@@ -193,7 +193,7 @@ def return_breakdown_analysis(df: pd.DataFrame, group_cols: list):
         row_data = dict(zip(group_cols, group_vals))
         total = len(subdf)
         new_count = (subdf["ReturnCategory"] == "New").sum()
-        ret = subdf["ReturnCategory"].str.contains("Returning").sum()
+        ret = (subdf["ReturnCategory"].str.contains("Returning") & ~subdf["ReturnCategory"].str.contains("From Housing")).sum()
         ret_housing = subdf["ReturnCategory"].str.contains("Returning From Housing").sum()
 
         valid_time = subdf.dropna(subset=["days_since_last_exit"])
