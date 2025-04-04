@@ -36,24 +36,30 @@ def inbound_recidivism_page():
     with st.expander("📘 About Inbound Recidivism Analysis", expanded=False):
         st.markdown("""
             **Inbound Recidivism Analysis Overview**  
-            *Analyze client returns to homelessness programs after previous exits.*
+            *Evaluate client returns to homelessness programs after prior exits.*
             
             ### Key Features:
-            - **Dynamic Date Filtering**: Select analysis window and lookback period
-            - **Multi-dimensional Filtering**: Filter by CoC codes, programs, and agencies
-            - **Return Classification**:
-              - 🆕 **New Clients**: First-time entries
-              - 🔄 **Returning Clients**: Previous exits within lookback period
-              - 🏠 **Returning from Housing**: Stable exits to permanent housing
-            - **Visual Analytics**: Interactive charts, detailed flow matrix, and flow network diagrams
-            """)
+            - **Customizable Date Range:** Uses a default entry period with a 24-month (730-day) lookback.
+            - **Flexible Filters:** Adjust by CoC codes, local CoC, agencies, programs, and project types.
+            - **Return Classification:**
+            - 🆕 **New Clients:** No exit found within the lookback.
+            - 🔄 **Returning Clients:** Prior exits detected.
+            - 🏠 **Returning from Housing:** Clients with exits to permanent housing.
+            - **Interactive Visuals:** Charts, flow matrix, and network diagrams.
+            
+            ### Methodology Highlights:
+            1. **Entry Identification:** Select new entries within the chosen date range.
+            2. **Exit Lookup:** Scan client history for exits within the 24-month lookback.
+            3. **Classification Logic:** Categorize based on the days between exit and new entry.
+        """)
         st.divider()
         st.markdown("""
-            ### Methodology Highlights:
-            1. **Entry Identification**: New entries within selected date range
-            2. **Exit Lookup**: Full client history scan for prior exits
-            3. **Classification Logic**: Calculation based on days since exit
-            """)
+            **Interpretation Guide:**
+            - **Metrics:** Counts and percentages for New, Returning, and Returning from Housing.
+            - **Timing Analysis:** Box plots display days-to-entry.
+            - **Flow Analysis:** Visual mapping of exit-to-entry pathways.
+        """)
+
 
     # Verify that data has been uploaded
     try:
@@ -69,11 +75,10 @@ def inbound_recidivism_page():
     st.sidebar.header("⚙️ Analysis Parameters", divider="gray")
     
     # Date range selection
-    col1, col2 = st.sidebar.columns(2)
-    with col1:
+    with st.sidebar.expander("🗓️ Entry Date & Lookback", expanded=True):
         try:
             date_range = st.date_input(
-                "🗓️ Entry Date Range",
+                "Entry Date Range",
                 [datetime(2025, 1, 1), datetime(2025, 1, 31)],
                 help="Analysis period for new entries"
             )
@@ -85,7 +90,6 @@ def inbound_recidivism_page():
             st.error(f"📅 Date Error: {str(e)}")
             return
 
-    with col2:
         months_lookback = st.number_input(
             "🔍 Months Lookback",
             min_value=1,
@@ -93,85 +97,77 @@ def inbound_recidivism_page():
             help="Months prior to entry to consider exits"
         )
 
+
     # Entry Filters: Updated to match naming style from SPM2 code
     with st.sidebar.expander("📍 Entry Filters", expanded=True):
-        entry_cols = st.columns(2)
         allowed_cocs, allowed_localcocs, allowed_agencies, allowed_programs = None, None, None, None
-        
+
         if "ProgramSetupCoC" in df.columns:
-            with entry_cols[0]:
-                all_cocs = sorted(df["ProgramSetupCoC"].dropna().unique().tolist())
-                co_selection = st.multiselect(
-                    "CoC Codes - Entry",
-                    ["ALL"] + all_cocs,
-                    default=["ALL"]
-                )
-                if co_selection and "ALL" not in co_selection:
-                    allowed_cocs = co_selection
+            all_cocs = sorted(df["ProgramSetupCoC"].dropna().unique().tolist())
+            co_selection = st.multiselect(
+                "CoC Codes - Entry",
+                ["ALL"] + all_cocs,
+                default=["ALL"]
+            )
+            if co_selection and "ALL" not in co_selection:
+                allowed_cocs = co_selection
 
         if "LocalCoCCode" in df.columns:
-            with entry_cols[1]:
-                all_localcocs = sorted(df["LocalCoCCode"].dropna().unique().tolist())
-                lc_selection = st.multiselect(
-                    "Local CoC Codes - Entry",
-                    ["ALL"] + all_localcocs,
-                    default=["ALL"]
-                )
-                if lc_selection and "ALL" not in lc_selection:
-                    allowed_localcocs = lc_selection
+            all_localcocs = sorted(df["LocalCoCCode"].dropna().unique().tolist())
+            lc_selection = st.multiselect(
+                "Local CoC Codes - Entry",
+                ["ALL"] + all_localcocs,
+                default=["ALL"]
+            )
+            if lc_selection and "ALL" not in lc_selection:
+                allowed_localcocs = lc_selection
 
-        agency_cols = st.columns(2)
         if "AgencyName" in df.columns:
-            with agency_cols[0]:
-                all_agencies = sorted(df["AgencyName"].dropna().unique().tolist())
-                ag_selection = st.multiselect(
-                    "Agencies - Entry",
-                    ["ALL"] + all_agencies,
-                    default=["ALL"]
-                )
-                if ag_selection and "ALL" not in ag_selection:
-                    allowed_agencies = ag_selection
+            all_agencies = sorted(df["AgencyName"].dropna().unique().tolist())
+            ag_selection = st.multiselect(
+                "Agencies - Entry",
+                ["ALL"] + all_agencies,
+                default=["ALL"]
+            )
+            if ag_selection and "ALL" not in ag_selection:
+                allowed_agencies = ag_selection
 
         if "ProgramName" in df.columns:
-            with agency_cols[1]:
-                all_programs = sorted(df["ProgramName"].dropna().unique().tolist())
-                pr_selection = st.multiselect(
-                    "Programs - Entry",
-                    ["ALL"] + all_programs,
-                    default=["ALL"]
-                )
-                if pr_selection and "ALL" not in pr_selection:
-                    allowed_programs = pr_selection
+            all_programs = sorted(df["ProgramName"].dropna().unique().tolist())
+            pr_selection = st.multiselect(
+                "Programs - Entry",
+                ["ALL"] + all_programs,
+                default=["ALL"]
+            )
+            if pr_selection and "ALL" not in pr_selection:
+                allowed_programs = pr_selection
 
-    # Project Type Filters: Renamed for clarity
     with st.sidebar.expander("🚪 Project Type Filters", expanded=True):
-        proj_type_cols = st.columns(2)
         entry_project_types, exit_project_types = None, None
-        
-        if "ProjectTypeCode" in df.columns:
-            with proj_type_cols[0]:
-                all_proj_types = sorted(df["ProjectTypeCode"].dropna().unique().tolist())
-                entry_sel = st.multiselect(
-                    "Entry Project Types",
-                    ["ALL"] + all_proj_types,
-                    default=["ALL"]
-                )
-                if entry_sel and "ALL" not in entry_sel:
-                    entry_project_types = entry_sel
 
-            with proj_type_cols[1]:
-                exit_sel = st.multiselect(
-                    "Exit Project Types",
-                    ["ALL"] + all_proj_types,
-                    default=["ALL"]
-                )
-                if exit_sel and "ALL" not in exit_sel:
-                    exit_project_types = exit_sel
+        if "ProjectTypeCode" in df.columns:
+            all_proj_types = sorted(df["ProjectTypeCode"].dropna().unique().tolist())
+            entry_sel = st.multiselect(
+                "Entry Project Types",
+                ["ALL"] + all_proj_types,
+                default=["ALL"]
+            )
+            if entry_sel and "ALL" not in entry_sel:
+                entry_project_types = entry_sel
+
+            exit_sel = st.multiselect(
+                "Exit Project Types",
+                ["ALL"] + all_proj_types,
+                default=["ALL"]
+            )
+            if exit_sel and "ALL" not in exit_sel:
+                exit_project_types = exit_sel
+
 
     # Run the analysis when the button is clicked
     st.divider()
-    st.markdown("### 🚀 Analysis Execution")
-    if st.button("▶️ Run Analysis", type="primary", use_container_width=True):
+    st.markdown("### 🚀 Execute Analysis")
+    if st.button("▶️ Run Inbound Analysis", type="primary", use_container_width=True):
         try:
             with st.status("🔍 Processing...", expanded=True) as status:
                 merged_df = run_return_analysis(
@@ -201,14 +197,14 @@ def inbound_recidivism_page():
         display_return_metrics_cards(final_ret_df)
         
         st.divider()
-        st.markdown("### ⏳ Time to Entry Distribution")
+        st.markdown("### ⏳ Days to Return Distribution")
         try:
             st.plotly_chart(plot_time_to_entry_box(final_ret_df), use_container_width=True)
         except Exception as e:
             st.error(f"📉 Visualization Error: {str(e)}")
 
         st.divider()
-        st.markdown("### 📈 Demographic Breakdown")
+        st.markdown("### 📈 Breakdown")
         possible_cols = final_ret_df.columns.tolist()
         default_breakdown = ["Exit_ProjectTypeCode"] if "Exit_ProjectTypeCode" in possible_cols else []
         chosen = st.multiselect(
@@ -280,7 +276,7 @@ def inbound_recidivism_page():
                 else:
                     st.info("No significant flows detected")
 
-                st.markdown("#### 🌐 Flow Network")
+                st.markdown("#### 🌐 Client Flow Network")
                 sankey_ra = plot_flow_sankey_ra(flow_pivot_ra, f"{exit_flow_col} → {entry_flow_col}")
                 st.plotly_chart(sankey_ra, use_container_width=True)
             else:
@@ -291,7 +287,7 @@ def inbound_recidivism_page():
         st.divider()
         st.markdown("### 📤 Data Export")
         st.download_button(
-            label="📥 Download Results",
+            label="📥 Download Inbound Data",
             data=final_ret_df.to_csv(index=False),
             file_name="recidivism_analysis.csv",
             mime="text/csv",

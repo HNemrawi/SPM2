@@ -41,12 +41,11 @@ def main():
     apply_custom_css()
     st.title("Return to Homelessness Analysis")
     st.markdown("""
-        Welcome to the Homelessness Analysis Suite. Use the sidebar to:
-        - Upload your HMIS data file.
-        - Reset the session if needed.
-        - Navigate between:
-            1. **SPM2 Analysis:** Analyze exits and returns.
-            2. **Inbound Recidivism Analysis:** Identify new vs. returning clients.
+    - Upload your data file to get started.
+    - Use the **Reset Session** button if you need to start over.
+    - Navigate between the available analyses:
+        1. **SPM 2 Analysis**
+        2. **Inbound Recidivism Analysis**
     """)
 
     # Sidebar: Data Upload & Reset Section.

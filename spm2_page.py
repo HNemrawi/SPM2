@@ -59,36 +59,37 @@ def spm2_page():
     This page allows users to configure filters, run the analysis, view performance metrics,
     visualize client flow, compare PH versus Non-PH exits, and export results.
     """
-    st.header("📊 SPM2 Performance Analysis")
+    st.header("📊 SPM2 Analysis")
     
     # About section with methodology overview and interpretation guide
     with st.expander("📘 About SPM2 Methodology", expanded=False):
         st.markdown("""
             **SPM2 Analysis Process Overview**  
-            *Measure housing stability through return-to-homelessness patterns*
+            *Assess housing stability through exit-to-return patterns*
             
             ### Key Features:
-            - **Dual Filter Systems**: Separate filters for Exit and Return enrollments
-            - **Temporal Analysis**: Customizable lookback and return periods
-            - **Comparative Metrics**: PH vs Non-PH exit comparisons
-            - **Flow Visualization**: Client movement analysis through Sankey diagrams
+            - **Customizable Filters:** Set parameters (project types, CoC codes, etc.) to define Exit and Return enrollments.
+            - **Default Date Windows:** Uses a 24-month lookback (730 days) for exit selection and a configurable return period.
+            - **Permanent Housing Focus:** Only counts exits where the destination is permanent housing.
+            - **Return Detection:** Finds the first valid return—with a 14-day gap for PH projects—to avoid miscounting transfers.
             
             ### Core Methodology:
-            1. **Exit Identification**: Valid exits within lookback window
-            2. **Return Detection**: First return within specified period
-            3. **Classification**:
-               - <6 Months (≤180d)
-               - 6–12 Months (≤365d)
-               - 12–24 Months (≤730d)
-               - >24 Months (>730d)
-            """)
+            1. **Exit Selection:** Identify each client’s earliest exit within the lookback period that leads to permanent housing.
+            2. **Return Scanning:** Scan forward for the first return to homelessness within the specified period.
+            3. **Return Classification:**
+            - <6 Months (≤180d)
+            - 6–12 Months (≤365d)
+            - 12–24 Months (≤730d)
+            - >24 Months (>730d)
+        """)
         st.divider()
         st.markdown("""
             ### Interpretation Guide:
-            - **Return Rates**: Percentage of exits with subsequent returns
-            - **Time Distributions**: Box plots show days-to-return distribution
-            - **Flow Analysis**: Paths between exit and return characteristics
-            """)
+            - **Return Rates:** Percentage of exits that are followed by a return.
+            - **Timing Analysis:** Metrics and box plots displaying days-to-return.
+            - **Flow Visualization:** Diagrams illustrating client pathways from exit to return.
+        """)
+
 
     # Check that data is available
     df = st.session_state.get("df")
@@ -101,24 +102,23 @@ def spm2_page():
     
     # Date configuration
     with st.sidebar.expander("📅 Date Configuration", expanded=True):
-        col1, col2 = st.columns(2)
-        with col1:
-            date_range = st.date_input(
-                "Reporting Period",
-                [datetime(2023, 10, 1), datetime(2024, 9, 30)],
-                help="Primary analysis window for SPM2 metrics"
-            )
-            report_start, report_end = pd.to_datetime(date_range[0]), pd.to_datetime(date_range[1])
-        with col2:
-            months_lookback = st.number_input(
-                "Lookback Months",
-                min_value=1,
-                value=24,
-                help="Months prior to report start for exit identification"
-            )
-            exit_window_start = report_start - pd.DateOffset(months=months_lookback)
-            exit_window_end = report_end - pd.DateOffset(months=months_lookback)
-            st.caption(f"Exit Window: {exit_window_start:%Y-%m-%d} to {exit_window_end:%Y-%m-%d}")
+        date_range = st.date_input(
+            "Reporting Period",
+            [datetime(2023, 10, 1), datetime(2024, 9, 30)],
+            help="Primary analysis window for SPM2 metrics"
+        )
+        report_start, report_end = pd.to_datetime(date_range[0]), pd.to_datetime(date_range[1])
+
+        months_lookback = st.number_input(
+            "Lookback Months",
+            min_value=1,
+            value=24,
+            help="Months prior to report start for exit identification"
+        )
+        exit_window_start = report_start - pd.DateOffset(months=months_lookback)
+        exit_window_end = report_end - pd.DateOffset(months=months_lookback)
+        st.caption(f"Exit Window: {exit_window_start:%Y-%m-%d} to {exit_window_end:%Y-%m-%d}")
+
 
     # Global settings
     with st.sidebar.expander("⚡ Global Settings", expanded=True):
@@ -145,33 +145,35 @@ def spm2_page():
     # Exit filters
     with st.sidebar.expander("🚪 Exit Filters", expanded=True):
         st.markdown("#### Exit Enrollment Criteria")
-        exit_cols = st.columns(2)
-        with exit_cols[0]:
-            exit_allowed_cocs = create_sidebar_multiselect(
-                "CoC Codes - Exit",
-                ["ALL"] + sorted(df["ProgramSetupCoC"].dropna().unique().tolist()) if "ProgramSetupCoC" in df.columns else [],
-                default=["ALL"],
-                help_text="CoC codes for exit identification"
-            )
-            exit_allowed_local_cocs = create_sidebar_multiselect(
-                "Local CoC - Exit",
-                ["ALL"] + sorted(df["LocalCoCCode"].dropna().unique().tolist()) if "LocalCoCCode" in df.columns else [],
-                default=["ALL"],
-                help_text="Local CoC codes for exits"
-            )
-        with exit_cols[1]:
-            exit_allowed_agencies = create_sidebar_multiselect(
-                "Agencies - Exit",
-                ["ALL"] + sorted(df["AgencyName"].dropna().unique().tolist()) if "AgencyName" in df.columns else [],
-                default=["ALL"],
-                help_text="Agencies for exit identification"
-            )
-            exit_allowed_programs = create_sidebar_multiselect(
-                "Programs - Exit",
-                ["ALL"] + sorted(df["ProgramName"].dropna().unique().tolist()) if "ProgramName" in df.columns else [],
-                default=["ALL"],
-                help_text="Programs for exit identification"
-            )
+
+        exit_allowed_cocs = create_sidebar_multiselect(
+            "CoC Codes - Exit",
+            ["ALL"] + sorted(df["ProgramSetupCoC"].dropna().unique().tolist()) if "ProgramSetupCoC" in df.columns else [],
+            default=["ALL"],
+            help_text="CoC codes for exit identification"
+        )
+
+        exit_allowed_local_cocs = create_sidebar_multiselect(
+            "Local CoC - Exit",
+            ["ALL"] + sorted(df["LocalCoCCode"].dropna().unique().tolist()) if "LocalCoCCode" in df.columns else [],
+            default=["ALL"],
+            help_text="Local CoC codes for exits"
+        )
+
+        exit_allowed_agencies = create_sidebar_multiselect(
+            "Agencies - Exit",
+            ["ALL"] + sorted(df["AgencyName"].dropna().unique().tolist()) if "AgencyName" in df.columns else [],
+            default=["ALL"],
+            help_text="Agencies for exit identification"
+        )
+
+        exit_allowed_programs = create_sidebar_multiselect(
+            "Programs - Exit",
+            ["ALL"] + sorted(df["ProgramName"].dropna().unique().tolist()) if "ProgramName" in df.columns else [],
+            default=["ALL"],
+            help_text="Programs for exit identification"
+        )
+
         if "ProjectTypeCode" in df.columns:
             exiting_projects = create_sidebar_multiselect(
                 "Exit Project Types",
@@ -186,6 +188,7 @@ def spm2_page():
                 ],
                 help_text="Project types considered valid exits"
             )
+
         if "ExitDestinationCat" in df.columns:
             allowed_exit_dest_cats = create_sidebar_multiselect(
                 "Exit Destinations",
@@ -197,33 +200,35 @@ def spm2_page():
     # Return filters
     with st.sidebar.expander("↩️ Return Filters", expanded=True):
         st.markdown("#### Return Enrollment Criteria")
-        return_cols = st.columns(2)
-        with return_cols[0]:
-            return_allowed_cocs = create_sidebar_multiselect(
-                "CoC Codes - Return",
-                ["ALL"] + sorted(df["ProgramSetupCoC"].dropna().unique().tolist()) if "ProgramSetupCoC" in df.columns else [],
-                default=["ALL"],
-                help_text="CoC codes for return identification"
-            )
-            return_allowed_local_cocs = create_sidebar_multiselect(
-                "Local CoC - Return",
-                ["ALL"] + sorted(df["LocalCoCCode"].dropna().unique().tolist()) if "LocalCoCCode" in df.columns else [],
-                default=["ALL"],
-                help_text="Local CoC codes for returns"
-            )
-        with return_cols[1]:
-            return_allowed_agencies = create_sidebar_multiselect(
-                "Agencies - Return",
-                ["ALL"] + sorted(df["AgencyName"].dropna().unique().tolist()) if "AgencyName" in df.columns else [],
-                default=["ALL"],
-                help_text="Agencies for return identification"
-            )
-            return_allowed_programs = create_sidebar_multiselect(
-                "Programs - Return",
-                ["ALL"] + sorted(df["ProgramName"].dropna().unique().tolist()) if "ProgramName" in df.columns else [],
-                default=["ALL"],
-                help_text="Programs for return identification"
-            )
+
+        return_allowed_cocs = create_sidebar_multiselect(
+            "CoC Codes - Return",
+            ["ALL"] + sorted(df["ProgramSetupCoC"].dropna().unique().tolist()) if "ProgramSetupCoC" in df.columns else [],
+            default=["ALL"],
+            help_text="CoC codes for return identification"
+        )
+
+        return_allowed_local_cocs = create_sidebar_multiselect(
+            "Local CoC - Return",
+            ["ALL"] + sorted(df["LocalCoCCode"].dropna().unique().tolist()) if "LocalCoCCode" in df.columns else [],
+            default=["ALL"],
+            help_text="Local CoC codes for returns"
+        )
+
+        return_allowed_agencies = create_sidebar_multiselect(
+            "Agencies - Return",
+            ["ALL"] + sorted(df["AgencyName"].dropna().unique().tolist()) if "AgencyName" in df.columns else [],
+            default=["ALL"],
+            help_text="Agencies for return identification"
+        )
+
+        return_allowed_programs = create_sidebar_multiselect(
+            "Programs - Return",
+            ["ALL"] + sorted(df["ProgramName"].dropna().unique().tolist()) if "ProgramName" in df.columns else [],
+            default=["ALL"],
+            help_text="Programs for return identification"
+        )
+
         return_projects = create_sidebar_multiselect(
             "Return Project Types",
             sorted(df["ProjectTypeCode"].dropna().unique().tolist()) if "ProjectTypeCode" in df.columns else [],
@@ -238,11 +243,12 @@ def spm2_page():
             help_text="Project types considered valid returns"
         )
 
+
     # Main analysis execution
     st.divider()
     st.markdown("### 🚀 Execute Analysis")
     if st.button("▶️ Run SPM2 Analysis", type="primary", use_container_width=True):
-        with st.status("🔍 Processing client patterns...", expanded=True) as status:
+        with st.status("🔍 Processing...", expanded=True) as status:
             try:
                 final_df_custom = run_spm2(
                     df,
@@ -267,7 +273,7 @@ def spm2_page():
                 status.update(label="✅ Analysis Complete!", state="complete", expanded=False)
                 st.toast("SPM2 analysis successful!", icon="🎉")
             except Exception as e:
-                st.error(f"🚨 Critical Analysis Error: {str(e)}")
+                st.error(f"🚨 Analysis Error: {str(e)}")
 
     # Display analysis results if available
     if "final_df_custom" in st.session_state and not st.session_state["final_df_custom"].empty:
@@ -276,7 +282,7 @@ def spm2_page():
 
         # Display core performance metrics
         st.divider()
-        st.markdown("### 📈 Core Performance Metrics")
+        st.markdown("### 📊 Key Metric")
         display_spm_metrics(metrics, show_total_exits=True)
 
         # Days-to-return distribution
@@ -291,7 +297,7 @@ def spm2_page():
         # Cohort breakdown analysis
         st.divider()
         with st.container():
-            st.markdown("### 📊 Cohort Breakdown")
+            st.markdown("### 📊 Breakdown")
             breakdown_options = list(final_df_c.columns)
             default_breakdown = ["Exit_ProjectTypeCode"] if "Exit_ProjectTypeCode" in breakdown_options else []
             
@@ -321,7 +327,7 @@ def spm2_page():
         # Client journey analysis (flow visualization)
         st.divider()
         with st.container():
-            st.markdown("### 🌊 Client Journey Analysis")
+            st.markdown("### 🌊 Client Flow Analysis")
             try:
                 exit_cols = [c for c in final_df_c.columns if c.startswith("Exit_")]
                 return_cols = [c for c in final_df_c.columns if c.startswith("Return_")]
@@ -354,7 +360,8 @@ def spm2_page():
                         )
 
                     st.markdown("#### 🏆 Top Client Pathways")
-                    top_n = st.slider("Number of Pathways", 5, 25, 10)
+                    top_n = st.slider("Number of Pathways", 5, 25, 5, 1, help="Top N pathways to display")
+                    top_n = int(top_n)
                     top_flows_df = get_top_flows_from_pivot(pivot_c, top_n=top_n)
                     
                     if not top_flows_df.empty:
@@ -418,9 +425,9 @@ def spm2_page():
         # Data export section
         st.divider()
         with st.container():
-            st.markdown("### 📤 Export Results")
+            st.markdown("### 📤 Data Export")
             st.download_button(
-                label="📥 Download Analysis Data",
+                label="📥 Download SPM2 Data",
                 data=final_df_c.to_csv(index=False),
                 file_name="spm2_analysis_results.csv",
                 mime="text/csv",
