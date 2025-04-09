@@ -23,6 +23,7 @@ from styling import apply_custom_css
 from data_preprocessing import load_and_preprocess_data
 from spm2_page import spm2_page
 from inbound_page import inbound_recidivism_page
+from outbound_recidivism_page import outbound_recidivism_page
 
 def reset_session():
     """
@@ -46,6 +47,7 @@ def main():
     - Navigate between the available analyses:
         1. **SPM 2 Analysis**
         2. **Inbound Recidivism Analysis**
+        2. **Outbound Recidivism Analysis**
     """)
 
     # Sidebar: Data Upload & Reset Section.
@@ -72,7 +74,7 @@ def main():
 
     # Sidebar: Navigation Section.
     st.sidebar.header("⚙️ Navigation")
-    pages = ["SPM2", "Inbound Recidivism"]
+    pages = ["SPM2", "Inbound Recidivism","Outbound Recidivism"]
     choice = st.sidebar.radio("Select a Page", pages)
     if "df" not in st.session_state or st.session_state["df"].empty:
         st.warning("Please upload a valid dataset to proceed.")
@@ -82,6 +84,8 @@ def main():
         spm2_page()
     elif choice == "Inbound Recidivism":
         inbound_recidivism_page()
+    elif choice == "Outbound Recidivism":
+        outbound_recidivism_page()
 
 if __name__ == "__main__":
     main()

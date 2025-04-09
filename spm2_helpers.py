@@ -37,8 +37,7 @@ def _find_earliest_return(client_df, earliest_exit, cutoff, report_end, exit_enr
         "PH – Housing Only",
         "PH – Housing with Services (no disability required for entry)",
         "PH – Permanent Supportive Housing (disability required for entry)",
-        "PH – Rapid Re-Housing",
-        "Transitional Housing",
+        "PH – Rapid Re-Housing"
     }
     
     client_df = client_df.dropna(subset=["ProjectStart"]).copy().sort_values(["ProjectStart", "EnrollmentID"])
