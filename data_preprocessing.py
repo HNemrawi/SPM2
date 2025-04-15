@@ -57,7 +57,8 @@ def load_and_preprocess_data(uploaded_file: BytesIO) -> pd.DataFrame:
             "Enrollments Household Move-In Date": "HouseholdMoveInDate",
             "Programs Continuum Project" : "ProgramsContinuumProject",
             "Enrollments Reporting Period Start Date" : "ReportingPeriodStartDate",
-            "Enrollments Reporting Period End Date" : "ReportingPeriodEndDate"
+            "Enrollments Reporting Period End Date" : "ReportingPeriodEndDate",
+            "Entry Screen Age Tier" : "AgeTieratEntry"
         }
         df = df.rename(columns=rename_map)
 

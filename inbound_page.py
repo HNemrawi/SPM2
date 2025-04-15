@@ -48,7 +48,7 @@ def inbound_recidivism_page():
             - **Interactive Visuals:** Charts, flow matrix, and network diagrams.
             
             ### Methodology Highlights:
-            1. **Entry Identification:** Select new entries within the chosen date range.
+            1. **Entry Identification:** Select first new entries within the chosen date range.
             2. **Exit Lookup:** Scan client history for exits within the 24-month lookback.
             3. **Classification Logic:** Categorize based on the days between exit and new entry.
         """)
@@ -90,12 +90,25 @@ def inbound_recidivism_page():
             st.error(f"📅 Date Error: {str(e)}")
             return
 
-        months_lookback = st.number_input(
-            "🔍 Months Lookback",
+        days_lookback = st.number_input(
+            "🔍 Days Lookback",
             min_value=1,
-            value=24,
-            help="Months prior to entry to consider exits"
+            value=730,
+            help="Number of days prior to entry to consider exits"
         )
+        analysis_start = report_start - pd.Timedelta(days=days_lookback)
+        analysis_end = report_end
+        
+        data_reporting_start = pd.to_datetime(df["ReportingPeriodStartDate"].iloc[0])
+        data_reporting_end = pd.to_datetime(df["ReportingPeriodEndDate"].iloc[0])
+        
+
+        if analysis_start < data_reporting_start or analysis_end > data_reporting_end:
+            st.warning(
+                f"WARNING: Your selected analysis range ({analysis_start:%Y-%m-%d} to {analysis_end:%Y-%m-%d}) "
+                f"is outside the data's available range ({data_reporting_start:%Y-%m-%d} to {data_reporting_end:%Y-%m-%d}). "
+                "This may result in missing data. Please adjust your Reporting Period or Lookback period accordingly."
+            )
 
 
     # Entry Filters: Updated to match naming style from SPM2 code
@@ -166,7 +179,6 @@ def inbound_recidivism_page():
 
     # Run the analysis when the button is clicked
     st.divider()
-    st.markdown("### 🚀 Execute Analysis")
     if st.button("▶️ Run Inbound Analysis", type="primary", use_container_width=True):
         try:
             with st.status("🔍 Processing...", expanded=True) as status:
@@ -174,7 +186,7 @@ def inbound_recidivism_page():
                     df,
                     report_start=report_start,
                     report_end=report_end,
-                    months_lookback=months_lookback,
+                    days_lookback=days_lookback,
                     allowed_cocs=allowed_cocs,
                     allowed_localcocs=allowed_localcocs,
                     allowed_programs=allowed_programs,
@@ -182,6 +194,31 @@ def inbound_recidivism_page():
                     entry_project_types=entry_project_types,
                     exit_project_types=exit_project_types
                 )
+                cols_to_remove = [
+                    "Exit_UniqueIdentifier",	
+                    "Exit_ClientID",
+                    "Exit_RaceEthnicity",	
+                    "Exit_Gender",	
+                    "Exit_DOB",	
+                    "Exit_VeteranStatus",
+                    "Enter_ReportingPeriodStartDate",
+                    "Enter_ReportingPeriodEndDate",
+                    "Exit_ReportingPeriodStartDate",
+                    "Exit_ReportingPeriodEndDate"
+                ]
+                merged_df.drop(columns=cols_to_remove, inplace=True, errors='ignore')
+
+                cols_to_rename = [
+                    "Enter_UniqueIdentifier", 
+                    "Enter_ClientID",
+                    "Enter_RaceEthnicity",
+                    "Enter_Gender",
+                    "Enter_DOB",
+                    "Enter_VeteranStatus"
+                ]
+                mapping = {col: col[len("Enter_"):] for col in cols_to_rename if col in merged_df.columns}
+                merged_df.rename(columns=mapping, inplace=True)
+                
                 st.session_state["return_df"] = merged_df
                 status.update(label="✅ Analysis Complete!", state="complete")
             st.toast("Analysis completed successfully!", icon="🎉")
@@ -193,7 +230,7 @@ def inbound_recidivism_page():
         final_ret_df = st.session_state["return_df"]
         
         st.divider()
-        st.markdown("### 📊 Key Metrics")
+        st.markdown("### 📊 Inbound Analysis Summary")
         display_return_metrics_cards(final_ret_df)
         
         st.divider()
@@ -205,7 +242,42 @@ def inbound_recidivism_page():
 
         st.divider()
         st.markdown("### 📈 Breakdown")
-        possible_cols = final_ret_df.columns.tolist()
+        breakdown_columns = [
+                "RaceEthnicity",
+                "Gender",
+                "VeteranStatus",
+                "Enter_HasIncome",
+                "Enter_HasDisability",
+                "Enter_HouseholdType",
+                "Enter_CHStartHousehold",
+                "Enter_LocalCoCCode",
+                "Enter_PriorLivingCat",
+                "Enter_ProgramSetupCoC",
+                "Enter_ProjectTypeCode",
+                "Enter_AgencyName",
+                "Enter_ProgramName",
+                "Enter_ExitDestinationCat",
+                "Enter_ExitDestination",
+                "Enter_ProgramsContinuumProject",
+                "Enter_AgeTieratEntry"
+                "ReturnCategory",
+                "Exit_HasIncome",
+                "Exit_HasDisability",
+                "Exit_HouseholdType",
+                "Exit_CHStartHousehold",
+                "Exit_LocalCoCCode",
+                "Exit_PriorLivingCat",
+                "Exit_ProgramSetupCoC",
+                "Exit_ProjectTypeCode",
+                "Exit_AgencyName",
+                "Exit_ProgramName",
+                "Exit_ExitDestinationCat",
+                "Exit_ExitDestination",
+                "Exit_ProgramsContinuumProject",
+                "Exit_AgeTieratEntry",
+            ]
+            
+        possible_cols = [col for col in breakdown_columns if col in final_ret_df.columns]
         default_breakdown = ["Exit_ProjectTypeCode"] if "Exit_ProjectTypeCode" in possible_cols else []
         chosen = st.multiselect(
             "Group By",
@@ -230,9 +302,42 @@ def inbound_recidivism_page():
         try:
             ra_flows_df = final_ret_df[final_ret_df["ReturnCategory"].str.contains("Returning")] \
                 if "ReturnCategory" in final_ret_df.columns else pd.DataFrame()
-
-            exit_cols_for_flow = [c for c in ra_flows_df.columns if c.startswith("Exit_")]
-            entry_cols_for_flow = [c for c in ra_flows_df.columns if c.startswith("Enter_")]
+            
+            exit_columns = [
+                    "Exit_HasIncome",
+                    "Exit_HasDisability",
+                    "Exit_HouseholdType",
+                    "Exit_CHStartHousehold",
+                    "Exit_LocalCoCCode",
+                    "Exit_PriorLivingCat",
+                    "Exit_ProgramSetupCoC",
+                    "Exit_ProjectTypeCode",
+                    "Exit_AgencyName",
+                    "Exit_ProgramName",
+                    "Exit_ExitDestinationCat",
+                    "Exit_ExitDestination",
+                    "Exit_ProgramsContinuumProject",
+                    "Exit_AgeTieratEntry",
+                ]
+            entry_columns = [
+                    "Enter_HasIncome",
+                    "Enter_HasDisability",
+                    "Enter_HouseholdType",
+                    "Enter_CHStartHousehold",
+                    "Enter_LocalCoCCode",
+                    "Enter_PriorLivingCat",
+                    "Enter_ProgramSetupCoC",
+                    "Enter_ProjectTypeCode",
+                    "Enter_AgencyName",
+                    "Enter_ProgramName",
+                    "Enter_ExitDestinationCat",
+                    "Enter_ExitDestination",
+                    "Enter_ProgramsContinuumProject",
+                    "Enter_AgeTieratEntry"
+                ]
+            
+            exit_cols_for_flow = [col for col in exit_columns if col in ra_flows_df.columns]
+            entry_cols_for_flow =[col for col in entry_columns if col in ra_flows_df.columns]
             
             if exit_cols_for_flow and entry_cols_for_flow:
                 flow_cols = st.columns(2)
@@ -256,12 +361,12 @@ def inbound_recidivism_page():
                 # Flow Matrix Details expander
                 with st.expander("🔍 Flow Matrix Details", expanded=True):
                     st.dataframe(
-                        flow_pivot_ra.style.background_gradient(cmap="Blues")
+                        flow_pivot_ra.style.background_gradient(cmap="Blues", axis=1)
                             .format(precision=0),
                         use_container_width=True
                     )
                 
-                st.markdown("#### 🏆 Top Client Pathways")
+                st.markdown("#### 🔝 Top Client Pathways")
                 top_n = st.slider("Number of Flows", 5, 25, 10)
                 top_flows_df = get_top_flows_from_pivot(flow_pivot_ra, top_n=top_n)
                 

@@ -30,7 +30,7 @@ def run_return_analysis(
     df: pd.DataFrame,
     report_start: pd.Timestamp,
     report_end: pd.Timestamp,
-    months_lookback: int,
+    days_lookback: int,
     allowed_cocs,
     allowed_localcocs,
     allowed_programs,
@@ -56,8 +56,8 @@ def run_return_analysis(
            - Otherwise, choose the most recent exit event.
          The full exit enrollment record (including ClientID and EnrollmentID) is returned with a new
          column "ReturnCategory" that marks the entry as:
-             - "Returning From Housing (X Months Lookback)" or
-             - "Returning (X Months Lookback)"
+             - "Returning From Housing (X Days Lookback)" or
+             - "Returning (X Days Lookback)"
          If no exit record is found within the lookback period, the exit columns are set to None and the
          category is "New".
          
@@ -96,7 +96,7 @@ def run_return_analysis(
         exit_df = exit_df.dropna(subset=["ProjectExit"])
         
         # Define the lookback threshold in days.
-        threshold_days = months_lookback * 30.4167
+        threshold_days = days_lookback
         
         # --- Define function to fetch the relevant exit record for each entry ---
         def get_exit_record(row):
@@ -116,10 +116,10 @@ def run_return_analysis(
             stable = sub[sub["ExitDestinationCat"] == "Permanent Housing Situations"]
             if not stable.empty:
                 best_row = stable.loc[stable["ProjectExit"].idxmax()]
-                category = f"Returning From Housing ({months_lookback} Months Lookback)"
+                category = f"Returning From Housing ({days_lookback} Days Lookback)"
             else:
                 best_row = sub.loc[sub["ProjectExit"].idxmax()]
-                category = f"Returning ({months_lookback} Months Lookback)"
+                category = f"Returning ({days_lookback} Days Lookback)"
             exit_info = best_row.add_prefix("Exit_")
             exit_info["ReturnCategory"] = category
             return exit_info
@@ -154,10 +154,10 @@ def display_return_metrics_cards(final_df: pd.DataFrame):
     # "New" is straightforward
     new_count = (final_df["ReturnCategory"] == "New").sum()
 
-    # Specifically count rows labeled as "Returning From Housing (X Months Lookback)"
+    # Specifically count rows labeled as "Returning From Housing (X Days Lookback)"
     returning_housing_count = final_df["ReturnCategory"].str.contains("Returning From Housing").sum()
 
-    # Count rows that say "Returning (X Months Lookback)" but NOT "Returning From Housing"
+    # Count rows that say "Returning (X Days Lookback)" but NOT "Returning From Housing"
     returning_only_mask = (
         final_df["ReturnCategory"].str.contains("Returning") &
         ~final_df["ReturnCategory"].str.contains("From Housing")
@@ -230,42 +230,55 @@ def create_flow_pivot_ra(final_df: pd.DataFrame, source_col: str, target_col: st
 
 def plot_flow_sankey_ra(pivot_df: pd.DataFrame, title: str = "Exit → Entry Sankey") -> go.Figure:
     """
-    Build a Sankey diagram for inbound recidivism (Exit → Entry).
-    
+    Build a Sankey diagram for inbound recidivism (Exit → Entry) with detailed labels.
+
     Parameters:
-        pivot_df (DataFrame): Flow pivot table.
+        pivot_df (DataFrame): Flow pivot table (rows: Exit categories, columns: Entry categories).
         title (str): Diagram title.
-    
+
     Returns:
-        go.Figure: Plotly figure.
+        go.Figure: Plotly Sankey figure.
     """
+    import plotly.graph_objects as go
+
     df = pivot_df.copy()
-    exit_cats = df.index.tolist()
-    entry_cats = df.columns.tolist()
+    exit_cats = df.index.tolist()     # Left side nodes (Exits)
+    entry_cats = df.columns.tolist()  # Right side nodes (Entries)
+
     nodes = exit_cats + entry_cats
+    n_exit = len(exit_cats)
+    
+    # Node types for hover clarity
+    node_types = ["Exits"] * n_exit + ["Entries"] * len(entry_cats)
+
     sources, targets, values = [], [], []
-    for i, ecat in enumerate(exit_cats):
-        for j, rcat in enumerate(entry_cats):
-            val = df.loc[ecat, rcat]
+    for i, exit_cat in enumerate(exit_cats):
+        for j, entry_cat in enumerate(entry_cats):
+            val = df.loc[exit_cat, entry_cat]
             if val > 0:
                 sources.append(i)
-                targets.append(len(exit_cats) + j)
+                targets.append(n_exit + j)
                 values.append(val)
+
     sankey = go.Sankey(
         node=dict(
             pad=15,
             thickness=20,
             line=dict(color="#FFFFFF", width=0.5),
             label=nodes,
-            color="#1f77b4"
+            color="#1f77b4",
+            customdata=node_types,
+            hovertemplate='%{label}<br>%{customdata}: %{value}<extra></extra>'
         ),
         link=dict(
             source=sources,
             target=targets,
             value=values,
-            color="rgba(255,127,14,0.6)"
-        )
+            color="rgba(255,127,14,0.6)",
+            hovertemplate='From: %{source.label}<br>To: %{target.label}<br>Count: %{value}<extra></extra>'
+        ),
     )
+
     fig = go.Figure(data=[sankey])
     fig.update_layout(
         title_text=title,

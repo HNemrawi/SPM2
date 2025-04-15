@@ -376,6 +376,7 @@ def spm2_page():
             breakdown_columns = [
                 "RaceEthnicity",
                 "Gender",
+                "VeteranStatus"
                 "Exit_HasIncome",
                 "Exit_HasDisability",
                 "Exit_HouseholdType",
@@ -389,6 +390,7 @@ def spm2_page():
                 "Exit_ExitDestinationCat",
                 "Exit_ExitDestination",
                 "Exit_CustomProgramType",
+                "Exit_AgeTieratEntry",
                 "Return_HasIncome",
                 "Return_HasDisability",
                 "Return_HouseholdType",
@@ -403,6 +405,7 @@ def spm2_page():
                 "Return_ExitDestination",
                 "DaysToReturn",
                 "ReturnCategory",
+                "Return_AgeTieratEntry"
                 "AgeAtExitRange",
             ]
 
@@ -451,6 +454,7 @@ def spm2_page():
                 "Exit_ExitDestinationCat",
                 "Exit_ExitDestination",
                 "Exit_CustomProgramType",
+                "Exit_AgeTieratEntry"
             ]
                 return_columns = [
                 "Return_HasIncome",
@@ -466,6 +470,7 @@ def spm2_page():
                 "Return_ExitDestinationCat",
                 "Return_ExitDestination",
                 "ReturnCategory",
+                "Return_AgeTieratEntry"
             ]
                 exit_cols = [col for col in exit_columns if col in final_df_c.columns]
                 return_cols = [col for col in return_columns if col in final_df_c.columns]
