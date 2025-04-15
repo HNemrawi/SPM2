@@ -98,7 +98,8 @@ def run_spm2(
     df: pd.DataFrame,
     report_start: pd.Timestamp,
     report_end: pd.Timestamp,
-    months_lookback: int = 24,
+    lookback_value: int = 730,
+    lookback_unit: str = "Days",
     exit_cocs: list = None,
     exit_localcocs: list = None,
     exit_agencies: list = None,
@@ -160,16 +161,20 @@ def run_spm2(
         if return_programs and "ProgramName" in df_return_base.columns:
             df_return_base = df_return_base[df_return_base["ProgramName"].isin(return_programs)]
 
-        if allowed_continuum and "Programs Continuum Project" in df.columns:
-            df_exit_base = df_exit_base[df_exit_base["Programs Continuum Project"].isin(allowed_continuum)]
-            df_return_base = df_return_base[df_return_base["Programs Continuum Project"].isin(allowed_continuum)]
+        if allowed_continuum and "ProgramsContinuumProject" in df.columns:
+            df_exit_base = df_exit_base[df_exit_base["ProgramsContinuumProject"].isin(allowed_continuum)]
+            df_return_base = df_return_base[df_return_base["ProgramsContinuumProject"].isin(allowed_continuum)]
 
         if allowed_exit_dest_cats is None and "ExitDestinationCat" in df_exit_base.columns:
             allowed_exit_dest_cats = df_exit_base["ExitDestinationCat"].dropna().unique().tolist()
 
         # Determine exit analysis window.
-        exit_min = report_start - pd.DateOffset(months=months_lookback)
-        exit_max = report_end - pd.DateOffset(months=months_lookback)
+        if lookback_unit == "Days":
+            exit_min = report_start - pd.Timedelta(days=lookback_value)
+            exit_max = report_end - pd.Timedelta(days=lookback_value)
+        else:
+            exit_min = report_start - pd.DateOffset(months=lookback_value)
+            exit_max = report_end - pd.DateOffset(months=lookback_value)
 
         # Identify valid exit enrollments.
         df_exits = df_exit_base.dropna(subset=["ProjectExit"]).copy()
@@ -275,6 +280,20 @@ def run_spm2(
         else:
             final_df["AgeAtExitRange"] = "Unknown"
 
+        # Add a new column "Exit_CustomProgramType" based on "Exit_ProjectTypeCode"
+        if "Exit_ProjectTypeCode" in final_df.columns:
+            final_df["Exit_CustomProgramType"] = final_df["Exit_ProjectTypeCode"].map({
+                'Emergency Shelter – Entry Exit': 'Exit was from ES',
+                'Emergency Shelter – Night-by-Night': 'Exit was from ES',
+                'PH – Housing Only': 'Exit was from PH',
+                'PH – Housing with Services (no disability required for entry)': 'Exit was from PH',
+                'PH – Permanent Supportive Housing (disability required for entry)': 'Exit was from PH',
+                'PH – Rapid Re-Housing': 'Exit was from PH',
+                'Transitional Housing': 'Exit was from TH',
+                'Street Outreach': 'Exit was from SO',
+                'Safe Haven': 'Exit was from SH'
+            }).fillna('Other')
+
         return final_df
 
     except Exception as e:
@@ -325,7 +344,7 @@ def compute_summary_metrics(final_df: pd.DataFrame, return_period: int = 730) ->
         median_days = avg_days = p25 = p75 = max_days = 0
 
     return {
-        "Total Exits": total_exited,
+        "Number of Relevant Exits": total_exited,
         "PH Exits": ph_exits,
         "% PH Exits": pct_ph_exits,
         "Return < 6 Months": r6,
@@ -364,7 +383,7 @@ def breakdown_by_columns(final_df: pd.DataFrame, columns: list, return_period: i
         row_data = {col: val for col, val in zip(columns, group_vals)}
         m = compute_summary_metrics(subdf, return_period)
 
-        row_data["Total Exits"] = m["Total Exits"]
+        row_data["Number of Relevant Exits"] = m["Number of Relevant Exits"]
         row_data["Total Return"] = m["Total Return"]
         row_data["% Return"] = f"{m['% Return']:.1f}%"
 
@@ -385,13 +404,14 @@ def breakdown_by_columns(final_df: pd.DataFrame, columns: list, return_period: i
         rows.append(row_data)
 
     out_df = pd.DataFrame(rows)
-    out_df = out_df.sort_values(by="Total Exits", key=lambda x: x.astype(int), ascending=False)
+    out_df = out_df.sort_values(by="Number of Relevant Exits", key=lambda x: x.astype(int), ascending=False)
     return out_df
 
 
 def get_top_flows_from_pivot(pivot_df: pd.DataFrame, top_n=10) -> pd.DataFrame:
     """
-    Generate a table of the top flows from a crosstab pivot table.
+    Generate a table of the top flows from a crosstab pivot table,
+    excluding flows involving "No Return".
     
     Parameters:
         pivot_df (DataFrame): Crosstab pivot table.
@@ -406,7 +426,11 @@ def get_top_flows_from_pivot(pivot_df: pd.DataFrame, top_n=10) -> pd.DataFrame:
     row_labels = df.index.tolist()
     col_labels = df.columns.tolist()
     for rlab in row_labels:
+        if rlab == "No Return":
+            continue
         for clab in col_labels:
+            if clab == "No Return":
+                continue
             val = df.loc[rlab, clab]
             rows.append({
                 "Source": rlab,
@@ -417,6 +441,7 @@ def get_top_flows_from_pivot(pivot_df: pd.DataFrame, top_n=10) -> pd.DataFrame:
     flows_df = pd.DataFrame(rows)
     flows_df = flows_df[flows_df["Count"] > 0].sort_values("Count", ascending=False)
     return flows_df.head(top_n)
+
 
 
 @st.cache_data(show_spinner=False)
@@ -441,26 +466,37 @@ def create_flow_pivot(final_df: pd.DataFrame, exit_col: str, return_col: str) ->
 def plot_flow_sankey(pivot_df: pd.DataFrame, title: str = "Exit → Return Sankey Diagram") -> go.Figure:
     """
     Build a Sankey diagram to visualize the flow from exit to return categories.
-    
+
     Parameters:
-        pivot_df (DataFrame): Flow pivot table.
+        pivot_df (DataFrame): Flow pivot table (rows are exit, columns are return).
         title (str): Diagram title.
-    
+
     Returns:
         go.Figure: Plotly figure of the Sankey diagram.
     """
+    import plotly.graph_objects as go
+
     df = pivot_df.copy()
-    exit_cats = df.index.tolist()
-    return_cats = df.columns.tolist()
+    # Get exit categories (rows) and return categories (columns)
+    exit_cats = df.index.tolist()   # left side nodes (Exit)
+    return_cats = df.columns.tolist() # right side nodes (Return)
+
+    # Overall nodes list: first exit, then return
     nodes = exit_cats + return_cats
+
+    # Create custom node type data: "Exit" for exit nodes, "Return" for return nodes.
+    n_exit = len(exit_cats)
+    node_types = ["Exits"] * n_exit + ["Returns"] * len(return_cats)
+    
     sources, targets, values = [], [], []
     for i, ecat in enumerate(exit_cats):
         for j, rcat in enumerate(return_cats):
             val = df.loc[ecat, rcat]
             if val > 0:
                 sources.append(i)
-                targets.append(len(exit_cats) + j)
+                targets.append(n_exit + j)
                 values.append(val)
+
     sankey = go.Sankey(
         node=dict(
             pad=15,
@@ -468,12 +504,15 @@ def plot_flow_sankey(pivot_df: pd.DataFrame, title: str = "Exit → Return Sanke
             line=dict(color="#FFFFFF", width=0.5),
             label=nodes,
             color="#1f77b4",
+            customdata=node_types,
+            hovertemplate='%{label}<br>%{customdata}: %{value}<extra></extra>'
         ),
         link=dict(
             source=sources,
             target=targets,
             value=values,
             color="rgba(255,127,14,0.6)",
+            hovertemplate='From: %{source.label}<br>To: %{target.label}<br>= %{value}<extra></extra>'
         ),
     )
     fig = go.Figure(data=[sankey])
@@ -486,9 +525,16 @@ def plot_flow_sankey(pivot_df: pd.DataFrame, title: str = "Exit → Return Sanke
     return fig
 
 
+
+
 def plot_days_to_return_box(final_df: pd.DataFrame, return_period: int = 730) -> go.Figure:
     """
-    Create a box plot for the distribution of Days-to-Return.
+    Create a horizontal box plot for the distribution of Days-to-Return,
+    ensuring that the displayed quartiles, whiskers, and mean match your summary metrics.
+    
+    The whiskers are calculated using the 1.5 x IQR rule:
+    - lower_whisker = max(min(data), Q1 - 1.5 * IQR)
+    - upper_whisker = min(max(data), Q3 + 1.5 * IQR)
     
     Parameters:
         final_df (DataFrame): Merged SPM2 DataFrame.
@@ -497,32 +543,57 @@ def plot_days_to_return_box(final_df: pd.DataFrame, return_period: int = 730) ->
     Returns:
         go.Figure: Plotly box plot figure.
     """
+
+    # Filter down to clients who actually returned within the chosen period.
     returned_df = final_df[
         (final_df["ReturnedToHomelessness"]) &
         (final_df["DaysToReturn"].notna()) &
         (final_df["DaysToReturn"] <= return_period)
     ]
-    import plotly.graph_objects as go
 
+    # If no returns are found, display a simple message in the figure.
     if returned_df.empty:
         fig = go.Figure()
         fig.update_layout(
             title="No Returns Found",
             xaxis_title="Days to Return",
-            yaxis_title="",
             template="plotly_dark"
         )
         return fig
 
+    # Calculate summary statistics using the same approach as your metrics.
     x = returned_df["DaysToReturn"].dropna()
-    median_val = x.median()
+    p25 = x.quantile(0.25)
+    median_val = x.median()          # Equivalent to quantile(0.50)
+    p75 = x.quantile(0.75)
     avg_val = x.mean()
+    min_val = x.min()
+    max_val = x.max()
+    
+    # Calculate Interquartile Range (IQR)
+    IQR = p75 - p25
+    
+    # Determine the whiskers using the 1.5 * IQR rule.
+    lower_whisker = max(min_val, p25 - 1.5 * IQR)
+    upper_whisker = min(max_val, p75 + 1.5 * IQR)
+
     fig = go.Figure()
+
+    # Create the box plot trace by explicitly providing the quartile values and whiskers.
     fig.add_trace(go.Box(
-        x=x,
-        name="Days to Return",
-        boxmean='sd'
+        q1=[p25],
+        median=[median_val],
+        q3=[p75],
+        lowerfence=[lower_whisker],
+        upperfence=[upper_whisker],
+        mean=[avg_val],    # Displays the mean marker with standard deviation info
+        boxmean='sd',      # This shows the mean ± SD on the plot
+        boxpoints='all',   # Option to show all data points; change to 'outliers' if desired
+        orientation='h',   # Horizontal orientation so that the x-axis reflects Days to Return
+        name="Days to Return"
     ))
+
+    # Optionally, add vertical lines to highlight the median and mean.
     fig.update_layout(
         title="Days to Return Distribution (Box Plot)",
         template="plotly_dark",
@@ -533,22 +604,26 @@ def plot_days_to_return_box(final_df: pd.DataFrame, return_period: int = 730) ->
                 type="line",
                 xref="x",
                 x0=median_val, x1=median_val,
-                yref="paper", y0=0, y1=1,
-                line=dict(color="yellow", width=2, dash="dot"),
+                yref="paper",
+                y0=0, y1=1,
+                line=dict(color="yellow", width=2, dash="dot")
             ),
             dict(
                 type="line",
                 xref="x",
                 x0=avg_val, x1=avg_val,
-                yref="paper", y0=0, y1=1,
-                line=dict(color="orange", width=2, dash="dash"),
+                yref="paper",
+                y0=0, y1=1,
+                line=dict(color="orange", width=2, dash="dash")
             ),
         ]
     )
+
     return fig
 
 
-def display_spm_metrics(metrics: dict, show_total_exits: bool = True):
+
+def display_spm_metrics(metrics: dict, return_period: int, show_total_exits: bool = True):
     """
     Display key SPM2 metrics in a card-style layout.
     
@@ -560,19 +635,38 @@ def display_spm_metrics(metrics: dict, show_total_exits: bool = True):
     from styling import style_metric_cards
 
     style_metric_cards()
+
+    # If return_period is less than 730, override the >24 Months metric
+    if return_period <= 730:
+        metrics["Return > 24 Months"] = None
+        metrics["% Return > 24M"] = None
+
     col1, col2, col3, col4, col5 = st.columns(5)
     if show_total_exits:
-        col1.metric("Total Exits", f"{metrics['Total Exits']:,}")
+        col1.metric("Number of Relevant Exits", f"{metrics['Number of Relevant Exits']:,}")
     col1.metric("PH Exits", f"{metrics['PH Exits']:,} ({metrics['% PH Exits']:.1f}%)")
     col2.metric("Return <6M", f"{metrics['Return < 6 Months']:,} ({metrics['% Return < 6M']:.1f}%)")
     col3.metric("Return 6–12M", f"{metrics['Return 6–12 Months']:,} ({metrics['% Return 6–12M']:.1f}%)")
     col4.metric("Return 12–24M", f"{metrics['Return 12–24 Months']:,} ({metrics['% Return 12–24M']:.1f}%)")
-    col5.metric("Return >24M", f"{metrics['Return > 24 Months']:,} ({metrics['% Return > 24M']:.1f}%)")
-    
+    # Conditionally render >24 months
+    if metrics["Return > 24 Months"] is None:
+        col5.metric("Return >24M", "N/A")
+    else:
+        col5.metric("Return >24M", f"{metrics['Return > 24 Months']:,} ({metrics['% Return > 24M']:.1f}%)")
+        
     colA, colB, colC = st.columns(3)
     colA.metric("Total Return", f"{metrics['Total Return']:,} ({metrics['% Return']:.1f}%)")
     colB.metric("Median Days", f"{metrics['Median Days (<=period)']:.1f}")
     colC.metric("Avg Days", f"{metrics['Average Days (<=period)']:.1f}")
     st.markdown(
-        f"**25th/75th:** {metrics['DaysToReturn 25th Pctl']:.1f}/{metrics['DaysToReturn 75th Pctl']:.1f} | **Max Days:** {metrics['DaysToReturn Max']:.0f}"
+        f"""
+        **25th/75th:** {metrics['DaysToReturn 25th Pctl']:.1f}/{metrics['DaysToReturn 75th Pctl']:.1f}  
+        **Max Days:** {metrics['DaysToReturn Max']:.0f}
+
+        25% of returns occurred within **{metrics['DaysToReturn 25th Pctl']:.0f}** days, 
+        and 25% occurred beyond **{metrics['DaysToReturn 75th Pctl']:.0f}** days. 
+        The longest time to return was **{metrics['DaysToReturn Max']:.0f}** days. 
+        See box plot below for additional details.
+        """
     )
+

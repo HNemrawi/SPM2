@@ -33,6 +33,7 @@ def load_and_preprocess_data(uploaded_file: BytesIO) -> pd.DataFrame:
         # Clean and rename columns for consistency.
         df.columns = df.columns.str.strip()
         rename_map = {
+            "Clients Unique Identifier": "UniqueIdentifier",
             "Clients Client ID": "ClientID",
             "Clients Race and Ethnicity": "RaceEthnicity",
             "Clients Gender": "Gender",
@@ -54,12 +55,14 @@ def load_and_preprocess_data(uploaded_file: BytesIO) -> pd.DataFrame:
             "Update/Exit Screen Destination Category": "ExitDestinationCat",
             "Update/Exit Screen Destination": "ExitDestination",
             "Enrollments Household Move-In Date": "HouseholdMoveInDate",
-            "Programs Continuum Project" : "Programs Continuum Project"
+            "Programs Continuum Project" : "ProgramsContinuumProject",
+            "Enrollments Reporting Period Start Date" : "ReportingPeriodStartDate",
+            "Enrollments Reporting Period End Date" : "ReportingPeriodEndDate"
         }
         df = df.rename(columns=rename_map)
 
         # Parse date columns (with error handling)
-        for col in ["ProjectStart", "ProjectExit", "DOB", "HouseholdMoveInDate"]:
+        for col in ["ProjectStart", "ProjectExit", "DOB", "HouseholdMoveInDate", "ReportingPeriodStartDate", "ReportingPeriodEndDate"]:
             if col in df.columns:
                 df[col] = pd.to_datetime(df[col], errors="coerce")
         return df

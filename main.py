@@ -24,13 +24,22 @@ from data_preprocessing import load_and_preprocess_data
 from spm2_page import spm2_page
 from inbound_page import inbound_recidivism_page
 from outbound_recidivism_page import outbound_recidivism_page
+from logo import HTML_HEADER_LOGO, HTML_FOOTER
+
 
 def reset_session():
     """
-    Reset the Streamlit session state.
+    Reset the Streamlit session state and clear resource and data caches.
     """
+    # Delete all items in the session state
     for key in list(st.session_state.keys()):
         del st.session_state[key]
+    
+    # Clear the resource cache
+    st.cache_resource.clear()
+    
+    # Clear the data cache
+    st.cache_data.clear()
 
 def main():
     """
@@ -41,18 +50,22 @@ def main():
     setup_page()
     apply_custom_css()
     st.title("Return to Homelessness Analysis")
-    st.markdown("""
-    - Upload your data file to get started.
-    - Use the **Reset Session** button if you need to start over.
-    - Navigate between the available analyses:
-        1. **SPM 2 Analysis**
-        2. **Inbound Recidivism Analysis**
-        2. **Outbound Recidivism Analysis**
-    """)
+    col1, col2 = st.columns([2, 1])
+    with col1:
+        st.markdown("""
+        - Upload your data file to get started.
+        - Use the **Reset Session** button if you need to start over.
+        - Navigate between the available analyses:
+            1. **SPM 2 Analysis**
+            2. **Inbound Recidivism Analysis**
+            2. **Outbound Recidivism Analysis**
+        """)
+    with col2:
+        st.markdown(HTML_HEADER_LOGO, unsafe_allow_html=True)
 
     # Sidebar: Data Upload & Reset Section.
     st.sidebar.header("📂 Data Upload")
-    if st.sidebar.button("Reset Data"):
+    if st.sidebar.button("Reset Session"):
         reset_session()
         st.rerun()
 
@@ -86,6 +99,8 @@ def main():
         inbound_recidivism_page()
     elif choice == "Outbound Recidivism":
         outbound_recidivism_page()
+
+    st.markdown(HTML_FOOTER, unsafe_allow_html=True)
 
 if __name__ == "__main__":
     main()

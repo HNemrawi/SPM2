@@ -1,13 +1,3 @@
-"""
-Outbound Recidivism Page
-========================
-A dedicated page for analyzing outbound recidivism:
- - Clients who exit during the reporting period.
- - Earliest next enrollment after each exit.
- - 14-day logic for "Return to Homelessness."
-Mirrors the layout of the SPM2 page.
-"""
-
 import streamlit as st
 import pandas as pd
 from datetime import datetime
@@ -16,7 +6,9 @@ from datetime import datetime
 from outbound_helpers import (
     run_outbound_recidivism,
     compute_summary_metrics,
-    display_spm_metrics,
+    display_spm_metrics,               # For the main "Key Metrics" summary
+    display_spm_metrics_ph,           # Specialized for PH subset
+    display_spm_metrics_non_ph,       # Specialized for Non-PH subset
     breakdown_by_columns,
     plot_days_to_return_box,
     create_flow_pivot,
@@ -24,13 +16,11 @@ from outbound_helpers import (
     plot_flow_sankey
 )
 
-# ----------------------------------------------------------------------------------
-# Outbound Recidivism Analysis Page
-# ----------------------------------------------------------------------------------
 
 def create_sidebar_multiselect(label: str, options: list, default: list, help_text: str):
     """
     Sidebar helper for multiselect with an "ALL" option.
+    If "ALL" is selected, returns None, meaning no filter is applied.
     """
     selection = st.multiselect(
         label=label,
@@ -45,30 +35,48 @@ def create_sidebar_multiselect(label: str, options: list, default: list, help_te
         return None
     return selection
 
+
 def outbound_recidivism_page():
     """
-    Renders the Outbound Recidivism Analysis page using the updated logic and enhanced error handling.
+    Renders the Outbound Recidivism Analysis page with updated logic and clearer comparisons.
     """
     st.header("📊 Outbound Recidivism Analysis")
 
-    with st.expander("📘 Methodology", expanded=False):
-        st.markdown("""
-        **Outbound Recidivism** analysis works in two steps:
+    with st.expander("📘  About Outbound Recidivism Analysis", expanded=False):
+        st.markdown(
+            """
+            ### How This Analysis Works
 
-        **1. Return (Next Enrollment):**  
-        - For each client's *last exit* within the reporting period, we search for the earliest next enrollment (i.e. the next enrollment that starts after the exit date).  
-        - If found, we record the number of days between the exit and the next enrollment as **DaysToReturnEnrollment**. This simply tells us which clients have a documented next enrollment.
+            1. **Which Exits Are Included?**  
+               You can set filters (CoC, Agency, Program, Destination Category, etc.) as well as a reporting date range. 
+               Only those exit enrollments that match these criteria and whose exit date falls within the period are included.
 
-        **2. Return to Homelessness:**  
-        - This calculation applies extra rules to determine if that next enrollment reflects an actual return to homelessness.
-        - **If the next enrollment is in a non-permanent housing (non-PH) project:** The client is flagged immediately as having returned to homelessness.
-        - **If the next enrollment is in a PH (permanent housing) project:** We check the gap in days:
-            - **14 days or less:** The client is likely transitioning seamlessly within housing services, so it is **not** considered a return to homelessness.
-            - **More than 14 days:** The gap is long enough that the client is flagged as a return to homelessness.
+            2. **Identifying a “Return” vs. “Return to Homelessness”**  
+               - **Return**: Looks for any next enrollment (based on filters) that starts *after* the exit date.
+               - **Return to Homelessness**:
+                 1. Excludes 'non-homeless' project types (Coordinated Entry, Day Shelter, HP, etc.).
+                 2. If the next project is Permanent Housing but begins ≤14 days after exit, **it is not** flagged as returning to literal homelessness.
+                 3. Otherwise, it is considered a return to homelessness.  
+                 Importantly, the rate of return to homelessness is **only** calculated among those who exited to permanent housing.
 
-        In short, “Return” means the client has another enrollment after exiting, while “Return to Homelessness” differentiates between a smooth transfer within housing services and a genuine relapse into homelessness.
-        """)
+            3. **Key Output Metrics**  
+               - **Total Exits**: Count of all exits in the filtered dataset.
+               - **Total Exits to PH**: Subset of those exits that went to “Permanent Housing Situations” (per the `ExitDestinationCat` field).
+               - **Return** & **% Return**: How many returned to *any* enrollment, and what percentage that is of total exits.
+               - **Return to Homelessness (PH)** & **% Return to Homelessness (PH)**: 
+                 Specifically among the *PH exit* subset, how many re-entered shelter/outreach/transitional or PH (after >14 days).
+               - **Median / Average / Max Days to Return**: Days from exit to the start of the next enrollment.
 
+            4. **PH vs. Non-PH Comparison**  
+               - This tool also compares those who exited to PH vs. those who exited to Non-PH destinations side by side.
+               - For the PH subset, metrics like Return to Homelessness are relevant.
+               - For the Non-PH subset, we hide those PH-specific metrics.
+
+            5. **Additional Notes**  
+               - Data quality is crucial. If exit dates or project types are missing or incorrect, results may be skewed.
+               - The 14-day rule for PH is based on HUD's SPM (System Performance Measure) guidance for recidivism.
+            """
+        )
 
     if "df" not in st.session_state or st.session_state["df"].empty:
         st.info("No data loaded. Please upload data on the main page sidebar.")
@@ -76,14 +84,14 @@ def outbound_recidivism_page():
 
     df = st.session_state["df"]
 
-    # Sidebar: Configuration
+    # ---------------- Sidebar: Configuration  -------------------
     st.sidebar.header("⚙️ Outbound Recidivism Parameters")
 
     with st.sidebar.expander("📅 Reporting Period", expanded=True):
         try:
             date_range = st.date_input(
                 "Reporting Period (for Exits)",
-                [datetime(2023, 10, 1), datetime(2024, 9, 30)],
+                [datetime(2025, 1, 1), datetime(2025, 1, 31)],
                 help="Clients must have an exit date within this range."
             )
             if len(date_range) != 2:
@@ -94,7 +102,6 @@ def outbound_recidivism_page():
         except Exception as e:
             st.error(f"📅 Date Error: {str(e)}")
             st.stop()
-
 
     with st.sidebar.expander("🚪 Exit Filters", expanded=True):
         exit_cocs = create_sidebar_multiselect(
@@ -204,6 +211,7 @@ def outbound_recidivism_page():
 
     st.divider()
 
+    # ----------------- Run Analysis Button -----------------------
     if st.button("▶️ Run Outbound Recidivism Analysis", type="primary", use_container_width=True):
         try:
             with st.spinner("Processing..."):
@@ -229,6 +237,7 @@ def outbound_recidivism_page():
         except Exception as e:
             st.error(f"An error occurred during analysis: {e}")
 
+    # ----------------- Display Results --------------------------
     if "outbound_df" in st.session_state and not st.session_state["outbound_df"].empty:
         final_df_c = st.session_state["outbound_df"]
 
@@ -299,19 +308,21 @@ def outbound_recidivism_page():
         if comp_check:
             ph_df = final_df_c[final_df_c["PH_Exit"] == True]
             nonph_df = final_df_c[final_df_c["PH_Exit"] == False]
+
             c1, c2 = st.columns(2)
             with c1:
                 st.subheader("PH Exits")
                 if not ph_df.empty:
                     ph_metrics = compute_summary_metrics(ph_df)
-                    display_spm_metrics(ph_metrics)
+                    display_spm_metrics_ph(ph_metrics)
                 else:
                     st.info("No PH Exits found.")
+
             with c2:
                 st.subheader("Non-PH Exits")
                 if not nonph_df.empty:
                     nonph_metrics = compute_summary_metrics(nonph_df)
-                    display_spm_metrics(nonph_metrics)
+                    display_spm_metrics_non_ph(nonph_metrics)
                 else:
                     st.info("No Non-PH Exits found.")
 
@@ -324,6 +335,7 @@ def outbound_recidivism_page():
             mime="text/csv",
             use_container_width=True
         )
+
 
 if __name__ == "__main__":
     outbound_recidivism_page()
