@@ -383,20 +383,28 @@ def breakdown_by_columns(final_df: pd.DataFrame, columns: list, return_period: i
         row_data = {col: val for col, val in zip(columns, group_vals)}
         m = compute_summary_metrics(subdf, return_period)
 
+        if return_period <= 730:
+            m["Return > 24 Months"] = None
+            m["% Return > 24M"] = None
+
         row_data["Number of Relevant Exits"] = m["Number of Relevant Exits"]
         row_data["Total Return"] = m["Total Return"]
         row_data["% Return"] = f"{m['% Return']:.1f}%"
 
         pairs = [
-            ("PH Exits", "% PH Exits"), 
-            ("Return < 6 Months", "% Return < 6M"), 
+            ("PH Exits", "% PH Exits"),
+            ("Return < 6 Months", "% Return < 6M"),
             ("Return 6–12 Months", "% Return 6–12M"),
             ("Return 12–24 Months", "% Return 12–24M"),
             ("Return > 24 Months", "% Return > 24M"),
         ]
         for count_col, pct_col in pairs:
-            if count_col in m and pct_col in m:
-                row_data[count_col] = f"{m[count_col]} ({m[pct_col]:.1f}%)"
+            cnt = m.get(count_col)
+            pct = m.get(pct_col)
+            if cnt is not None and pct is not None:
+                row_data[count_col] = f"{cnt} ({pct:.1f}%)"
+            else:
+                row_data[count_col] = None
 
         row_data["Median Days"] = f"{m['Median Days (<=period)']:.1f}"
         row_data["Average Days"] = f"{m['Average Days (<=period)']:.1f}"
@@ -404,8 +412,14 @@ def breakdown_by_columns(final_df: pd.DataFrame, columns: list, return_period: i
         rows.append(row_data)
 
     out_df = pd.DataFrame(rows)
-    out_df = out_df.sort_values(by="Number of Relevant Exits", key=lambda x: x.astype(int), ascending=False)
+    out_df = out_df.sort_values(
+        by="Number of Relevant Exits",
+        key=lambda x: x.astype(int),
+        ascending=False
+    )
     return out_df
+
+
 
 
 def get_top_flows_from_pivot(pivot_df: pd.DataFrame, top_n=10) -> pd.DataFrame:
@@ -474,7 +488,6 @@ def plot_flow_sankey(pivot_df: pd.DataFrame, title: str = "Exit → Return Sanke
     Returns:
         go.Figure: Plotly figure of the Sankey diagram.
     """
-    import plotly.graph_objects as go
 
     df = pivot_df.copy()
     # Get exit categories (rows) and return categories (columns)

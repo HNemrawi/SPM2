@@ -49,8 +49,8 @@ def inbound_recidivism_page():
             
             ### Methodology Highlights:
             1. **Entry Identification:** Select first new entries within the chosen date range.
-            2. **Exit Lookup:** Scan client history for exits within the 24-month lookback.
-            3. **Classification Logic:** Categorize based on the days between exit and new entry.
+            2. **Exit Lookup:** Scan client history for exits within the Days lookback.
+            3. **Classification Logic:** Categorize based on previous exits.
         """)
         st.divider()
         st.markdown("""
@@ -259,7 +259,7 @@ def inbound_recidivism_page():
                 "Enter_ExitDestinationCat",
                 "Enter_ExitDestination",
                 "Enter_ProgramsContinuumProject",
-                "Enter_AgeTieratEntry"
+                "Enter_AgeTieratEntry",
                 "ReturnCategory",
                 "Exit_HasIncome",
                 "Exit_HasDisability",
@@ -361,7 +361,7 @@ def inbound_recidivism_page():
                 # Flow Matrix Details expander
                 with st.expander("🔍 Flow Matrix Details", expanded=True):
                     st.dataframe(
-                        flow_pivot_ra.style.background_gradient(cmap="Blues", axis=1)
+                        flow_pivot_ra.style.background_gradient(cmap="Blues")
                             .format(precision=0),
                         use_container_width=True
                     )

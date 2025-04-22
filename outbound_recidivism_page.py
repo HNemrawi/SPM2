@@ -1,221 +1,233 @@
-import streamlit as st
-import pandas as pd
-from datetime import datetime
+"""
+Outbound Recidivism Streamlit Page
+==================================
+End‑to‑end UI that mirrors the layout, visual hierarchy, and UX polish
+of the SPM 2 page.  Place this file alongside `outbound_helpers.py`.
+"""
 
-# Import our new helper functions
+from __future__ import annotations
+
+from datetime import datetime
+from typing import List, Optional
+
+import pandas as pd
+import streamlit as st
+
 from outbound_helpers import (
-    run_outbound_recidivism,
-    compute_summary_metrics,
-    display_spm_metrics,               # For the main "Key Metrics" summary
-    display_spm_metrics_ph,           # Specialized for PH subset
-    display_spm_metrics_non_ph,       # Specialized for Non-PH subset
     breakdown_by_columns,
-    plot_days_to_return_box,
+    compute_summary_metrics,
     create_flow_pivot,
+    display_spm_metrics,
+    display_spm_metrics_non_ph,
+    display_spm_metrics_ph,
     get_top_flows_from_pivot,
-    plot_flow_sankey
+    plot_days_to_return_box,
+    plot_flow_sankey,
+    run_outbound_recidivism,
 )
 
-
-def create_sidebar_multiselect(label: str, options: list, default: list, help_text: str):
+# -----------------------------------------------------------------------------#
+# Sidebar Utilities                                                            #
+# -----------------------------------------------------------------------------#
+def create_sidebar_multiselect(
+    label: str,
+    options: List[str],
+    default: Optional[List[str]],
+    help_text: str,
+) -> Optional[List[str]]:
     """
-    Sidebar helper for multiselect with an "ALL" option.
-    If "ALL" is selected, returns None, meaning no filter is applied.
+    Multiselect wrapper with an “ALL” option that returns *None* if ALL selected.
     """
-    selection = st.multiselect(
-        label=label,
-        options=["ALL"] + options,
-        default=default,
-        help=help_text
-    )
-    if "ALL" in selection:
-        return None
-    if not selection:
-        st.error(f"Please select at least one option for {label}, or choose ALL.")
+    selection = st.multiselect(label, ["ALL"] + options, default=default or ["ALL"], help=help_text)
+    if "ALL" in selection or not selection:
         return None
     return selection
 
+# -----------------------------------------------------------------------------#
+# Main Page Function                                                           #
+# -----------------------------------------------------------------------------#
+def outbound_recidivism_page() -> None:
+    """Render the Outbound Recidivism page."""
+    st.header("📈 Outbound Recidivism Analysis")
 
-def outbound_recidivism_page():
-    """
-    Renders the Outbound Recidivism Analysis page with updated logic and clearer comparisons.
-    """
-    st.header("📊 Outbound Recidivism Analysis")
-
+    # ----------------- About ------------------------------------------------- #
     with st.expander("📘  About Outbound Recidivism Analysis", expanded=False):
         st.markdown(
             """
             ### How This Analysis Works
 
             1. **Which Exits Are Included?**  
-               You can set filters (CoC, Agency, Program, Destination Category, etc.) as well as a reporting date range. 
-               Only those exit enrollments that match these criteria and whose exit date falls within the period are included.
+               You configure filters (CoC, Agency, Program, Project Type,
+               Destination Category, etc.) and a reporting date range.  
+               Only last exit enrollment per client that match those filters,
+               with exit dates in the selected window, are analyzed.
 
-            2. **Identifying a “Return” vs. “Return to Homelessness”**  
-               - **Return**: Looks for any next enrollment (based on filters) that starts *after* the exit date.
-               - **Return to Homelessness**:
-                 1. Excludes 'non-homeless' project types (Coordinated Entry, Day Shelter, HP, etc.).
-                 2. If the next project is Permanent Housing but begins ≤14 days after exit, **it is not** flagged as returning to literal homelessness.
-                 3. Otherwise, it is considered a return to homelessness.  
-                 Importantly, the rate of return to homelessness is **only** calculated among those who exited to permanent housing.
+            2. **Return Definitions**  
+               - **Return** = first enrollment after exit (any project).  
+               - **Return to Homelessness** = first enrollment that is **not**
+                 Coordinated Entry/Day Shelter/HP/Services **and** is either:
+                 - a non‑PH project, or  
+                 - a PH project beginning > 14 days after the exit
+                   (excluding any PH transition windows same as SPM2 logic).  
+               *Note:* The “Return to Homelessness” rate is calculated only for
+               clients who exited to Permanent Housing Situations.
 
             3. **Key Output Metrics**  
-               - **Total Exits**: Count of all exits in the filtered dataset.
-               - **Total Exits to PH**: Subset of those exits that went to “Permanent Housing Situations” (per the `ExitDestinationCat` field).
-               - **Return** & **% Return**: How many returned to *any* enrollment, and what percentage that is of total exits.
-               - **Return to Homelessness (PH)** & **% Return to Homelessness (PH)**: 
-                 Specifically among the *PH exit* subset, how many re-entered shelter/outreach/transitional or PH (after >14 days).
-               - **Median / Average / Max Days to Return**: Days from exit to the start of the next enrollment.
+               - **Total Exits**: count of all exits in the filtered dataset.  
+               - **Total Exits to PH**: count of exits whose
+                 `ExitDestinationCat` = “Permanent Housing Situations.”  
+               - **Return** & **% Return**: number and share of exits with
+                 any subsequent enrollment.  
+               - **Return to Homelessness (PH)** & **% Return to Homelessness (PH)**:
+                 among PH exits, the count and share of true homelessness returns.  
+               - **Median / Average / Max Days to Return**: days between exit and
+                 start of that next enrollment.
 
-            4. **PH vs. Non-PH Comparison**  
-               - This tool also compares those who exited to PH vs. those who exited to Non-PH destinations side by side.
-               - For the PH subset, metrics like Return to Homelessness are relevant.
-               - For the Non-PH subset, we hide those PH-specific metrics.
+            4. **PH vs. Non‑PH Comparison**  
+               Side‑by‑side metrics for those who exited to PH versus those who
+               exited elsewhere. PH‑specific metrics (e.g. Return to Homelessness)
+               are only shown for the PH subset.
 
             5. **Additional Notes**  
-               - Data quality is crucial. If exit dates or project types are missing or incorrect, results may be skewed.
-               - The 14-day rule for PH is based on HUD's SPM (System Performance Measure) guidance for recidivism.
-            """
+               - Data completeness matters: missing or incorrect exit dates or
+                 types will skew results.  
+               - The 14‑day gap rule follows HUD’s SPM guidance for homelessness recidivism.
+            """,
+            unsafe_allow_html=True,
         )
 
+    # ----------------- Data Check ------------------------------------------- #
     if "df" not in st.session_state or st.session_state["df"].empty:
-        st.info("No data loaded. Please upload data on the main page sidebar.")
-        return
+        st.info("📭 No data uploaded!  Please upload HMIS export on the main page.")
+        st.stop()
 
-    df = st.session_state["df"]
+    df: pd.DataFrame = st.session_state["df"]
 
-    # ---------------- Sidebar: Configuration  -------------------
-    st.sidebar.header("⚙️ Outbound Recidivism Parameters")
+    # ----------------- Sidebar Configuration -------------------------------- #
+    st.sidebar.header("⚙️ Outbound Parameters")
 
-    with st.sidebar.expander("📅 Reporting Period", expanded=True):
-        try:
-            date_range = st.date_input(
-                "Reporting Period (for Exits)",
-                [datetime(2025, 1, 1), datetime(2025, 1, 31)],
-                help="Clients must have an exit date within this range."
-            )
-            if len(date_range) != 2:
-                st.error("⚠️ Please select both a start and end date.")
-                st.stop()
+    # --- Reporting period
+    with st.sidebar.expander("📅 Reporting Period", expanded=True):
+        start_d, end_d = st.date_input(
+            "Exit date range",
+            value=[datetime(2025, 1, 1), datetime(2025, 1, 31)],
+            help="Clients must have an exit date inside this window.",
+        )
+        report_start, report_end = pd.to_datetime(start_d), pd.to_datetime(end_d)
 
-            report_start, report_end = pd.to_datetime(date_range[0]), pd.to_datetime(date_range[1])
-        except Exception as e:
-            st.error(f"📅 Date Error: {str(e)}")
-            st.stop()
-
-    with st.sidebar.expander("🚪 Exit Filters", expanded=True):
+    # --- Exit filters
+    with st.sidebar.expander("🚪 Exit Filters", expanded=True):
         exit_cocs = create_sidebar_multiselect(
-            "CoC Codes - Exit",
+            "CoC Codes",
             sorted(df["ProgramSetupCoC"].dropna().unique()) if "ProgramSetupCoC" in df.columns else [],
-            default=["ALL"],
-            help_text="Filter exit enrollments by CoC code"
+            default=None,
+            help_text="Filter exits by CoC code",
         )
         exit_localcocs = create_sidebar_multiselect(
-            "Local CoC - Exit",
+            "Local CoC",
             sorted(df["LocalCoCCode"].dropna().unique()) if "LocalCoCCode" in df.columns else [],
-            default=["ALL"],
-            help_text="Filter exit enrollments by local CoC"
+            default=None,
+            help_text="Filter exits by local CoC",
         )
         exit_agencies = create_sidebar_multiselect(
-            "Agencies - Exit",
+            "Agencies",
             sorted(df["AgencyName"].dropna().unique()) if "AgencyName" in df.columns else [],
-            default=["ALL"],
-            help_text="Filter exit enrollments by agency"
+            default=None,
+            help_text="Filter exits by agency",
         )
         exit_programs = create_sidebar_multiselect(
-            "Programs - Exit",
+            "Programs",
             sorted(df["ProgramName"].dropna().unique()) if "ProgramName" in df.columns else [],
-            default=["ALL"],
-            help_text="Filter exit enrollments by program"
+            default=None,
+            help_text="Filter exits by program",
         )
-        default_exit_types = [
-            "Street Outreach",
-            "Emergency Shelter – Entry Exit",
-            "Emergency Shelter – Night-by-Night",
-            "Transitional Housing",
-            "Safe Haven",
-            "PH – Housing Only",
-            "PH – Housing with Services (no disability required for entry)",
-            "PH – Permanent Supportive Housing (disability required for entry)",
-            "PH – Rapid Re-Housing"
-        ]
         exiting_projects = st.multiselect(
-            "Exit Project Types",
+            "Project Types (Exit)",
             sorted(df["ProjectTypeCode"].dropna().unique()) if "ProjectTypeCode" in df.columns else [],
-            default=default_exit_types,
-            help="Project types considered as exits"
+            default=[
+                "Street Outreach",
+                "Emergency Shelter – Entry Exit",
+                "Emergency Shelter – Night-by-Night",
+                "Transitional Housing",
+                "Safe Haven",
+                "PH – Housing Only",
+                "PH – Housing with Services (no disability required for entry)",
+                "PH – Permanent Supportive Housing (disability required for entry)",
+                "PH – Rapid Re-Housing"
+            ],
+            help="Project types treated as exits",
         )
         allowed_exit_dest_cats = st.multiselect(
             "Exit Destination Categories",
             sorted(df["ExitDestinationCat"].dropna().unique()) if "ExitDestinationCat" in df.columns else [],
             default=["Permanent Housing Situations"],
-            help="Filter exits by exit destination category"
+            help="Limit exits to these destination categories",
         )
 
-    with st.sidebar.expander("↩️ Return Filters", expanded=True):
+    # --- Return filters
+    with st.sidebar.expander("↩️ Return Filters", expanded=True):
         return_cocs = create_sidebar_multiselect(
-            "CoC Codes - Return",
+            "CoC Codes",
             sorted(df["ProgramSetupCoC"].dropna().unique()) if "ProgramSetupCoC" in df.columns else [],
-            default=["ALL"],
-            help_text="Filter next enrollments by CoC code"
+            default=None,
+            help_text="Filter next enrollments by CoC code",
         )
         return_localcocs = create_sidebar_multiselect(
-            "Local CoC - Return",
+            "Local CoC",
             sorted(df["LocalCoCCode"].dropna().unique()) if "LocalCoCCode" in df.columns else [],
-            default=["ALL"],
-            help_text="Filter next enrollments by local CoC code"
+            default=None,
+            help_text="Filter next enrollments by local CoC",
         )
         return_agencies = create_sidebar_multiselect(
-            "Agencies - Return",
+            "Agencies",
             sorted(df["AgencyName"].dropna().unique()) if "AgencyName" in df.columns else [],
-            default=["ALL"],
-            help_text="Filter next enrollments by agency"
+            default=None,
+            help_text="Filter next enrollments by agency",
         )
         return_programs = create_sidebar_multiselect(
-            "Programs - Return",
+            "Programs",
             sorted(df["ProgramName"].dropna().unique()) if "ProgramName" in df.columns else [],
-            default=["ALL"],
-            help_text="Filter next enrollments by program"
+            default=None,
+            help_text="Filter next enrollments by program",
         )
-        default_return_types = [
-            "Street Outreach",
-            "Emergency Shelter – Entry Exit",
-            "Emergency Shelter – Night-by-Night",
-            "Safe Haven",
-            "Transitional Housing",
-            "PH – Housing Only",
-            "PH – Housing with Services (no disability required for entry)",
-            "PH – Permanent Supportive Housing (disability required for entry)",
-            "PH – Rapid Re-Housing"
-        ]
         return_projects = st.multiselect(
-            "Return Project Types",
+            "Project Types (Return)",
             sorted(df["ProjectTypeCode"].dropna().unique()) if "ProjectTypeCode" in df.columns else [],
-            default=default_return_types,
-            help="Project types considered for next enrollment"
+            default=[
+                "Street Outreach",
+                "Emergency Shelter – Entry Exit",
+                "Emergency Shelter – Night-by-Night",
+                "Transitional Housing",
+                "Safe Haven",
+                "PH – Housing Only",
+                "PH – Housing with Services (no disability required for entry)",
+                "PH – Permanent Supportive Housing (disability required for entry)",
+                "PH – Rapid Re-Housing"
+            ],
+            help="Project types treated as candidate returns",
         )
 
-    with st.sidebar.expander("⚡ Continuum Filter", expanded=False):
-        if "Programs Continuum Project" in df.columns:
-            continuum_list = sorted(df["Programs Continuum Project"].dropna().unique())
-            chosen_continuum = st.multiselect(
-                "Programs Continuum Project",
-                ["ALL"] + continuum_list,
-                default=["ALL"],
-                help="Filter for continuum projects"
-            )
-            if "ALL" in chosen_continuum:
-                chosen_continuum = None
-        else:
-            chosen_continuum = None
+    # --- Continuum
+    with st.sidebar.expander("⚡ Continuum", expanded=False):
+        cont_opts = (
+            sorted(df["ProgramsContinuumProject"].dropna().unique())
+            if "ProgramsContinuumProject" in df.columns
+            else []
+        )
+        chosen_continuum = create_sidebar_multiselect(
+            "Programs Continuum Project",
+            cont_opts,
+            default=None,
+            help_text="Optional continuum filter",
+        )
 
     st.divider()
 
-    # ----------------- Run Analysis Button -----------------------
-    if st.button("▶️ Run Outbound Recidivism Analysis", type="primary", use_container_width=True):
-        try:
-            with st.spinner("Processing..."):
-                result_df = run_outbound_recidivism(
+    # ----------------- Run Analysis Button ---------------------------------- #
+    if st.button("▶️ Run Analysis", type="primary", use_container_width=True):
+        with st.status("🔄 Running Outbound Recidivism…", expanded=True) as status:
+            try:
+                outbound_df = run_outbound_recidivism(
                     df,
                     report_start,
                     report_end,
@@ -230,112 +242,218 @@ def outbound_recidivism_page():
                     allowed_continuum=chosen_continuum,
                     allowed_exit_dest_cats=allowed_exit_dest_cats,
                     exiting_projects=exiting_projects,
-                    return_projects=return_projects
+                    return_projects=return_projects,
                 )
-                st.session_state["outbound_df"] = result_df
-                st.success("Outbound Recidivism Analysis Complete!")
-        except Exception as e:
-            st.error(f"An error occurred during analysis: {e}")
+                cols_to_remove = [
+                    "Return_UniqueIdentifier",
+                    "Return_ClientID",
+                    "Return_RaceEthnicity",
+                    "Return_Gender",
+                    "Return_DOB",
+                    "Return_VeteranStatus",
+                    "Exit_ReportingPeriodStartDate",
+                    "Exit_ReportingPeriodEndDate",
+                    "Return_ReportingPeriodStartDate",
+                    "Return_ReportingPeriodEndDate"
+                ]
+                outbound_df.drop(columns=cols_to_remove, inplace=True, errors='ignore')
+                cols_to_rename = [
+                    "Exit_UniqueIdentifier", 
+                    "Exit_ClientID",
+                    "Exit_RaceEthnicity",
+                    "Exit_Gender",
+                    "Exit_DOB",
+                    "Exit_VeteranStatus"
+                ]
+                mapping = {col: col[len("Exit_"):] for col in cols_to_rename if col in outbound_df.columns}
+                outbound_df.rename(columns=mapping, inplace=True)
 
-    # ----------------- Display Results --------------------------
-    if "outbound_df" in st.session_state and not st.session_state["outbound_df"].empty:
-        final_df_c = st.session_state["outbound_df"]
+                st.session_state["outbound_df"] = outbound_df
+                status.update(label="✅ Done!", state="complete")
+                st.toast("Analysis complete 🎉", icon="🎉")
+            except Exception as exc:
+                status.update(label=f"🚨 Error: {exc}", state="error")
 
-        st.divider()
-        st.markdown("### 📊 Key Metrics")
-        metrics = compute_summary_metrics(final_df_c)
-        display_spm_metrics(metrics)
+    # ----------------- Results Section -------------------------------------- #
+    if "outbound_df" not in st.session_state or st.session_state["outbound_df"].empty:
+        return
 
-        st.divider()
-        st.markdown("### ⏳ Days to Return Distribution")
-        fig_box = plot_days_to_return_box(final_df_c)
-        st.plotly_chart(fig_box, use_container_width=True)
+    out_df = st.session_state["outbound_df"]
 
-        st.divider()
-        st.markdown("### 📈 Breakdown by Columns")
-        bcols = st.multiselect(
-            "Group By",
-            final_df_c.columns.tolist(),
-            default=["Exit_ProjectTypeCode"] if "Exit_ProjectTypeCode" in final_df_c.columns else []
+    # --- Metrics
+    st.divider()
+    st.markdown("### 📊 Outbound Analysis Summary")
+    display_spm_metrics(compute_summary_metrics(out_df))
+
+    # --- Days‑to‑Return box
+    st.divider()
+    st.markdown("### ⏳ Days to Return Distribution")
+    st.plotly_chart(plot_days_to_return_box(out_df), use_container_width=True)
+
+    # --- Breakdown
+    st.divider()
+    st.markdown("### 📈 Breakdown")
+    breakdown_columns = [
+        "RaceEthnicity",
+        "Gender",
+        "VeteranStatus",
+        "Exit_HasIncome",
+        "Exit_HasDisability",
+        "Exit_HouseholdType",
+        "Exit_CHStartHousehold",
+        "Exit_LocalCoCCode",
+        "Exit_PriorLivingCat",
+        "Exit_ProgramSetupCoC",
+        "Exit_ProjectTypeCode",
+        "Exit_AgencyName",
+        "Exit_ProgramName",
+        "Exit_ExitDestinationCat",
+        "Exit_ExitDestination",
+        "Exit_CustomProgramType",
+        "Exit_AgeTieratEntry",
+        "Return_HasIncome",
+        "Return_HasDisability",
+        "Return_HouseholdType",
+        "Return_CHStartHousehold",
+        "Return_LocalCoCCode",
+        "Return_PriorLivingCat",
+        "Return_ProgramSetupCoC",
+        "Return_ProjectTypeCode",
+        "Return_AgencyName",
+        "Return_ProgramName",
+        "Return_ExitDestinationCat",
+        "Return_ExitDestination",
+        "AgeAtExitRange",
+    ]
+    cols_to_group = st.multiselect(
+        "Group by columns",
+        options=[col for col in breakdown_columns if col in out_df.columns],
+        default=["Exit_ProjectTypeCode"] if "Exit_ProjectTypeCode" in out_df.columns else [],
+        help="Select up to 3 columns",
+    )
+    if cols_to_group:
+        bdf = breakdown_by_columns(out_df, cols_to_group[:3])
+        st.dataframe(
+            bdf.style.format(thousands=",").background_gradient(cmap="Blues"),
+            use_container_width=True,
         )
-        if bcols:
-            bdf = breakdown_by_columns(final_df_c, bcols)
-            st.dataframe(bdf, use_container_width=True)
 
-        st.divider()
-        st.markdown("### 🌊 Flow Analysis")
-        exit_candidates = [c.replace("Exit_","") for c in final_df_c.columns if c.startswith("Exit_")]
-        return_candidates = [c.replace("Return_","") for c in final_df_c.columns if c.startswith("Return_")]
-        if exit_candidates and return_candidates:
-            colA, colB = st.columns(2)
-            with colA:
-                ex_dim = st.selectbox(
-                    "Exit Dimension",
-                    exit_candidates,
-                    index=exit_candidates.index("ProjectTypeCode") if "ProjectTypeCode" in exit_candidates else 0
-                )
-            with colB:
-                ret_dim = st.selectbox(
-                    "Return Dimension",
-                    return_candidates,
-                    index=return_candidates.index("ProjectTypeCode") if "ProjectTypeCode" in return_candidates else 0
-                )
+    # --- Flow Analysis
+    st.divider()
+    st.markdown("### 🌊 Client Flow Analysis")
+    exit_columns = [
+        "Exit_HasIncome",
+        "Exit_HasDisability",
+        "Exit_HouseholdType",
+        "Exit_CHStartHousehold",
+        "Exit_LocalCoCCode",
+        "Exit_PriorLivingCat",
+        "Exit_ProgramSetupCoC",
+        "Exit_ProjectTypeCode",
+        "Exit_AgencyName",
+        "Exit_ProgramName",
+        "Exit_ExitDestinationCat",
+        "Exit_ExitDestination",
+    ]
+    return_columns = [
+        "Return_HasIncome",
+        "Return_HasDisability",
+        "Return_HouseholdType",
+        "Return_CHStartHousehold",
+        "Return_LocalCoCCode",
+        "Return_PriorLivingCat",
+        "Return_ProgramSetupCoC",
+        "Return_ProjectTypeCode",
+        "Return_AgencyName",
+        "Return_ProgramName",
+        "Return_ExitDestinationCat",
+        "Return_ExitDestination",
+    ]
+    exit_dims = [c for c in exit_columns if c in out_df.columns]
+    ret_dims = [c for c in return_columns if c in out_df.columns]
 
-            pivot_df = create_flow_pivot(final_df_c, ex_dim, ret_dim)
-            if pivot_df.empty:
-                st.info("No next enrollments found to build flow pivot.")
+    if exit_dims and ret_dims:
+        col_a, col_b = st.columns(2)
+        with col_a:
+            ex_dim = st.selectbox(
+                "Exit dimension",
+                exit_dims,
+                index=exit_dims.index("Exit_ProjectTypeCode") if "Exit_ProjectTypeCode" in exit_dims else 0,
+            )
+        with col_b:
+            ret_dim = st.selectbox(
+                "Return dimension",
+                ret_dims,
+                index=ret_dims.index("Return_ProjectTypeCode") if "Return_ProjectTypeCode" in ret_dims else 0,
+            )
+
+        # build pivot including "No Return"
+        flow_pivot = create_flow_pivot(out_df, ex_dim, ret_dim)
+        if "No Return" in flow_pivot.columns:
+            cols_order = [col for col in flow_pivot.columns if col != "No Return"] + ["No Return"]
+            flow_pivot = flow_pivot[cols_order]
+        columns_to_color = [col for col in flow_pivot.columns if col != "No Return"]
+        # 1) Flow Matrix Details
+        with st.expander("🔍 Flow Matrix Details", expanded=True):
+            if flow_pivot.empty:
+                st.info("No return enrollments to build flow.")
             else:
-                st.markdown("#### Flow Matrix")
                 st.dataframe(
-                    pivot_df.style.background_gradient(cmap="Blues").format(precision=0),
-                    use_container_width=True
+                    flow_pivot.style
+                    .background_gradient(cmap="Blues",subset=columns_to_color, axis=1)
+                    .format(precision=0),
+                    use_container_width=True,
                 )
 
-                top_n = st.slider("Top N Flows", 5, 25, 10)
-                top_flows = get_top_flows_from_pivot(pivot_df, top_n=top_n)
-                if not top_flows.empty:
-                    st.markdown("#### Top Flows")
-                    st.dataframe(
-                        top_flows.style.format({"Percent": "{:.1f}%"}).background_gradient(cmap="Blues"),
-                        use_container_width=True
-                    )
-                sankey_fig = plot_flow_sankey(pivot_df, f"{ex_dim} → {ret_dim}")
-                st.plotly_chart(sankey_fig, use_container_width=True)
+        # 2) Top Client Pathways
+        st.markdown("#### 🔝 Top Client Pathways")
+        top_n = st.slider("Top N flows", 5, 25, 10)
+        top_flows = get_top_flows_from_pivot(flow_pivot, top_n=top_n)
+        if not top_flows.empty:
+            top_flows["Percent"] = top_flows["Percent"].astype(float)
+            st.dataframe(
+                top_flows
+                .style.format({"Percent": "{:.1f}%"}).background_gradient(cmap="Blues"),
+                use_container_width=True,
+            )
+        else:
+            st.info("No significant pathways detected")
 
-        st.divider()
-        st.markdown("### PH vs. Non-PH Exits Comparison")
-        comp_check = st.checkbox("Compare PH vs. Non-PH Exits", value=False)
-        if comp_check:
-            ph_df = final_df_c[final_df_c["PH_Exit"] == True]
-            nonph_df = final_df_c[final_df_c["PH_Exit"] == False]
+        # 3) Client Flow Network
+        st.markdown("#### 🌐 Client Flow Network")
+        sankey_fig = plot_flow_sankey(flow_pivot, f"{ex_dim} → {ret_dim}")
+        st.plotly_chart(sankey_fig, use_container_width=True)
 
-            c1, c2 = st.columns(2)
-            with c1:
-                st.subheader("PH Exits")
-                if not ph_df.empty:
-                    ph_metrics = compute_summary_metrics(ph_df)
-                    display_spm_metrics_ph(ph_metrics)
-                else:
-                    st.info("No PH Exits found.")
+    # --- PH vs Non‑PH comparison
+    st.divider()
+    st.markdown("### 🏠 PH vs. Non‑PH Exit Comparison")
+    if st.checkbox("Show comparison", value=False):
+        ph_df = out_df[out_df["PH_Exit"]]
+        nonph_df = out_df[~out_df["PH_Exit"]]
+        c1, c2 = st.columns(2)
+        with c1:
+            st.subheader("PH Exits")
+            if not ph_df.empty:
+                display_spm_metrics_ph(compute_summary_metrics(ph_df))
+            else:
+                st.info("No PH exits found.")
+        with c2:
+            st.subheader("Non‑PH Exits")
+            if not nonph_df.empty:
+                display_spm_metrics_non_ph(compute_summary_metrics(nonph_df))
+            else:
+                st.info("No Non‑PH exits found.")
 
-            with c2:
-                st.subheader("Non-PH Exits")
-                if not nonph_df.empty:
-                    nonph_metrics = compute_summary_metrics(nonph_df)
-                    display_spm_metrics_non_ph(nonph_metrics)
-                else:
-                    st.info("No Non-PH Exits found.")
-
-        st.divider()
-        st.markdown("### 📤 Export Results")
-        st.download_button(
-            "Download Outbound Recidivism Results (CSV)",
-            data=final_df_c.to_csv(index=False),
-            file_name="OutboundRecidivismResults.csv",
-            mime="text/csv",
-            use_container_width=True
-        )
-
+    # --- Download
+    st.divider()
+    st.download_button(
+        "⬇️ Download results (CSV)",
+        data=out_df.to_csv(index=False),
+        file_name="OutboundRecidivismResults.csv",
+        mime="text/csv",
+        use_container_width=True,
+    )
 
 if __name__ == "__main__":
+    st.set_page_config(page_title="Outbound Recidivism", layout="wide")
     outbound_recidivism_page()

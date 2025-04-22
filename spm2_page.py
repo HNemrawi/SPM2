@@ -64,57 +64,67 @@ def spm2_page():
     # About section with methodology overview and interpretation guide
     with st.expander("📘 About SPM2 Methodology", expanded=False):
         st.markdown("""
-            **SPM2 Analysis Overview**  
-            *Analyzing housing stability through return patterns post-permanent housing exits.*
+    ## 📘 About SPM2 Methodology
 
-            ---
-            ### Default Logic (Customizable via Filters)
-            This tool starts with a default setup that can be refined using filter options.
+    **SPM2 Analysis Overview**  
+    *Assessing housing stability by tracking if and when clients return to homeless services after exiting to permanent housing.*
 
-            **1. Client Universe Selection**
-            - Includes clients with **exits from SO, ES (EE/NbN), TH, SH, or PH projects**.
-            - The exit must fall **within 730 days prior** to the reporting period.
-            - Logic:
-                - `[Exit Date] >= [Report Start Date – 730 days]`
-                - `[Exit Date] <= [Report End Date – 730 days]`
+    ---
 
-            **2. Exit to Permanent Housing**
-            - For each client, identify the **earliest exit to permanent housing**.
-            - If there are multiple exits on that date, select the one with the **lowest Enrollment ID**.
+    ### 1. Client Universe  
+    - **Included Project Types**  
+    - Street Outreach (SO)  
+    - Emergency Shelter (ES)  
+    - Transitional Housing (TH)  
+    - Safe Haven (SH)  
+    - Permanent Housing (PH)  
+    - **Date Window**  
+    - Consider exits that occurred **within 730 days before** the reporting period  
+        - Exit Date ≥ (Report Start Date – 730 days)  
+        - Exit Date ≤ (Report End Date – 730 days)
 
-            **3. Return Scanning**
-            - Scan forward in time from each client’s permanent housing exit.
-            - Look for a **re-entry into a project** that indicates homelessness.
+    ---
 
-                **Eligible Return Enrollments:**
-                - **Street Outreach, ES, TH, SH**, or
-                - **PH** projects that meet both:
-                - The return is **more than 14 days after** the original PH exit.
-                - The return does **not overlap with another PH enrollment's transition window**  
-                    (defined as `[Project Start + 1]` to `min([Exit + 14], [Report End])`).
+    ### 2. Identifying the “Permanent Housing” Exit  
+    - **Definition:** the client’s **earliest** exit into any PH project  
+    - **Tie‑Breaker:** if multiple exits share that date, pick the one with **lowest Enrollment ID**
 
-            - **Stop at the first qualifying return** where:
-                - `[Project Start Date] >= [Exit Date]`
-                - `[Project Start Date] <= [Report End Date]`
-                - Criteria above are met.
+    ---
 
-            ---
-            ### Methodology Summary
-            1. **Exit Selection:** Identify permanent housing exits using lookback logic.
-            2. **Scan for Return:** Forward-search for valid return enrollments.
-            3. **Classify Return Timing:**
-                - **<6 Months** (≤180 days)
-                - **6–12 Months** (≤365 days)
-                - **12–24 Months** (≤730 days)
-                - **>24 Months** (>730 days)
+    ### 3. Scanning for a Return to Homeless Services  
+    1. **Search Window:** from the PH exit date up to the end of the reporting period  
+    2. **Eligible Return Enrollments:**  
+    - Any SO, ES, TH, or SH project  
+    - PH project re‑entries that meet both:  
+        - Start date **> 14 days** after the original PH exit  
+        - No overlap with **another PH transition window**  
+        - Transition window = Day 1 after PH start through `min(PH exit + 14 days, report end)`  
+    3. **First Qualifying Return:**  
+    - Project Start ≥ PH Exit Date  
+    - Project Start ≤ Report End Date  
+    - Stop at the very first enrollment that fulfills the above
 
-            ---
-            ### Interpretation Guide
-            - **Return Rates:** % of clients returning to homelessness post-exit.
-            - **Return Timing:** Days between exit and return with visual breakdowns.
-            - **Pathways:** Flow diagrams illustrating client trajectories.
+    ---
 
-        """)
+    ### 4. Classifying Return Timing  
+    | Category         | Days from Exit       |  
+    |------------------|----------------------|  
+    | **< 6 months**   | 0–180 days           |  
+    | **6–12 months**  | 181–365 days         |  
+    | **12–24 months** | 366–730 days         |  
+    | **> 24 months**  | 731+ days            |
+
+    ---
+
+    ### 5. Interpretation Guide  
+    - **Return Rate**  
+    - Percentage of clients who re‑enroll in any homeless service after exiting to PH  
+    - **Timing Distribution**  
+    - How long (in days) it takes for clients to return, broken down by the categories above  
+    - **Trajectory Flows**  
+    - Sankey or flow diagrams showing client pathways from exit through return (if any)
+        """, unsafe_allow_html=True)
+
 
     df = st.session_state.get("df")
     if df is None or df.empty:
