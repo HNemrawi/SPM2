@@ -73,7 +73,7 @@ def outbound_recidivism_page() -> None:
                clients who exited to Permanent Housing Situations.
 
             3. **Key Output Metrics**  
-               - **Total Exits**: count of all exits in the filtered dataset.  
+               - **Number of Relevant Exits**: count of all exits in the filtered dataset.  
                - **Total Exits to PH**: count of exits whose
                  `ExitDestinationCat` = “Permanent Housing Situations.”  
                - **Return** & **% Return**: number and share of exits with
@@ -87,11 +87,6 @@ def outbound_recidivism_page() -> None:
                Side‑by‑side metrics for those who exited to PH versus those who
                exited elsewhere. PH‑specific metrics (e.g. Return to Homelessness)
                are only shown for the PH subset.
-
-            5. **Additional Notes**  
-               - Data completeness matters: missing or incorrect exit dates or
-                 types will skew results.  
-               - The 14‑day gap rule follows HUD’s SPM guidance for homelessness recidivism.
             """,
             unsafe_allow_html=True,
         )
@@ -338,9 +333,10 @@ def outbound_recidivism_page() -> None:
             use_container_width=True,
         )
 
-    # --- Flow Analysis
+    # --- Flow Analysis (with drill-in) ---
     st.divider()
     st.markdown("### 🌊 Client Flow Analysis")
+
     exit_columns = [
         "Exit_HasIncome",
         "Exit_HasDisability",
@@ -369,60 +365,95 @@ def outbound_recidivism_page() -> None:
         "Return_ExitDestinationCat",
         "Return_ExitDestination",
     ]
-    exit_dims = [c for c in exit_columns if c in out_df.columns]
-    ret_dims = [c for c in return_columns if c in out_df.columns]
+    exit_dims = [c for c in exit_columns   if c in out_df.columns]
+    ret_dims  = [c for c in return_columns if c in out_df.columns]
 
     if exit_dims and ret_dims:
-        col_a, col_b = st.columns(2)
-        with col_a:
-            ex_dim = st.selectbox(
-                "Exit dimension",
+        # Dimension selectors
+        flow_cols = st.columns(2)
+        with flow_cols[0]:
+            ex_choice = st.selectbox(
+                "Exit Dimension: Rows",
                 exit_dims,
                 index=exit_dims.index("Exit_ProjectTypeCode") if "Exit_ProjectTypeCode" in exit_dims else 0,
             )
-        with col_b:
-            ret_dim = st.selectbox(
-                "Return dimension",
+        with flow_cols[1]:
+            ret_choice = st.selectbox(
+                "Return Dimension: Columns",
                 ret_dims,
                 index=ret_dims.index("Return_ProjectTypeCode") if "Return_ProjectTypeCode" in ret_dims else 0,
             )
 
-        # build pivot including "No Return"
-        flow_pivot = create_flow_pivot(out_df, ex_dim, ret_dim)
-        if "No Return" in flow_pivot.columns:
-            cols_order = [col for col in flow_pivot.columns if col != "No Return"] + ["No Return"]
-            flow_pivot = flow_pivot[cols_order]
-        columns_to_color = [col for col in flow_pivot.columns if col != "No Return"]
+        # Build the full pivot
+        pivot_c = create_flow_pivot(out_df, ex_choice, ret_choice)
+        if "No Return" in pivot_c.columns:
+            cols_order = [c for c in pivot_c.columns if c != "No Return"] + ["No Return"]
+            pivot_c = pivot_c[cols_order]
+
+        # Drill-in controls
+        colL, colR = st.columns(2)
+        focus_exit   = colL.selectbox(
+            "🔍 Focus Exit Dimension",
+            ["All"] + pivot_c.index.tolist(),
+            help="Show only this exit in the flow",
+        )
+        focus_return = colR.selectbox(
+            "🔍 Focus Return Dimension",
+            ["All"] + pivot_c.columns.tolist(),
+            help="Show only this return in the flow",
+        )
+
+        # Subset pivot_c in place
+        if focus_exit != "All":
+            pivot_c = pivot_c.loc[[focus_exit]]
+        if focus_return != "All":
+            pivot_c = pivot_c[[focus_return]]
+
         # 1) Flow Matrix Details
         with st.expander("🔍 Flow Matrix Details", expanded=True):
-            if flow_pivot.empty:
-                st.info("No return enrollments to build flow.")
+            if pivot_c.empty:
+                st.info("📭 No return enrollments to build flow.")
             else:
+                cols_to_color = [c for c in pivot_c.columns if c != "No Return"]
                 st.dataframe(
-                    flow_pivot.style
-                    .background_gradient(cmap="Blues",subset=columns_to_color, axis=1)
-                    .format(precision=0),
+                    pivot_c
+                        .style
+                        .background_gradient(cmap="Blues", subset=cols_to_color, axis=1)
+                        .format(precision=0),
                     use_container_width=True,
                 )
 
         # 2) Top Client Pathways
         st.markdown("#### 🔝 Top Client Pathways")
-        top_n = st.slider("Top N flows", 5, 25, 10)
-        top_flows = get_top_flows_from_pivot(flow_pivot, top_n=top_n)
-        if not top_flows.empty:
-            top_flows["Percent"] = top_flows["Percent"].astype(float)
-            st.dataframe(
-                top_flows
-                .style.format({"Percent": "{:.1f}%"}).background_gradient(cmap="Blues"),
-                use_container_width=True,
-            )
+        top_n = st.slider(
+            "Number of Flows",
+            min_value=5,
+            max_value=25,
+            value=10,
+            step=1,
+            help="Top N pathways to display",
+        )
+        top_flows_df = get_top_flows_from_pivot(pivot_c, top_n=top_n)
+        if not top_flows_df.empty:
+            if "Percent" in top_flows_df.columns:
+                top_flows_df["Percent"] = top_flows_df["Percent"].astype(float)
+                styled = top_flows_df.style.format({'Percent': '{:.1f}%'}).background_gradient(
+                    cmap="Blues", subset=["Count", "Percent"]
+                )
+                st.dataframe(styled, use_container_width=True)
+            else:
+                st.dataframe(top_flows_df.style.background_gradient(cmap="Blues"), use_container_width=True)
         else:
             st.info("No significant pathways detected")
 
         # 3) Client Flow Network
         st.markdown("#### 🌐 Client Flow Network")
-        sankey_fig = plot_flow_sankey(flow_pivot, f"{ex_dim} → {ret_dim}")
+        sankey_fig = plot_flow_sankey(pivot_c, f"{ex_choice} → {ret_choice}")
         st.plotly_chart(sankey_fig, use_container_width=True)
+
+    else:
+        st.info("📭 Insufficient data for flow analysis")
+
 
     # --- PH vs Non‑PH comparison
     st.divider()

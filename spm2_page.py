@@ -446,85 +446,118 @@ def spm2_page():
                     st.error(f"📈 Breakdown Error: {str(e)}")
 
         # Client Journey Analysis (Flow Visualization)
+        # Client Journey Analysis (Flow Visualization)
         st.divider()
         with st.container():
             st.markdown("### 🌊 Client Flow Analysis")
             try:
                 exit_columns = [
-                "Exit_HasIncome",
-                "Exit_HasDisability",
-                "Exit_HouseholdType",
-                "Exit_CHStartHousehold",
-                "Exit_LocalCoCCode",
-                "Exit_PriorLivingCat",
-                "Exit_ProgramSetupCoC",
-                "Exit_ProjectTypeCode",
-                "Exit_AgencyName",
-                "Exit_ProgramName",
-                "Exit_ExitDestinationCat",
-                "Exit_ExitDestination",
-                "Exit_CustomProgramType",
-                "Exit_AgeTieratEntry"
-            ]
+                    "Exit_HasIncome",
+                    "Exit_HasDisability",
+                    "Exit_HouseholdType",
+                    "Exit_CHStartHousehold",
+                    "Exit_LocalCoCCode",
+                    "Exit_PriorLivingCat",
+                    "Exit_ProgramSetupCoC",
+                    "Exit_ProjectTypeCode",
+                    "Exit_AgencyName",
+                    "Exit_ProgramName",
+                    "Exit_ExitDestinationCat",
+                    "Exit_ExitDestination",
+                    "Exit_CustomProgramType",
+                    "Exit_AgeTieratEntry"
+                ]
                 return_columns = [
-                "Return_HasIncome",
-                "Return_HasDisability",
-                "Return_HouseholdType",
-                "Return_CHStartHousehold",
-                "Return_LocalCoCCode",
-                "Return_PriorLivingCat",
-                "Return_ProgramSetupCoC",
-                "Return_ProjectTypeCode",
-                "Return_AgencyName",
-                "Return_ProgramName",
-                "Return_ExitDestinationCat",
-                "Return_ExitDestination",
-                "ReturnCategory",
-                "Return_AgeTieratEntry"
-            ]
+                    "Return_HasIncome",
+                    "Return_HasDisability",
+                    "Return_HouseholdType",
+                    "Return_CHStartHousehold",
+                    "Return_LocalCoCCode",
+                    "Return_PriorLivingCat",
+                    "Return_ProgramSetupCoC",
+                    "Return_ProjectTypeCode",
+                    "Return_AgencyName",
+                    "Return_ProgramName",
+                    "Return_ExitDestinationCat",
+                    "Return_ExitDestination",
+                    "ReturnCategory",
+                    "Return_AgeTieratEntry"
+                ]
                 exit_cols = [col for col in exit_columns if col in final_df_c.columns]
                 return_cols = [col for col in return_columns if col in final_df_c.columns]
                 if exit_cols and return_cols:
+                    # original dimension selectors
                     flow_cols = st.columns(2)
                     with flow_cols[0]:
                         ex_choice = st.selectbox(
-                            "Source Dimension (Exit)",
+                            "Exit Dimension: Rows",
                             exit_cols,
                             index=exit_cols.index("Exit_ProjectTypeCode") if "Exit_ProjectTypeCode" in exit_cols else 0,
                             help="Characteristic at exit point"
                         )
                     with flow_cols[1]:
                         ret_choice = st.selectbox(
-                            "Target Dimension (Return)",
+                            "Entry Dimension: Columns",
                             return_cols,
                             index=return_cols.index("Return_ProjectTypeCode") if "Return_ProjectTypeCode" in return_cols else 0,
                             help="Characteristic at return point"
                         )
+
+                    # build full pivot
                     pivot_c = create_flow_pivot(final_df_c, ex_choice, ret_choice)
+
+                    # Drill-in controls (focus on one exit or return node)
+                    colL, colR = st.columns(2)
+                    focus_exit = colL.selectbox(
+                        "🔍 Focus Exit Dimension",
+                        ["All"] + pivot_c.index.tolist(),
+                        help="Show only this exit in the flow"
+                    )
+                    focus_return = colR.selectbox(
+                        "🔍 Focus Return Dimension",
+                        ["All"] + pivot_c.columns.tolist(),
+                        help="Show only this return in the flow"
+                    )
+
+                    # Subset pivot_c in place
+                    if focus_exit != "All":
+                        pivot_c = pivot_c.loc[[focus_exit]]
+                    if focus_return != "All":
+                        pivot_c = pivot_c[[focus_return]]
+
+                    # Ensure “No Return” column is last
                     if "No Return" in pivot_c.columns:
-                        cols_order = [col for col in pivot_c.columns if col != "No Return"] + ["No Return"]
+                        cols_order = [c for c in pivot_c.columns if c != "No Return"] + ["No Return"]
                         pivot_c = pivot_c[cols_order]
+
                     columns_to_color = [col for col in pivot_c.columns if col != "No Return"]
                     with st.expander("🔍 Flow Matrix Details", expanded=True):
                         st.dataframe(
                             pivot_c.style.background_gradient(cmap="Blues", subset=columns_to_color, axis=1)
-                                    .format(precision=0),
+                                .format(precision=0),
                             use_container_width=True
                         )
+
                     st.markdown("#### 🔝 Top Client Pathways")
-                    top_n = st.slider("Number of Pathways", 5, 25, 5, 1, help="Top N pathways to display")
-                    top_n = int(top_n)
+                    top_n = st.slider(
+                        "Number of Pathways",
+                        min_value=5,
+                        max_value=25,
+                        value=5,
+                        step=1,
+                        help="Top N pathways to display"
+                    )
                     top_flows_df = get_top_flows_from_pivot(pivot_c, top_n=top_n)
                     if not top_flows_df.empty:
                         if "Percent" in top_flows_df.columns:
                             top_flows_df["Percent"] = top_flows_df["Percent"].astype(float)
-                            styled_top_flows = top_flows_df.style.format({'Percent': '{:.1f}%'})\
-                                .background_gradient(cmap="Blues", subset=["Count", "Percent"])
+                            styled_top_flows = top_flows_df.style.format({'Percent': '{:.1f}%'}).background_gradient(cmap="Blues", subset=["Count", "Percent"])
                             st.dataframe(styled_top_flows, use_container_width=True)
                         else:
                             st.dataframe(top_flows_df.style.background_gradient(cmap="Blues"), use_container_width=True)
                     else:
                         st.info("No significant pathways detected")
+
                     st.markdown("#### 🌐 Client Flow Network")
                     sankey_fig = plot_flow_sankey(pivot_c, f"{ex_choice} → {ret_choice}")
                     st.plotly_chart(sankey_fig, use_container_width=True)
@@ -532,6 +565,7 @@ def spm2_page():
                     st.info("📭 Insufficient data for flow analysis")
             except Exception as e:
                 st.error(f"🌊 Flow Analysis Error: {str(e)}")
+
 
         # PH vs. Non-PH Exit Comparison
         if compare_ph_others:

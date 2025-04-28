@@ -31,115 +31,114 @@ def run_return_analysis(
     report_start: pd.Timestamp,
     report_end: pd.Timestamp,
     days_lookback: int,
-    allowed_cocs,
-    allowed_localcocs,
-    allowed_programs,
-    allowed_agencies,
-    entry_project_types,
-    exit_project_types
+    allowed_cocs: list[str] | None,
+    allowed_localcocs: list[str] | None,
+    allowed_programs: list[str] | None,
+    allowed_agencies: list[str] | None,
+    entry_project_types: list[str] | None,
+    allowed_cocs_exit: list[str] | None,
+    allowed_localcocs_exit: list[str] | None,
+    allowed_programs_exit: list[str] | None,
+    allowed_agencies_exit: list[str] | None,
+    exit_project_types: list[str] | None
 ) -> pd.DataFrame:
     """
-    Perform inbound recidivism analysis with exit enrollment merge and lookback threshold.
-    
+    Perform inbound recidivism analysis with entry and exit filtering and a lookback threshold.
+
     Steps:
-      1. **New Entry Filtering (Keep All Columns):**
-         Filter the dataset based on selected CoC codes, local CoC codes, program names, agencies,
-         and entry project types. Then select new entries with ProjectStart within the reporting period.
-         For clients with multiple entries, only the earliest is kept.
-      
-      2. **Exit Event Lookup & Merge (Within Lookback Period):**
-         For each new entry, look up exit events (filtered by exit project types) from the complete
-         client history where ProjectExit occurs before the entry date and within the lookback period.
-         Then:
-           - If there is an exit with "ExitDestinationCat" equal to "Permanent Housing Situations",
-             choose the most recent one.
-           - Otherwise, choose the most recent exit event.
-         The full exit enrollment record (including ClientID and EnrollmentID) is returned with a new
-         column "ReturnCategory" that marks the entry as:
-             - "Returning From Housing (X Days Lookback)" or
-             - "Returning (X Days Lookback)"
-         If no exit record is found within the lookback period, the exit columns are set to None and the
-         category is "New".
-         
-         **Note:** After merging, all entry columns are prefixed with "Enter_" and exit columns retain the "Exit_" prefix.
-         Additionally, the days difference between entry and exit is computed.
-    
-    Returns:
-        pd.DataFrame: One row per client containing all entry enrollment info (prefixed with "Enter_")
-                      and corresponding exit enrollment info (prefixed with "Exit_"), along with computed metrics.
+    1. Filter entries by CoC, LocalCoC, Agency, Program, and Project-Type; keep first entry per client 
+       within report_start → report_end.
+    2. Filter exits by CoC, LocalCoC, Agency, Program, and Project-Type; drop missing exits.
+    3. For each entry, find the most recent exit within days_lookback days before the entry:
+       - Prefer exits where ExitDestinationCat == "Permanent Housing Situations".
+       - Label as "Returning From Housing (...)" or "Returning (...)".
+       - If none, label as "New" and set exit columns to None.
+    4. Prefix entry columns with "Enter_" and exit columns with "Exit_".
+    5. Compute days_since_last_exit.
+
+    Returns
+    -------
+    pd.DataFrame
+        One row per entry, with Enter_*/Exit_* fields, ReturnCategory, and days_since_last_exit.
     """
     try:
-        # --- New Entry Selection (Keep All Columns) ---
-        raw_df = df.copy()
-        if allowed_cocs is not None and len(allowed_cocs) > 0 and "ProgramSetupCoC" in raw_df.columns:
-            raw_df = raw_df[raw_df["ProgramSetupCoC"].isin(allowed_cocs)]
-        if allowed_localcocs is not None and len(allowed_localcocs) > 0 and "LocalCoCCode" in raw_df.columns:
-            raw_df = raw_df[raw_df["LocalCoCCode"].isin(allowed_localcocs)]
-        if allowed_programs is not None and len(allowed_programs) > 0 and "ProgramName" in raw_df.columns:
-            raw_df = raw_df[raw_df["ProgramName"].isin(allowed_programs)]
-        if allowed_agencies is not None and len(allowed_agencies) > 0 and "AgencyName" in raw_df.columns:
-            raw_df = raw_df[raw_df["AgencyName"].isin(allowed_agencies)]
-        if entry_project_types is not None and len(entry_project_types) > 0 and "ProjectTypeCode" in raw_df.columns:
-            raw_df = raw_df[raw_df["ProjectTypeCode"].isin(entry_project_types)]
-        
-        # Filter for entries with valid ProjectStart within the reporting period.
-        entry_df = raw_df.dropna(subset=["ProjectStart"])
-        entry_df = entry_df[(entry_df["ProjectStart"] >= report_start) & (entry_df["ProjectStart"] <= report_end)]
-        # For clients with multiple entries, keep the earliest entry.
-        entry_df = entry_df.sort_values(by="ProjectStart", ascending=True).drop_duplicates(subset="ClientID", keep="first")
-        entry_df = entry_df.copy()
-        
-        # --- Exit Event Filtering ---
-        exit_df = df.copy()
-        if exit_project_types is not None and len(exit_project_types) > 0 and "ProjectTypeCode" in exit_df.columns:
-            exit_df = exit_df[exit_df["ProjectTypeCode"].isin(exit_project_types)]
-        exit_df = exit_df.dropna(subset=["ProjectExit"])
-        
-        # Define the lookback threshold in days.
-        threshold_days = days_lookback
-        
-        # --- Define function to fetch the relevant exit record for each entry ---
-        def get_exit_record(row):
-            # Use the original entry row (without prefixing yet)
-            client_id = row["ClientID"]
-            entry_date = row["ProjectStart"]
-            # Filter exit records for this client that occurred before the entry date.
-            sub = exit_df[(exit_df["ClientID"] == client_id) & (exit_df["ProjectExit"] < entry_date)]
-            # Further restrict to exits within the lookback period.
-            sub = sub[sub["ProjectExit"].apply(lambda x: (entry_date - x).days <= threshold_days)]
-            if sub.empty:
-                # No valid exit within lookback: return a Series with exit columns as None.
-                exit_info = pd.Series({f"Exit_{col}": None for col in exit_df.columns})
-                exit_info["ReturnCategory"] = "New"
-                return exit_info
-            # Try to find a stable exit (Permanent Housing Situations) within lookback.
-            stable = sub[sub["ExitDestinationCat"] == "Permanent Housing Situations"]
-            if not stable.empty:
-                best_row = stable.loc[stable["ProjectExit"].idxmax()]
-                category = f"Returning From Housing ({days_lookback} Days Lookback)"
-            else:
-                best_row = sub.loc[sub["ProjectExit"].idxmax()]
-                category = f"Returning ({days_lookback} Days Lookback)"
-            exit_info = best_row.add_prefix("Exit_")
-            exit_info["ReturnCategory"] = category
-            return exit_info
-        
-        # Apply exit lookup for each entry record.
-        exit_records = entry_df.apply(get_exit_record, axis=1)
-        
-        # Rename all entry columns with "Enter_" prefix.
-        entry_df_renamed = entry_df.copy().add_prefix("Enter_")
-        
-        # Merge exit info with renamed entry data.
-        merged_df = pd.concat([entry_df_renamed.reset_index(drop=True), exit_records.reset_index(drop=True)], axis=1)
-        
-        # Compute days_since_last_exit as the difference between Enter_ProjectStart and Exit_ProjectExit.
-        merged_df["days_since_last_exit"] = merged_df.apply(
-            lambda row: (row["Enter_ProjectStart"] - row["Exit_ProjectExit"]).days 
-                        if pd.notnull(row["Exit_ProjectExit"]) else None, axis=1
+        # --- Entry-side Filtering & Selection ---
+        raw = df.copy()
+        if allowed_cocs and "ProgramSetupCoC" in raw.columns:
+            raw = raw[raw["ProgramSetupCoC"].isin(allowed_cocs)]
+        if allowed_localcocs and "LocalCoCCode" in raw.columns:
+            raw = raw[raw["LocalCoCCode"].isin(allowed_localcocs)]
+        if allowed_programs and "ProgramName" in raw.columns:
+            raw = raw[raw["ProgramName"].isin(allowed_programs)]
+        if allowed_agencies and "AgencyName" in raw.columns:
+            raw = raw[raw["AgencyName"].isin(allowed_agencies)]
+        if entry_project_types and "ProjectTypeCode" in raw.columns:
+            raw = raw[raw["ProjectTypeCode"].isin(entry_project_types)]
+
+        entries = raw.dropna(subset=["ProjectStart"])
+        entries = entries[
+            (entries["ProjectStart"] >= report_start) &
+            (entries["ProjectStart"] <= report_end)
+        ]
+        entries = (
+            entries
+            .sort_values("ProjectStart")
+            .drop_duplicates("ClientID", keep="first")
+            .copy()
         )
-        
-        return merged_df
+
+        # --- Exit-side Filtering ---
+        exits = df.copy()
+        if allowed_cocs_exit and "ProgramSetupCoC" in exits.columns:
+            exits = exits[exits["ProgramSetupCoC"].isin(allowed_cocs_exit)]
+        if allowed_localcocs_exit and "LocalCoCCode" in exits.columns:
+            exits = exits[exits["LocalCoCCode"].isin(allowed_localcocs_exit)]
+        if allowed_programs_exit and "ProgramName" in exits.columns:
+            exits = exits[exits["ProgramName"].isin(allowed_programs_exit)]
+        if allowed_agencies_exit and "AgencyName" in exits.columns:
+            exits = exits[exits["AgencyName"].isin(allowed_agencies_exit)]
+        if exit_project_types and "ProjectTypeCode" in exits.columns:
+            exits = exits[exits["ProjectTypeCode"].isin(exit_project_types)]
+        exits = exits.dropna(subset=["ProjectExit"])
+
+        threshold = days_lookback
+
+        def get_exit_record(row: pd.Series) -> pd.Series:
+            client = row["ClientID"]
+            start = row["ProjectStart"]
+            subset = exits[
+                (exits["ClientID"] == client) &
+                (exits["ProjectExit"] < start)
+            ]
+            subset = subset[subset["ProjectExit"].apply(lambda x: (start - x).days <= threshold)]
+            if subset.empty:
+                none_s = pd.Series({f"Exit_{c}": None for c in exits.columns})
+                none_s["ReturnCategory"] = "New"
+                return none_s
+
+            stable = subset[subset["ExitDestinationCat"] == "Permanent Housing Situations"]
+            if not stable.empty:
+                choice = stable.loc[stable["ProjectExit"].idxmax()]
+                cat = f"Returning From Housing ({days_lookback} Days Lookback)"
+            else:
+                choice = subset.loc[subset["ProjectExit"].idxmax()]
+                cat = f"Returning ({days_lookback} Days Lookback)"
+
+            info = choice.add_prefix("Exit_")
+            info["ReturnCategory"] = cat
+            return info
+
+        exit_info = entries.apply(get_exit_record, axis=1).reset_index(drop=True)
+        entry_info = entries.add_prefix("Enter_").reset_index(drop=True)
+
+        merged = pd.concat([entry_info, exit_info], axis=1)
+        merged["days_since_last_exit"] = merged.apply(
+            lambda r: (r["Enter_ProjectStart"] - r["Exit_ProjectExit"]).days
+            if pd.notna(r["Exit_ProjectExit"]) else None,
+            axis=1
+        )
+
+        return merged
 
     except Exception as e:
         st.error(f"Error during Return Analysis: {e}")
