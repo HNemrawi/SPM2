@@ -113,29 +113,28 @@ def setup_exit_filters(df: pd.DataFrame) -> Tuple[Optional[List[str]], ...]:
         
         exit_allowed_cocs = create_multiselect_filter(
             "CoC Codes - Exit",
-            sorted(set(["ALL"] + df["ProgramSetupCoC"].dropna().tolist())) if "ProgramSetupCoC" in df.columns else [],
+            sorted(df["ProgramSetupCoC"].dropna().unique().tolist()) if "ProgramSetupCoC" in df.columns else [],
             default=["ALL"],
             help_text="CoC codes for exit identification"
         )
-
         
         exit_allowed_local_cocs = create_multiselect_filter(
             "Local CoC - Exit",
-            ["ALL"] + sorted(df["LocalCoCCode"].dropna().unique().tolist()) if "LocalCoCCode" in df.columns else [],
+            sorted(df["LocalCoCCode"].dropna().unique().tolist()) if "LocalCoCCode" in df.columns else [],
             default=["ALL"],
             help_text="Local CoC codes for exits"
         )
         
         exit_allowed_agencies = create_multiselect_filter(
             "Agencies - Exit",
-            ["ALL"] + sorted(df["AgencyName"].dropna().unique().tolist()) if "AgencyName" in df.columns else [],
+            sorted(df["AgencyName"].dropna().unique().tolist()) if "AgencyName" in df.columns else [],
             default=["ALL"],
             help_text="Agencies for exit identification"
         )
         
         exit_allowed_programs = create_multiselect_filter(
             "Programs - Exit",
-            ["ALL"] + sorted(df["ProgramName"].dropna().unique().tolist()) if "ProgramName" in df.columns else [],
+            sorted(df["ProgramName"].dropna().unique().tolist()) if "ProgramName" in df.columns else [],
             default=["ALL"],
             help_text="Programs for exit identification"
         )
@@ -170,28 +169,28 @@ def setup_return_filters(df: pd.DataFrame) -> Tuple[Optional[List[str]], ...]:
         
         return_allowed_cocs = create_multiselect_filter(
             "CoC Codes - Return",
-            ["ALL"] + sorted(df["ProgramSetupCoC"].dropna().unique().tolist()) if "ProgramSetupCoC" in df.columns else [],
+            sorted(df["ProgramSetupCoC"].dropna().unique().tolist()) if "ProgramSetupCoC" in df.columns else [],
             default=["ALL"],
             help_text="CoC codes for return identification"
         )
         
         return_allowed_local_cocs = create_multiselect_filter(
             "Local CoC - Return",
-            ["ALL"] + sorted(df["LocalCoCCode"].dropna().unique().tolist()) if "LocalCoCCode" in df.columns else [],
+            sorted(df["LocalCoCCode"].dropna().unique().tolist()) if "LocalCoCCode" in df.columns else [],
             default=["ALL"],
             help_text="Local CoC codes for returns"
         )
         
         return_allowed_agencies = create_multiselect_filter(
             "Agencies - Return",
-            ["ALL"] + sorted(df["AgencyName"].dropna().unique().tolist()) if "AgencyName" in df.columns else [],
+            sorted(df["AgencyName"].dropna().unique().tolist()) if "AgencyName" in df.columns else [],
             default=["ALL"],
             help_text="Agencies for return identification"
         )
         
         return_allowed_programs = create_multiselect_filter(
             "Programs - Return",
-            ["ALL"] + sorted(df["ProgramName"].dropna().unique().tolist()) if "ProgramName" in df.columns else [],
+            sorted(df["ProgramName"].dropna().unique().tolist()) if "ProgramName" in df.columns else [],
             default=["ALL"],
             help_text="Programs for return identification"
         )
@@ -245,6 +244,32 @@ def run_analysis(df: pd.DataFrame, analysis_params: Dict[str, Any]) -> bool:
                     return_projects=analysis_params["return_projects"],
                     return_period=analysis_params["return_period"]
                 )
+                # Clean up columns
+                cols_to_remove = [
+                    "Return_UniqueIdentifier",
+                    "Return_ClientID",
+                    "Return_RaceEthnicity",
+                    "Return_Gender",
+                    "Return_DOB",
+                    "Return_VeteranStatus",
+                    "Exit_ReportingPeriodStartDate",
+                    "Exit_ReportingPeriodEndDate",
+                    "Return_ReportingPeriodStartDate",
+                    "Return_ReportingPeriodEndDate"
+                ]
+                final_df.drop(columns=[c for c in cols_to_remove if c in final_df.columns], inplace=True)
+
+                # Rename flattened exit columns to simpler names
+                cols_to_rename = {
+                    "Exit_UniqueIdentifier": "UniqueIdentifier",
+                    "Exit_ClientID": "ClientID",
+                    "Exit_RaceEthnicity": "RaceEthnicity",
+                    "Exit_Gender": "Gender",
+                    "Exit_DOB": "DOB",
+                    "Exit_VeteranStatus": "VeteranStatus"
+                }
+                final_df.rename(columns={k: v for k, v in cols_to_rename.items() if k in final_df.columns}, inplace=True)
+
                 
                 # Store results in session state
                 set_analysis_result("spm2", final_df)
