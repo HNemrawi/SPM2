@@ -1,47 +1,19 @@
 """
-Outbound Recidivism – Helper Functions & Metrics
-================================================
-Core logic for the Outbound Recidivism analysis page:
-
-    • Filtering exits and candidate returns
-    • Identifying “Return” vs. “Return to Homelessness”
-    • Summary‑metric calculators
-    • Break‑down, flow, and visualisation helpers
-
-Everything is **Streamlit‑cacheable** and PEP‑8‑compliant.
+Outbound Recidivism Analysis Logic
+----------------------------------
+Implements analysis of clients returning to homelessness after exit.
 """
 
-from __future__ import annotations
-
-from datetime import datetime
-from typing import Any, Dict, Iterable, List, Optional, Set, Tuple, Union
-
-import numpy as np
-import pandas as pd
-import plotly.graph_objects as go
 import streamlit as st
+import pandas as pd
+import numpy as np
+from datetime import datetime
+from typing import Dict, List, Optional, Tuple, Set, Union, Any
 
-# -----------------------------------------------------------------------------#
-# Constants                                                                     #
-# -----------------------------------------------------------------------------#
-PH_PROJECTS: Set[str] = {
-    "PH – Housing Only",
-    "PH – Housing with Services (no disability required for entry)",
-    "PH – Permanent Supportive Housing (disability required for entry)",
-    "PH – Rapid Re-Housing",
-}
+from config.constants import PH_PROJECTS, NON_HOMELESS_PROJECTS, PH_CATEGORY
 
-NON_HOMELESS_PROJECTS: Set[str] = {
-    "Coordinated Entry",
-    "Day Shelter",
-    "Homelessness Prevention",
-    "Other",
-    "Services Only",
-}
 
-# -----------------------------------------------------------------------------#
-# Internal Helpers                                                              #
-# -----------------------------------------------------------------------------#
+# Internal helper functions
 def _find_earliest_return_any(
     client_df: pd.DataFrame,
     exit_date: pd.Timestamp,
@@ -75,15 +47,36 @@ def _find_earliest_return_homeless(
     exit_enrollment_id: int,
 ) -> Optional[Tuple[pd.Series, bool, int]]:
     """
-    HUD‑compliant “Return to Homelessness” finder.
+    HUD-compliant "Return to Homelessness" finder.
+
+    Scans a client's history after a given exit for the earliest qualifying return:
+      - Excludes non-homeless projects.
+      - Builds exclusion windows for short (<15d) PH stays.
+      - **New**: skips PH records where ProjectStart == HouseholdMoveInDate.
+
+    Parameters
+    ----------
+    client_df : pd.DataFrame
+        Enrollment records with columns including:
+        ['ProjectTypeCode', 'ProjectStart', 'ProjectExit',
+         'EnrollmentID', 'HouseholdMoveInDate', ...].
+    exit_date : pd.Timestamp
+        The date of the exit event to compare against.
+    exit_enrollment_id : int
+        The EnrollmentID of the exit record (to skip).
+
+    Returns
+    -------
+    Optional[Tuple[pd.Series, bool, int]]
+        (row_series, True, gap_days) for the first valid return, else None.
     """
     try:
+        # Prepare next enrollments after exit_date
         df_next = (
-            client_df.copy()
-            .dropna(subset=["ProjectStart"])
-            .loc[lambda d: ~d["ProjectTypeCode"].isin(NON_HOMELESS_PROJECTS)]
-            .loc[lambda d: d["ProjectStart"] > exit_date]
-            .sort_values(["ProjectStart", "EnrollmentID"])
+            client_df.dropna(subset=["ProjectStart"])
+                     .loc[lambda d: ~d["ProjectTypeCode"].isin(NON_HOMELESS_PROJECTS)]
+                     .loc[lambda d: d["ProjectStart"] > exit_date]
+                     .sort_values(["ProjectStart", "EnrollmentID"])
         )
         if df_next.empty:
             return None
@@ -96,62 +89,65 @@ def _find_earliest_return_homeless(
         ) -> List[Tuple[pd.Timestamp, pd.Timestamp]]:
             new_start, new_end = new_win
             merged: List[Tuple[pd.Timestamp, pd.Timestamp]] = []
-            for win_start, win_end in windows:
-                if new_start <= win_end and new_end >= win_start:
-                    new_start = min(new_start, win_start)
-                    new_end = max(new_end, win_end)
+            for ws, we in windows:
+                if new_start <= we and new_end >= ws:
+                    new_start = min(new_start, ws)
+                    new_end = max(new_end, we)
                 else:
-                    merged.append((win_start, win_end))
+                    merged.append((ws, we))
             merged.append((new_start, new_end))
             merged.sort(key=lambda w: w[0])
             return merged
 
+        # Iterate chronologically
         for row in df_next.itertuples(index=False):
             if row.EnrollmentID == exit_enrollment_id:
                 continue
-            gap_days: int = (row.ProjectStart - exit_date).days
-            is_ph: bool = row.ProjectTypeCode in PH_PROJECTS
+
+            is_ph = row.ProjectTypeCode in PH_PROJECTS
+
+            # Skip PH entries that coincide with move-in date
+            if is_ph and hasattr(row, "HouseholdMoveInDate"):
+                hmi = row.HouseholdMoveInDate
+                if pd.notna(hmi) and row.ProjectStart == hmi:
+                    continue
+
+            gap_days = (row.ProjectStart - exit_date).days
 
             if is_ph:
+                # Exclude short stays (≤14d)
                 if gap_days <= 14:
-                    if pd.notna(row.ProjectExit):
+                    if pd.notnull(row.ProjectExit):
                         exclusion_windows = _merge_window(
-                            (
-                                row.ProjectStart + pd.Timedelta(days=1),
-                                row.ProjectExit + pd.Timedelta(days=14),
-                            ),
-                            exclusion_windows,
+                            (row.ProjectStart + pd.Timedelta(days=1),
+                             row.ProjectExit + pd.Timedelta(days=14)),
+                            exclusion_windows
                         )
                     continue
 
-                inside_window = any(
-                    start <= row.ProjectStart <= end for start, end in exclusion_windows
-                )
-                if inside_window:
-                    if pd.notna(row.ProjectExit):
+                # Exclude if within any prior exclusion window
+                if any(ws <= row.ProjectStart <= we for ws, we in exclusion_windows):
+                    if pd.notnull(row.ProjectExit):
                         exclusion_windows = _merge_window(
-                            (
-                                row.ProjectStart + pd.Timedelta(days=1),
-                                row.ProjectExit + pd.Timedelta(days=14),
-                            ),
-                            exclusion_windows,
+                            (row.ProjectStart + pd.Timedelta(days=1),
+                             row.ProjectExit + pd.Timedelta(days=14)),
+                            exclusion_windows
                         )
                     continue
 
+                # Qualifies as a PH return
                 return (pd.Series(row._asdict()), True, gap_days)
 
-            # Non‑PH
+            # Non-PH return qualifies immediately
             return (pd.Series(row._asdict()), True, gap_days)
 
         return None
+
     except Exception as exc:
         st.error(f"Error in _find_earliest_return_homeless: {exc}")
         return None
 
 
-# -----------------------------------------------------------------------------#
-# Main ETL                                                                    #
-# -----------------------------------------------------------------------------#
 @st.cache_data(show_spinner=False)
 def run_outbound_recidivism(
     df: pd.DataFrame,
@@ -173,6 +169,26 @@ def run_outbound_recidivism(
 ) -> pd.DataFrame:
     """
     End‑to‑end ETL for Outbound Recidivism.
+    
+    Parameters:
+        df (pd.DataFrame): Input DataFrame with client records
+        report_start (pd.Timestamp): Start date of the reporting period
+        report_end (pd.Timestamp): End date of the reporting period
+        exit_cocs (Optional[List[str]]): CoC filter for exits
+        exit_localcocs (Optional[List[str]]): Local CoC filter for exits
+        exit_agencies (Optional[List[str]]): Agency filter for exits
+        exit_programs (Optional[List[str]]): Program filter for exits
+        return_cocs (Optional[List[str]]): CoC filter for returns
+        return_localcocs (Optional[List[str]]): Local CoC filter for returns
+        return_agencies (Optional[List[str]]): Agency filter for returns
+        return_programs (Optional[List[str]]): Program filter for returns
+        allowed_continuum (Optional[List[str]]): Continuum filter
+        allowed_exit_dest_cats (Optional[List[str]]): Exit destination category filter
+        exiting_projects (Optional[List[str]]): Project types for exits
+        return_projects (Optional[List[str]]): Project types for returns
+        
+    Returns:
+        pd.DataFrame: Results with exit and return information
     """
     try:
         req_cols: Set[str] = {
@@ -193,7 +209,7 @@ def run_outbound_recidivism(
             st.error("No project types selected for Exits.")
             return pd.DataFrame()
 
-        def _opt_filter(frame: pd.DataFrame, col: str, allowed: Optional[Iterable[str]]) -> pd.DataFrame:
+        def _opt_filter(frame: pd.DataFrame, col: str, allowed: Optional[List[str]]) -> pd.DataFrame:
             return frame if not allowed or col not in frame.columns else frame[frame[col].isin(allowed)]
 
         # EXIT filter
@@ -295,11 +311,18 @@ def run_outbound_recidivism(
         st.error(f"Error in run_outbound_recidivism: {exc}")
         return pd.DataFrame()
 
-# -----------------------------------------------------------------------------#
-# Metric Calculators & Display Helpers                                        #
-# -----------------------------------------------------------------------------#
+
 @st.cache_data(show_spinner=False)
 def compute_summary_metrics(final_df: pd.DataFrame) -> Dict[str, Any]:
+    """
+    Compute key summary metrics for outbound recidivism.
+    
+    Parameters:
+        final_df (pd.DataFrame): Results DataFrame
+        
+    Returns:
+        Dict[str, Any]: Dictionary of metrics
+    """
     if final_df.empty:
         return {
             "Number of Relevant Exits": 0,
@@ -331,53 +354,19 @@ def compute_summary_metrics(final_df: pd.DataFrame) -> Dict[str, Any]:
         "Max Days": float(rtn_days.max() if not rtn_days.empty else 0),
     }
 
-def display_spm_metrics(metrics: Dict[str, Any]) -> None:
-    try:
-        from styling import style_metric_cards
-        style_metric_cards()
-    except Exception:
-        pass
-    col1, col2, col3 = st.columns(3)
-    col1.metric("Number of Relevant Exits", f"{metrics['Number of Relevant Exits']:,}")
-    col2.metric("Exits to PH", f"{metrics['Total Exits to PH']:,}")
-    col3.metric("Return", f"{metrics['Return']:,}")
-    col4, col5, col6 = st.columns(3)
-    col4.metric("% Return", f"{metrics['Return %']:.1f}%")
-    col5.metric("Return → Homeless (PH)", f"{metrics['Return to Homelessness']:,}")
-    col6.metric("% Return → Homeless (PH)", f"{metrics['% Return to Homelessness']:.1f}%")
-    col7, col8, col9 = st.columns(3)
-    col7.metric("Median Days", f"{metrics['Median Days']:.1f}")
-    col8.metric("Average Days", f"{metrics['Average Days']:.1f}")
-    col9.metric("Max Days", f"{metrics['Max Days']:.0f}")
 
-def display_spm_metrics_ph(metrics: Dict[str, Any]) -> None:
-    col1, col2, col3 = st.columns(3)
-    col1.metric("PH Exits", f"{metrics['Number of Relevant Exits']:,}")
-    col2.metric("Return", f"{metrics['Return']:,}")
-    col3.metric("% Return", f"{metrics['Return %']:.1f}%")
-    col4, col5, col6 = st.columns(3)
-    col4.metric("Return → Homeless", f"{metrics['Return to Homelessness']:,}")
-    col5.metric("% Return → Homeless", f"{metrics['% Return to Homelessness']:.1f}%")
-    col6.metric("Max Days", f"{metrics['Max Days']:.0f}")
-    col7, col8, _ = st.columns(3)
-    col7.metric("Median Days", f"{metrics['Median Days']:.1f}")
-    col8.metric("Average Days", f"{metrics['Average Days']:.1f}")
-
-def display_spm_metrics_non_ph(metrics: Dict[str, Any]) -> None:
-    col1, col2, col3 = st.columns(3)
-    col1.metric("Non‑PH Exits", f"{metrics['Number of Relevant Exits']:,}")
-    col2.metric("Return", f"{metrics['Return']:,}")
-    col3.metric("% Return", f"{metrics['Return %']:.1f}%")
-    col4, col5, col6 = st.columns(3)
-    col4.metric("Median Days", f"{metrics['Median Days']:.1f}")
-    col5.metric("Average Days", f"{metrics['Average Days']:.1f}")
-    col6.metric("Max Days", f"{metrics['Max Days']:.0f}")
-
-# -----------------------------------------------------------------------------#
-# Breakdown & Top‑flows                                                       #
-# -----------------------------------------------------------------------------#
 @st.cache_data(show_spinner=False)
 def breakdown_by_columns(final_df: pd.DataFrame, columns: List[str]) -> pd.DataFrame:
+    """
+    Group outbound recidivism data by selected columns and compute metrics.
+    
+    Parameters:
+        final_df (pd.DataFrame): Results DataFrame
+        columns (List[str]): Columns to group by
+        
+    Returns:
+        pd.DataFrame: Aggregated results
+    """
     if final_df.empty or not columns:
         return pd.DataFrame()
     records: List[Dict[str, Any]] = []
@@ -396,143 +385,3 @@ def breakdown_by_columns(final_df: pd.DataFrame, columns: List[str]) -> pd.DataF
         })
         records.append(row)
     return pd.DataFrame(records).sort_values("Number of Relevant Exits", ascending=False)
-
-def get_top_flows_from_pivot(pivot_df: pd.DataFrame, top_n: int = 10) -> pd.DataFrame:
-    """
-    Flatten pivot to top‑*n* flows by count, **excluding** any flows
-    where either the source or target is "No Return".
-    """
-    total = pivot_df.values.sum()
-    flows = [
-        {
-            "Source": src,
-            "Target": tgt,
-            "Count": int(val),
-            "Percent": (val / total * 100) if total else 0,
-        }
-        for src, row in pivot_df.iterrows()
-        for tgt, val in row.items()
-        if val > 0 and src != "No Return" and tgt != "No Return"
-    ]
-    return (
-        pd.DataFrame(flows)
-          .sort_values("Count", ascending=False)
-          .head(top_n)
-    )
-
-
-@st.cache_data(show_spinner=False)
-def create_flow_pivot(
-    final_df: pd.DataFrame,
-    exit_col: str,
-    return_col: str,
-) -> pd.DataFrame:
-    """
-    Build a crosstab pivot table for flow analysis using the exact column names provided,
-    **including** “No Return” as a category.
-    """
-    df_copy = final_df.copy()
-    df_copy[return_col] = df_copy[return_col].fillna("No Return").astype(str)
-    if exit_col not in df_copy.columns:
-        return pd.DataFrame()
-    return pd.crosstab(
-        df_copy[exit_col],
-        df_copy[return_col],
-        margins=False
-    )
-
-def plot_flow_sankey(
-    pivot_df: pd.DataFrame,
-    title: str = "Exit → Return Sankey Diagram"
-) -> go.Figure:
-    """
-    Build a Sankey diagram to visualize the flow from exit to return categories.
-    """
-    # If no flows are present
-    if pivot_df.empty:
-        fig = go.Figure()
-        fig.update_layout(
-            title_text="No flows available",
-            template="plotly_dark"
-        )
-        return fig
-
-    df = pivot_df.copy()
-    exit_cats = df.index.tolist()
-    return_cats = df.columns.tolist()
-    nodes = exit_cats + return_cats
-    n_exit = len(exit_cats)
-    node_types = ["Exit"] * n_exit + ["Return"] * len(return_cats)
-
-    sources, targets, values = [], [], []
-    for i, ecat in enumerate(exit_cats):
-        for j, rcat in enumerate(return_cats):
-            count = df.loc[ecat, rcat]
-            if count > 0:
-                sources.append(i)
-                targets.append(n_exit + j)
-                values.append(int(count))
-
-    sankey = go.Sankey(
-        node=dict(
-            pad=15,
-            thickness=20,
-            line=dict(color="#FFFFFF", width=0.5),
-            label=nodes,
-            color="#1f77b4",
-            customdata=node_types,
-            hovertemplate="%{label}<br>%{customdata}: %{value}<extra></extra>"
-        ),
-        link=dict(
-            source=sources,
-            target=targets,
-            value=values,
-            color="rgba(255,127,14,0.6)",
-            hovertemplate="From: %{source.label}<br>To: %{target.label}<br>= %{value}<extra></extra>"
-        )
-    )
-    fig = go.Figure(data=[sankey])
-    fig.update_layout(
-        title_text=title,
-        font=dict(family="Open Sans", color="#FFFFFF"),
-        hovermode="x",
-        template="plotly_dark"
-    )
-    return fig
-
-def plot_days_to_return_box(final_df: pd.DataFrame) -> go.Figure:
-    """
-    Horizontal box‑plot of *DaysToReturnEnrollment*.
-    """
-    data = final_df["DaysToReturnEnrollment"].dropna()
-    if data.empty:
-        return go.Figure(
-            layout={
-                "title": {"text": "No Return Enrollments Found"},
-                "template": "plotly_dark",
-            }
-        )
-
-    median_val = float(data.median())
-    avg_val = float(data.mean())
-
-    fig = go.Figure()
-    fig.add_trace(
-        go.Box(
-            x=data.astype(float),
-            orientation="h",
-            name="Days to Return",
-            boxmean="sd",
-        )
-    )
-    fig.update_layout(
-        title="Distribution of Days to Return Enrollment",
-        template="plotly_dark",
-        xaxis_title="Days",
-        shapes=[
-            dict(type="line", x0=median_val, x1=median_val, yref="paper", y0=0, y1=1, line=dict(dash="dot", width=2)),
-            dict(type="line", x0=avg_val, x1=avg_val, yref="paper", y0=0, y1=1, line=dict(dash="dash", width=2)),
-        ],
-        showlegend=False,
-    )
-    return fig

@@ -7,6 +7,7 @@ Handles the user file upload, reading CSV/Excel, renaming columns, and parsing d
 import streamlit as st
 import pandas as pd
 from io import BytesIO
+from typing import Dict, List, Optional, Union
 
 @st.cache_data(show_spinner=False)
 def load_and_preprocess_data(uploaded_file: BytesIO) -> pd.DataFrame:
@@ -33,33 +34,41 @@ def load_and_preprocess_data(uploaded_file: BytesIO) -> pd.DataFrame:
         # Clean and rename columns for consistency.
         df.columns = df.columns.str.strip()
         rename_map = {
+            # Client-level fields
             "Clients Unique Identifier": "UniqueIdentifier",
             "Clients Client ID": "ClientID",
-            "Clients Race and Ethnicity": "RaceEthnicity",
-            "Clients Gender": "Gender",
             "Clients Date of Birth Date": "DOB",
+            "Clients Gender": "Gender",
+            "Clients Race and Ethnicity": "RaceEthnicity",
             "Clients Veteran Status": "VeteranStatus",
-            "Enrollments Enrollment ID": "EnrollmentID",
+            # Entry screen fields
+            "Entry Screen Age Tier": "AgeTieratEntry",
             "Entry Screen Income from any Source": "HasIncome",
             "Entry Screen Any Disability": "HasDisability",
-            "Enrollments Household Type": "HouseholdType",
-            "Entry Screen Chronically Homeless Project Start - Household": "CHStartHousehold",
-            "Program Custom Local CoC Code": "LocalCoCCode",
+            "Entry Screen Head of Household (Yes / No)": "IsHeadOfHousehold",
+            "Entry Screen Currently Fleeing Domestic Violence": "CurrentlyFleeingDV",
             "Entry Screen Prior Living Situation Category": "PriorLivingCat",
+            "Entry Screen Chronically Homeless Project Start - Household": "CHStartHousehold",
+            # Enrollment fields
+            "Enrollments Enrollment ID": "EnrollmentID",
+            "Enrollments Household Type": "HouseholdType",
+            "Enrollments Household Move-In Date": "HouseholdMoveInDate",
             "Enrollments Project Start Date": "ProjectStart",
             "Enrollments Project Exit Date": "ProjectExit",
-            "Programs Program Setup CoC": "ProgramSetupCoC",
-            "Programs Project Type Code": "ProjectTypeCode",
-            "Programs Name": "ProgramName",
+            "Enrollments Reporting Period Start Date": "ReportingPeriodStartDate",
+            "Enrollments Reporting Period End Date": "ReportingPeriodEndDate",
+            # Program-level fields
             "Programs Agency Name": "AgencyName",
+            "Programs Name": "ProgramName",
+            "Program Custom Local CoC Code": "LocalCoCCode",
+            "Programs Program Setup CoC": "ProgramSetupCoC",
+            "Programs Continuum Project": "ProgramsContinuumProject",
+            "Programs Project Type Code": "ProjectTypeCode",
+            # Exit screen fields
             "Update/Exit Screen Destination Category": "ExitDestinationCat",
             "Update/Exit Screen Destination": "ExitDestination",
-            "Enrollments Household Move-In Date": "HouseholdMoveInDate",
-            "Programs Continuum Project" : "ProgramsContinuumProject",
-            "Enrollments Reporting Period Start Date" : "ReportingPeriodStartDate",
-            "Enrollments Reporting Period End Date" : "ReportingPeriodEndDate",
-            "Entry Screen Age Tier" : "AgeTieratEntry"
         }
+
         df = df.rename(columns=rename_map)
 
         # Parse date columns (with error handling)

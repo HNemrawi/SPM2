@@ -1,7 +1,19 @@
+# Core app framework
 streamlit
+
+# Data handling
 pandas
 numpy
-plotly
 openpyxl
+
+# Visualization
+plotly
 matplotlib
+
+# Machine learning & preprocessing
 scikit-learn
+scipy
+joblib
+
+# Typing and development (optional but useful)
+typing-extensions

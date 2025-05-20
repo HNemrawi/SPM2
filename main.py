@@ -1,45 +1,42 @@
 """
 Homelessness Analysis Suite
-===========================
-This Streamlit application analyzes HMIS data with two main modules:
-  1. SPM2 Analysis – for exit and return analysis with flexible filtering.
-  2. Inbound Recidivism Analysis – for classifying new versus returning clients.
-
-The code is modularized into sections:
-    • Setup & Configuration
-    • Custom CSS & Styling
-    • Data Loading & Preprocessing
-    • Helper Functions (SPM2 Logic, Metrics, Visualizations)
-    • SPM2 Analysis Page
-    • Inbound Recidivism Analysis Page
-    • Main Application
-
-Please upload your HMIS CSV/Excel file in the sidebar. Use the reset button if you wish to clear the session.
+--------------------------
+Main application entry point that configures the app and renders the appropriate pages.
 """
 
 import streamlit as st
-from config import setup_page
-from styling import apply_custom_css
-from data_preprocessing import load_and_preprocess_data
-from spm2_page import spm2_page
-from inbound_page import inbound_recidivism_page
-from outbound_recidivism_page import outbound_recidivism_page
-from logo import HTML_HEADER_LOGO, HTML_FOOTER
+from datetime import datetime
+
+# Application setup
+from config.settings import PAGE_TITLE, PAGE_ICON, DEFAULT_LAYOUT, SIDEBAR_STATE
+from config.themes import setup_plotly_theme, setup_pandas_options
+
+# UI components
+from ui.styling import apply_custom_css
+from ui.templates import render_header, render_footer
+
+# Core functionality
+from core.data_loader import load_and_preprocess_data
+from core.session import reset_session, check_data_available
+
+# Analysis pages
+from analysis.spm2.page import spm2_page
+from analysis.inbound.page import inbound_recidivism_page  
+from analysis.outbound.page import outbound_recidivism_page
+from analysis.general.general_analysis_page import general_analysis_page
 
 
-def reset_session():
-    """
-    Reset the Streamlit session state and clear resource and data caches.
-    """
-    # Delete all items in the session state
-    for key in list(st.session_state.keys()):
-        del st.session_state[key]
+def setup_page():
+    """Configure the Streamlit page and set up themes."""
+    st.set_page_config(
+        page_title=PAGE_TITLE,
+        page_icon=PAGE_ICON,
+        layout=DEFAULT_LAYOUT,
+        initial_sidebar_state=SIDEBAR_STATE
+    )
+    setup_plotly_theme()
+    setup_pandas_options()
     
-    # Clear the resource cache
-    st.cache_resource.clear()
-    
-    # Clear the data cache
-    st.cache_data.clear()
 
 def main():
     """
@@ -50,20 +47,11 @@ def main():
     setup_page()
     apply_custom_css()
     st.title("Return to Homelessness Analysis")
-    col1, col2 = st.columns([2, 1])
-    with col1:
-        st.markdown("""
-        - Upload your data file to get started.
-        - Use the **Reset Session** button if you need to start over.
-        - Navigate between the available analyses:
-            1. **SPM 2 Analysis**
-            2. **Inbound Recidivism Analysis**
-            2. **Outbound Recidivism Analysis**
-        """)
-    with col2:
-        st.markdown(HTML_HEADER_LOGO, unsafe_allow_html=True)
+    
+    # Render header with logo
+    render_header()
 
-    # Sidebar: Data Upload & Reset Section.
+    # Sidebar: Data Upload & Reset Section
     st.sidebar.header("📂 Data Upload")
     if st.sidebar.button("Reset Session"):
         reset_session()
@@ -85,22 +73,29 @@ def main():
         else:
             st.sidebar.info("Please upload a data file to proceed.")
 
-    # Sidebar: Navigation Section.
+    # Sidebar: Navigation Section
     st.sidebar.header("⚙️ Navigation")
-    pages = ["SPM2", "Inbound Recidivism","Outbound Recidivism"]
+    pages = ["SPM2", "Inbound Recidivism", "Outbound Recidivism", "General Analysis"]
     choice = st.sidebar.radio("Select a Page", pages)
+    
+    # Check data availability before rendering pages
     if "df" not in st.session_state or st.session_state["df"].empty:
         st.warning("Please upload a valid dataset to proceed.")
         return
 
+    # Render the selected page
     if choice == "SPM2":
         spm2_page()
     elif choice == "Inbound Recidivism":
         inbound_recidivism_page()
     elif choice == "Outbound Recidivism":
         outbound_recidivism_page()
+    elif choice == "General Analysis":
+        general_analysis_page()
 
-    st.markdown(HTML_FOOTER, unsafe_allow_html=True)
+    # Render footer
+    render_footer()
+
 
 if __name__ == "__main__":
     main()

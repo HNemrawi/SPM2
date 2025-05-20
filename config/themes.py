@@ -1,25 +1,14 @@
 """
-Setup & Configuration
----------------------
-Handles initial page config, Plotly theme setup, and any global configurations.
+Plotly and Streamlit theme configuration
 """
 
-import streamlit as st
-import pandas as pd
 import plotly.graph_objects as go
 import plotly.io as pio
 
-def setup_page():
+def setup_plotly_theme():
     """
-    Configure the Streamlit page and set up a custom dark Plotly theme.
+    Configure a custom dark theme for Plotly charts.
     """
-    st.set_page_config(
-        page_title="Homelessness Analysis Suite",
-        page_icon="📈",
-        layout="wide",
-        initial_sidebar_state="expanded"
-    )
-    # Define and set a custom dark theme for Plotly charts.
     custom_theme = go.layout.Template(
         layout=go.Layout(
             font=dict(family="Open Sans", size=12, color="#FFFFFF"),
@@ -33,4 +22,10 @@ def setup_page():
     )
     pio.templates["custom_dark"] = custom_theme
     pio.templates.default = "custom_dark"
+
+def setup_pandas_options():
+    """
+    Configure pandas display options.
+    """
+    import pandas as pd
     pd.set_option("styler.render.max_elements", 1_000_000)

@@ -1,3 +1,7 @@
+"""
+CSS styling and theme components
+"""
+
 import streamlit as st
 
 CUSTOM_CSS = """

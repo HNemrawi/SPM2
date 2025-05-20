@@ -88,3 +88,7 @@ ipython_config.py
 # Additional project files
 *.db
 *.sqlite3
+
+# New features
+pathway.py
+clustering.py
