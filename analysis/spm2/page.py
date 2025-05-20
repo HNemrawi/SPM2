@@ -113,10 +113,11 @@ def setup_exit_filters(df: pd.DataFrame) -> Tuple[Optional[List[str]], ...]:
         
         exit_allowed_cocs = create_multiselect_filter(
             "CoC Codes - Exit",
-            ["ALL"] + sorted(df["ProgramSetupCoC"].dropna().unique().tolist()) if "ProgramSetupCoC" in df.columns else [],
+            sorted(set(["ALL"] + df["ProgramSetupCoC"].dropna().tolist())) if "ProgramSetupCoC" in df.columns else [],
             default=["ALL"],
             help_text="CoC codes for exit identification"
         )
+
         
         exit_allowed_local_cocs = create_multiselect_filter(
             "Local CoC - Exit",
