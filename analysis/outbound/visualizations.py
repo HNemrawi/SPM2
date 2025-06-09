@@ -30,12 +30,15 @@ def display_spm_metrics(metrics: Dict[str, Any]) -> None:
     col3.metric("Return", f"{metrics['Return']:,}")
     col4, col5, col6 = st.columns(3)
     col4.metric("% Return", f"{metrics['Return %']:.1f}%")
-    col5.metric("Return → Homeless (PH)", f"{metrics['Return to Homelessness']:,}")
-    col6.metric("% Return → Homeless (PH)", f"{metrics['% Return to Homelessness']:.1f}%")
+    col5.metric("Return → Homeless (from PH)", f"{metrics['Return to Homelessness']:,}")
+    col6.metric("% Return → Homeless (from PH)", f"{metrics['% Return to Homelessness']:.1f}%")
     col7, col8, col9 = st.columns(3)
-    col7.metric("Median Days", f"{metrics['Median Days']:.1f}")
-    col8.metric("Average Days", f"{metrics['Average Days']:.1f}")
-    col9.metric("Max Days", f"{metrics['Max Days']:.0f}")
+    col7.metric("Median Days", f"{metrics['Median Days']:.1f}", help="Median days to ANY return enrollment (not just homeless returns)")
+    col8.metric("Average Days", f"{metrics['Average Days']:.1f}", help="Average days to ANY return enrollment (not just homeless returns)")
+    col9.metric("Max Days", f"{metrics['Max Days']:.0f}", help="Maximum days to ANY return enrollment (not just homeless returns)")
+        
+    # Add clarifying note
+    st.caption("📌 **Note:** Timing metrics (Median/Average/Max Days) include ALL returns, not just returns to homelessness. Return to Homelessness metrics are calculated only for PH exits.")
 
 
 def display_spm_metrics_ph(metrics: Dict[str, Any]) -> None:
@@ -49,13 +52,15 @@ def display_spm_metrics_ph(metrics: Dict[str, Any]) -> None:
     col1.metric("PH Exits", f"{metrics['Number of Relevant Exits']:,}")
     col2.metric("Return", f"{metrics['Return']:,}")
     col3.metric("% Return", f"{metrics['Return %']:.1f}%")
+    
     col4, col5, col6 = st.columns(3)
-    col4.metric("Return → Homeless", f"{metrics['Return to Homelessness']:,}")
-    col5.metric("% Return → Homeless", f"{metrics['% Return to Homelessness']:.1f}%")
+    col4.metric("Median Days", f"{metrics['Median Days']:.1f}")
+    col5.metric("Average Days", f"{metrics['Average Days']:.1f}")
     col6.metric("Max Days", f"{metrics['Max Days']:.0f}")
+    
     col7, col8, _ = st.columns(3)
-    col7.metric("Median Days", f"{metrics['Median Days']:.1f}")
-    col8.metric("Average Days", f"{metrics['Average Days']:.1f}")
+    col7.metric("Return → Homeless (from PH)", f"{metrics['Return to Homelessness']:,}")
+    col8.metric("% Return → Homeless (from PH)", f"{metrics['% Return to Homelessness']:.1f}%")
 
 
 def display_spm_metrics_non_ph(metrics: Dict[str, Any]) -> None:
@@ -69,6 +74,7 @@ def display_spm_metrics_non_ph(metrics: Dict[str, Any]) -> None:
     col1.metric("Non‑PH Exits", f"{metrics['Number of Relevant Exits']:,}")
     col2.metric("Return", f"{metrics['Return']:,}")
     col3.metric("% Return", f"{metrics['Return %']:.1f}%")
+    
     col4, col5, col6 = st.columns(3)
     col4.metric("Median Days", f"{metrics['Median Days']:.1f}")
     col5.metric("Average Days", f"{metrics['Average Days']:.1f}")

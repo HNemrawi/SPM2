@@ -39,6 +39,8 @@ def setup_date_config(df: pd.DataFrame) -> Tuple[pd.Timestamp, pd.Timestamp, int
                 [datetime(2025, 1, 1), datetime(2025, 1, 31)],
                 help="Analysis period for new entries"
             )
+            st.caption("📌 **Note:** The selected end date will be included in the analysis period.")
+
             if len(date_range) != 2:
                 st.error("⚠️ Please select both dates")
                 return None, None, None
@@ -159,7 +161,17 @@ def setup_exit_filters(df: pd.DataFrame) -> Tuple[Optional[List[str]], ...]:
                 help_text="Filter by project types for exits"
             )
 
-        return allowed_cocs_exit, allowed_localcocs_exit, allowed_agencies_exit, allowed_programs_exit, exit_project_types
+        # Exit Destination Category filter
+        allowed_exit_dest_cats = None
+        if "ExitDestinationCat" in df.columns:
+            allowed_exit_dest_cats = create_multiselect_filter(
+                "Exit Destination Categories",
+                sorted(df["ExitDestinationCat"].dropna().unique().tolist()),
+                default=["ALL"],
+                help_text="Filter exits by destination category (e.g., Permanent Housing Situations)"
+            )
+
+        return allowed_cocs_exit, allowed_localcocs_exit, allowed_agencies_exit, allowed_programs_exit, exit_project_types, allowed_exit_dest_cats
 
 
 def run_analysis(df: pd.DataFrame, analysis_params: Dict[str, Any]) -> bool:
@@ -180,7 +192,8 @@ def run_analysis(df: pd.DataFrame, analysis_params: Dict[str, Any]) -> bool:
                 allowed_localcocs_exit=analysis_params["allowed_localcocs_exit"],
                 allowed_programs_exit=analysis_params["allowed_programs_exit"],
                 allowed_agencies_exit=analysis_params["allowed_agencies_exit"],
-                exit_project_types=analysis_params["exit_project_types"]
+                exit_project_types=analysis_params["exit_project_types"],
+                allowed_exit_dest_cats=analysis_params["allowed_exit_dest_cats"]  # ADD THIS
             )
 
             cols_to_remove = [
@@ -239,6 +252,19 @@ def display_breakdowns(final_df: pd.DataFrame) -> None:
     """Display cohort breakdown analysis."""
     st.divider()
     st.markdown("### 📈 Breakdown")
+    
+    # Add the collapsible description
+    with st.expander("Understanding Breakdown Categories", expanded=False):
+        st.markdown("""
+        This table can be grouped by:
+        
+        - **Client-level values** (race, gender, etc.): these are demographic factors that are stable for clients across their enrollments.
+        
+        - **Entry-based values**: clients are categorized based on information relating to their Inbound Entry.
+        
+        - **Exit-based values**: clients are categorized based on information relating to most recent exit prior to their Entry during the reporting period. Because we are grouping by values related to their previous exit, clients who did NOT have a previous exit (new clients) will be excluded from the table.
+        """)
+    
     breakdown_columns = [
         "RaceEthnicity",
         "Gender",
@@ -275,13 +301,17 @@ def display_breakdowns(final_df: pd.DataFrame) -> None:
     ]
 
     possible_cols = [col for col in breakdown_columns if col in final_df.columns]
-    default_breakdown = ["Exit_ProjectTypeCode"] if "Exit_ProjectTypeCode" in possible_cols else []
+    
+    # Change default to Enter_ProjectTypeCode if it exists
+    default_breakdown = ["Enter_ProjectTypeCode"] if "Enter_ProjectTypeCode" in possible_cols else []
+    
     chosen = st.multiselect(
         "Group By",
         possible_cols,
         default=default_breakdown,
         help="Select grouping columns"
     )
+    
     if chosen:
         try:
             breakdown = return_breakdown_analysis(final_df, chosen)
@@ -347,6 +377,7 @@ def display_client_flow(final_df: pd.DataFrame) -> None:
 
         if exit_cols_for_flow and entry_cols_for_flow:
             # Pick your two dimensions
+            st.caption("📌 **Note:** Both the Exit and Entry Dimension filters apply to the entire flow section, including Client Flow Analysis, Top Client Pathways, and Client Flow Network.")
             flow_cols = st.columns(2)
             with flow_cols[0]:
                 exit_flow_col = st.selectbox(
@@ -452,7 +483,7 @@ def inbound_recidivism_page() -> None:
     
     # Setup filters
     allowed_cocs, allowed_localcocs, allowed_agencies, allowed_programs, entry_project_types = setup_entry_filters(df)
-    allowed_cocs_exit, allowed_localcocs_exit, allowed_agencies_exit, allowed_programs_exit, exit_project_types = setup_exit_filters(df)
+    allowed_cocs_exit, allowed_localcocs_exit, allowed_agencies_exit, allowed_programs_exit, exit_project_types, allowed_exit_dest_cats = setup_exit_filters(df)
     
     # Prepare analysis parameters
     analysis_params = {
@@ -468,7 +499,8 @@ def inbound_recidivism_page() -> None:
         "allowed_localcocs_exit": allowed_localcocs_exit,
         "allowed_programs_exit": allowed_programs_exit,
         "allowed_agencies_exit": allowed_agencies_exit,
-        "exit_project_types": exit_project_types
+        "exit_project_types": exit_project_types,
+        "allowed_exit_dest_cats": allowed_exit_dest_cats 
     }
     
     # Run analysis when button is clicked

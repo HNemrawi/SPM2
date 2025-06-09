@@ -38,6 +38,7 @@ def setup_date_config(df: pd.DataFrame) -> Tuple[pd.Timestamp, pd.Timestamp, int
             [datetime(2023, 10, 1), datetime(2024, 9, 30)],
             help="Primary analysis window for SPM2 metrics"
         )
+        st.caption("📌 **Note:** Primary analysis window for SPM2 metrics. The selected end date will be included in the analysis period.")
         report_start, report_end = pd.to_datetime(date_range[0]), pd.to_datetime(date_range[1])
         
         unit_choice = st.radio(
@@ -139,24 +140,22 @@ def setup_exit_filters(df: pd.DataFrame) -> Tuple[Optional[List[str]], ...]:
             help_text="Programs for exit identification"
         )
         
-        exiting_projects = None
-        if "ProjectTypeCode" in df.columns:
-            all_project_types = sorted(df["ProjectTypeCode"].dropna().unique().tolist())
-            default_projects = [p for p in DEFAULT_PROJECT_TYPES if p in all_project_types]
-            exiting_projects = create_multiselect_filter(
-                "Exit Project Types",
-                all_project_types,
-                default=default_projects,
-                help_text="Project types considered valid exits"
-            )
+        all_project_types = sorted(df["ProjectTypeCode"].dropna().unique().tolist())
+        default_projects = [p for p in DEFAULT_PROJECT_TYPES if p in all_project_types]
+        exiting_projects = st.multiselect(
+            "Project Types (Exit)",
+            all_project_types,
+            default=default_projects,
+            help="Project types treated as exits",
+        )
         
         allowed_exit_dest_cats = None
         if "ExitDestinationCat" in df.columns:
-            allowed_exit_dest_cats = create_multiselect_filter(
-                "Exit Destinations",
-                ["ALL"] + sorted(df["ExitDestinationCat"].dropna().unique().tolist()),
+            allowed_exit_dest_cats = st.multiselect(
+                "Exit Destination Categories",
+                sorted(df["ExitDestinationCat"].dropna().unique()),
                 default=["Permanent Housing Situations"],
-                help_text="Destination categories for exits"
+                help="Limit exits to these destination categories",
             )
     
     return exit_allowed_cocs, exit_allowed_local_cocs, exit_allowed_agencies, exit_allowed_programs, exiting_projects, allowed_exit_dest_cats
@@ -197,11 +196,11 @@ def setup_return_filters(df: pd.DataFrame) -> Tuple[Optional[List[str]], ...]:
         
         all_project_types = sorted(df["ProjectTypeCode"].dropna().unique().tolist())
         default_projects = [p for p in DEFAULT_PROJECT_TYPES if p in all_project_types]
-        return_projects = create_multiselect_filter(
-            "Return Project Types",
+        return_projects = st.multiselect(
+            "Project Types (Return)",
             all_project_types,
             default=default_projects,
-            help_text="Project types considered valid returns"
+            help="Project types treated as candidate returns",
         )
     
     return return_allowed_cocs, return_allowed_local_cocs, return_allowed_agencies, return_allowed_programs, return_projects
@@ -381,6 +380,7 @@ def display_client_flow(final_df: pd.DataFrame) -> None:
             
             if exit_cols and return_cols:
                 # Dimension selectors
+                st.caption("📌 **Note:** Both the Exit and Entry Dimension filters apply to the entire flow section, including Client Flow Analysis, Top Client Pathways, and Client Flow Network.")
                 flow_cols = st.columns(2)
                 with flow_cols[0]:
                     ex_choice = st.selectbox(
@@ -477,7 +477,14 @@ def display_ph_comparison(final_df: pd.DataFrame, return_period: int) -> None:
                 st.metric("Number of Relevant Exits", ph_metrics.get("Number of Relevant Exits", 0))
                 st.metric("<6 Month Returns", f"{ph_metrics.get('Return < 6 Months', 0)} ({ph_metrics.get('% Return < 6M', 0):.1f}%)")
                 st.metric("6–12 Month Returns", f"{ph_metrics.get('Return 6–12 Months', 0)} ({ph_metrics.get('% Return 6–12M', 0):.1f}%)")
-                st.metric("Median Return Days", ph_metrics.get('Median Days (<=period)', 0))
+                st.metric("12–24 Month Returns", f"{ph_metrics.get('Return 12–24 Months', 0)} ({ph_metrics.get('% Return 12–24M', 0):.1f}%)")
+                
+                # Only show >24 months if return period is greater than 730 days
+                if return_period > 730:
+                    st.metric(">24 Month Returns", f"{ph_metrics.get('Return > 24 Months', 0)} ({ph_metrics.get('% Return > 24M', 0):.1f}%)")
+                
+                st.metric("Total Returns", f"{ph_metrics.get('Total Return', 0)} ({ph_metrics.get('% Return', 0):.1f}%)")
+                st.metric("Median Return Days", f"{ph_metrics.get('Median Days (<=period)', 0):.0f}")
                 st.markdown(f"**Percentiles**: 25th: {ph_metrics.get('DaysToReturn 25th Pctl', 0):.0f} | 75th: {ph_metrics.get('DaysToReturn 75th Pctl', 0):.0f}")
             else:
                 st.info("No PH exits in current filters")
@@ -489,7 +496,14 @@ def display_ph_comparison(final_df: pd.DataFrame, return_period: int) -> None:
                 st.metric("Number of Relevant Exits", nonph_metrics.get("Number of Relevant Exits", 0))
                 st.metric("<6 Month Returns", f"{nonph_metrics.get('Return < 6 Months', 0)} ({nonph_metrics.get('% Return < 6M', 0):.1f}%)")
                 st.metric("6–12 Month Returns", f"{nonph_metrics.get('Return 6–12 Months', 0)} ({nonph_metrics.get('% Return 6–12M', 0):.1f}%)")
-                st.metric("Median Return Days", nonph_metrics.get('Median Days (<=period)', 0))
+                st.metric("12–24 Month Returns", f"{nonph_metrics.get('Return 12–24 Months', 0)} ({nonph_metrics.get('% Return 12–24M', 0):.1f}%)")
+                
+                # Only show >24 months if return period is greater than 730 days
+                if return_period > 730:
+                    st.metric(">24 Month Returns", f"{nonph_metrics.get('Return > 24 Months', 0)} ({nonph_metrics.get('% Return > 24M', 0):.1f}%)")
+                
+                st.metric("Total Returns", f"{nonph_metrics.get('Total Return', 0)} ({nonph_metrics.get('% Return', 0):.1f}%)")
+                st.metric("Median Return Days", f"{nonph_metrics.get('Median Days (<=period)', 0):.0f}")
                 st.markdown(f"**Percentiles**: 25th: {nonph_metrics.get('DaysToReturn 25th Pctl', 0):.0f} | 75th: {nonph_metrics.get('DaysToReturn 75th Pctl', 0):.0f}")
             else:
                 st.info("No Non-PH exits in current filters")

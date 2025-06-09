@@ -1,5 +1,5 @@
 """
-Equity analysis section for HMIS dashboard.
+Equity analysis section for HMIS dashboard - Improved Version
 """
 
 from typing import Any, Dict, List, Optional, Set, Tuple
@@ -18,15 +18,216 @@ from analysis.general.filter_utils import (
 )
 from analysis.general.theme import (
     CUSTOM_COLOR_SEQUENCE, MAIN_COLOR, NEUTRAL_COLOR, PLOT_TEMPLATE, SECONDARY_COLOR,
-    SUCCESS_COLOR, WARNING_COLOR, apply_chart_style, fmt_int, fmt_pct
+    SUCCESS_COLOR, WARNING_COLOR, DANGER_COLOR, apply_chart_style, fmt_int, fmt_pct,
+    blue_divider
 )
 
 # Constants
 EQUITY_SECTION_KEY = "equity_analysis"
 
+# Color scales for equity visualization
+EQUITY_COLOR_SCALE = {
+    "severe": DANGER_COLOR,      # Red for severe disparities
+    "significant": WARNING_COLOR, # Orange for significant disparities  
+    "moderate": NEUTRAL_COLOR,   # Gray for moderate disparities
+    "none": SUCCESS_COLOR       # Green for no/minimal disparities
+}
+
 def _safe_div(a: float, b: float, default: float = 0.0, multiplier: float = 1.0) -> float:
     """Safe division with optional multiplier."""
     return round((a / b) * multiplier if b else default, 1)
+
+def _calculate_chart_height(num_groups: int, base_height: int = 450) -> int:
+    """Calculate optimal chart height based on number of groups."""
+    if num_groups <= 6:
+        return base_height
+    elif num_groups <= 12:
+        return base_height + 100
+    elif num_groups <= 20:
+        return base_height + 200
+    else:
+        return min(base_height + 350, 800)
+
+def _get_disparity_color(di_value: float) -> str:
+    """Get color based on disparity index value."""
+    if di_value >= 0.95:
+        return SUCCESS_COLOR  # Green - minimal disparity
+    elif di_value >= 0.8:
+        return MAIN_COLOR     # Blue - moderate disparity
+    elif di_value >= 0.5:
+        return WARNING_COLOR  # Orange - significant disparity
+    else:
+        return DANGER_COLOR   # Red - severe disparity
+
+def _get_disparity_level(di_value: float) -> str:
+    """Get disparity level description."""
+    if di_value >= 0.95:
+        return "Minimal"
+    elif di_value >= 0.8:
+        return "Moderate"
+    elif di_value >= 0.5:
+        return "Significant"
+    else:
+        return "Severe"
+
+def _create_disparity_summary_html(
+    best_group: pd.Series,
+    worst_group: pd.Series,
+    gap: float,
+    total_improvement: int,
+    is_returns: bool,
+    outcome_name: str
+) -> str:
+    """Create HTML summary for disparity findings."""
+    
+    # Determine colors based on metric type
+    best_color = SUCCESS_COLOR
+    worst_color = DANGER_COLOR
+    impact_color = MAIN_COLOR
+    
+    # Create impact description
+    if abs(total_improvement) > 0:
+        impact_type = "fewer returns" if is_returns else "more successful exits"
+        impact_text = f"""
+        <div style="background-color: rgba(33,102,172,0.1); border: 1px solid {impact_color}; 
+                    border-radius: 10px; padding: 20px; margin: 20px 0;">
+            <h4 style="color: {impact_color}; margin: 0 0 10px 0;">💡 Potential System Impact</h4>
+            <p style="margin: 0; font-size: 16px;">
+                If all groups performed at the level of <strong>{best_group['group']}</strong>, 
+                the system could achieve approximately 
+                <strong style="font-size: 20px; color: {SUCCESS_COLOR};">{abs(total_improvement):,}</strong> 
+                {impact_type}.
+            </p>
+        </div>
+        """
+    else:
+        impact_text = ""
+    
+    return f"""
+    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 20px; margin: 20px 0;">
+        
+        <div style="background-color: rgba(73,160,181,0.15); border: 2px solid {best_color}; 
+                    border-radius: 10px; padding: 20px; text-align: center;">
+            <h4 style="color: {best_color}; margin: 0;">Best Performer</h4>
+            <h2 style="margin: 10px 0;">{best_group['group']}</h2>
+            <h3 style="color: {best_color}; margin: 0;">{fmt_pct(best_group['outcome_rate'])}</h3>
+            <p style="margin: 5px 0 0 0; font-size: 14px;">
+                {"Lowest return rate" if is_returns else "Highest exit rate"}
+            </p>
+        </div>
+        
+        <div style="background-color: rgba(255,99,71,0.15); border: 2px solid {worst_color}; 
+                    border-radius: 10px; padding: 20px; text-align: center;">
+            <h4 style="color: {worst_color}; margin: 0;">Needs Improvement</h4>
+            <h2 style="margin: 10px 0;">{worst_group['group']}</h2>
+            <h3 style="color: {worst_color}; margin: 0;">{fmt_pct(worst_group['outcome_rate'])}</h3>
+            <p style="margin: 5px 0 0 0; font-size: 14px;">
+                {"Highest return rate" if is_returns else "Lowest exit rate"}
+            </p>
+        </div>
+        
+        <div style="background-color: rgba(128,128,128,0.15); border: 2px solid {NEUTRAL_COLOR}; 
+                    border-radius: 10px; padding: 20px; text-align: center;">
+            <h4 style="color: {NEUTRAL_COLOR}; margin: 0;">Performance Gap</h4>
+            <h2 style="margin: 10px 0;">{fmt_pct(gap)}</h2>
+            <h3 style="color: {NEUTRAL_COLOR}; margin: 0;">percentage points</h3>
+            <p style="margin: 5px 0 0 0; font-size: 14px;">
+                Difference between best and worst
+            </p>
+        </div>
+        
+    </div>
+    {impact_text}
+    """
+
+def _create_methodology_html(
+    equity_label: str,
+    outcome_name: str,
+    t0: Timestamp,
+    t1: Timestamp,
+    min_pop: int,
+    return_window: Optional[int] = None
+) -> str:
+    """Create methodology HTML section."""
+    
+    outcome_definitions = ""
+    if "Permanent housing exits" in outcome_name:
+        outcome_definitions = f"""
+        <div style="background-color: rgba(75,181,67,0.1); border: 1px solid {SUCCESS_COLOR}; 
+                    border-radius: 5px; padding: 15px; margin-bottom: 20px;">
+            <h4 style="margin-top: 0;">Permanent Housing Exits</h4>
+            <ul style="margin-bottom: 0;">
+                <li>Clients who exited to a permanent housing destination during the reporting period</li>
+                <li>Base population: All clients who exited programs during the reporting period</li>
+                <li><strong>Higher rates are better</strong> (more successful housing placements)</li>
+            </ul>
+        </div>
+        """
+    else:  # Returns to homelessness
+        outcome_definitions = f"""
+        <div style="background-color: rgba(255,99,71,0.1); border: 1px solid {SECONDARY_COLOR}; 
+                    border-radius: 5px; padding: 15px; margin-bottom: 20px;">
+            <h4 style="margin-top: 0;">Returns to Homelessness</h4>
+            <ul style="margin-bottom: 0;">
+                <li>Clients who exited to PH and returned to homelessness within {return_window} days</li>
+                <li>Base population: All clients who exited to permanent housing during the period</li>
+                <li>Excludes: Prevention, coordinated entry, and services-only project enrollments</li>
+                <li>Direct PH placements (move-in date = project start) not counted as returns</li>
+                <li><strong>Lower rates are better</strong> (fewer people returning to homelessness)</li>
+            </ul>
+        </div>
+        """
+    
+    return f"""
+    <div style="background-color: rgba(0,0,0,0.2); border-radius: 10px; padding: 20px;">
+        
+        <h3 style="color: {MAIN_COLOR}; margin-top: 0;">Analysis Parameters</h3>
+        <table style="width: 100%; border-collapse: collapse; margin-bottom: 20px;">
+            <tr style="border-bottom: 1px solid rgba(255,255,255,0.2);">
+                <td style="padding: 8px; width: 50%;"><strong>Demographic dimension:</strong></td>
+                <td style="padding: 8px;">{equity_label}</td>
+            </tr>
+            <tr style="border-bottom: 1px solid rgba(255,255,255,0.2);">
+                <td style="padding: 8px;"><strong>Outcome measure:</strong></td>
+                <td style="padding: 8px;">{outcome_name}</td>
+            </tr>
+            <tr style="border-bottom: 1px solid rgba(255,255,255,0.2);">
+                <td style="padding: 8px;"><strong>Date range:</strong></td>
+                <td style="padding: 8px;">{t0.date()} to {t1.date()}</td>
+            </tr>
+            <tr style="border-bottom: 1px solid rgba(255,255,255,0.2);">
+                <td style="padding: 8px;"><strong>Minimum group size:</strong></td>
+                <td style="padding: 8px;">{min_pop}</td>
+            </tr>
+        </table>
+        
+        <h3 style="color: {MAIN_COLOR};">Statistical Methods</h3>
+        <ul style="margin-bottom: 20px;">
+            <li>Chi-square test with Yates' correction for groups with n ≥ 5 in all cells</li>
+            <li>Fisher's exact test for smaller samples</li>
+            <li>Statistical significance threshold: p < 0.05</li>
+            <li>Groups below minimum size threshold excluded from analysis</li>
+        </ul>
+        
+        <h3 style="color: {MAIN_COLOR};">Outcome Definitions</h3>
+        {outcome_definitions}
+        
+        <h3 style="color: {WARNING_COLOR};">Important Limitations</h3>
+        <ul style="margin-bottom: 0;">
+            <li>Disparities show correlation, not causation</li>
+            <li>Multiple unmeasured factors may influence outcomes</li>
+            <li>Single outcome measure - comprehensive assessment requires multiple metrics</li>
+            {"<li>Returns analysis depends on complete re-entry data capture</li>" if return_window else ""}
+        </ul>
+        
+        <h3 style="color: {MAIN_COLOR};">Disparity Index Calculation</h3>
+        <div style="background-color: rgba(255,255,255,0.05); border-radius: 5px; padding: 15px;">
+            <p style="margin: 0;">
+                {"For returns: DI = (Lowest Rate ÷ Group Rate)<br>Groups with lowest return rates get DI = 1.0 (best)" if "Returns" in outcome_name else "For exits: DI = (Group Rate ÷ Highest Rate)<br>Groups with highest exit rates get DI = 1.0 (best)"}
+            </p>
+        </div>
+    </div>
+    """
 
 def equity_analysis(
     df: DataFrame,
@@ -80,15 +281,14 @@ def equity_analysis(
     if _population_filter is None:
         # For PH exits, base population is all clients who exited during the period
         pop_mask = (df["ProjectExit"] >= start) & (df["ProjectExit"] <= end)
-        population = df.loc[pop_mask].copy()  # Create a copy here to avoid the warning
+        population = df.loc[pop_mask].copy()
     else:
         # For custom populations like short-stay or returns, use the provided filter
         pop_ids = _population_filter(df, start, end)
-        population = df[df["ClientID"].isin(pop_ids)].copy()  # Create a copy here to avoid the warning
+        population = df[df["ClientID"].isin(pop_ids)].copy()
 
     # Convert any non-string values to strings in the demographic column
     if demographic_col in population.columns:
-        # Fix: Use .loc to modify the DataFrame
         population.loc[:, demographic_col] = population[demographic_col].astype(str)
 
     # Step 2: Apply subdimension filtering if restrict_groups provided
@@ -215,31 +415,72 @@ def equity_analysis(
             ]
         )
 
-    # Step 7: Add disparity index relative to top group
+    # Step 7: Add disparity index relative to best performer
     if "return" in str(_outcome_metric).lower():
-        # For returns, lowest rate is best, so use minimum as reference
-        min_rate = result["outcome_rate"].min()
-        if min_rate > 0:  # Avoid division by zero
-            result["disparity_index"] = result["outcome_rate"].apply(
-                lambda x: _safe_div(min_rate, x, default=0.0) if x > 0 else 0.0
-            )
-        else:
+        # For returns, lowest rate is best (0% is perfect)
+        best_rate = result["outcome_rate"].min()
+        worst_rate = result["outcome_rate"].max()
+        
+        # Calculate disparity index
+        if worst_rate == 0:
+            # SPECIAL CASE: All groups have 0% returns - perfect performance!
             result["disparity_index"] = 1.0
+            # Add a flag to indicate this special case
+            result["all_groups_perfect"] = True
+        elif best_rate == 0:
+            # Some groups have 0% (perfect), others don't
+            # Groups with 0% get DI = 1.0, others get scaled down
+            result["disparity_index"] = result["outcome_rate"].apply(
+                lambda x: 1.0 if x == 0 else max(0, 1.0 - (x / worst_rate))
+            )
+            result["all_groups_perfect"] = False
+        elif worst_rate == best_rate:
+            # All groups have the same non-zero rate
+            result["disparity_index"] = 1.0
+            result["all_groups_perfect"] = False
+        else:
+            # Normal case: best_rate > 0, variation exists
+            # DI = best_rate / group_rate (lower rates get higher DI)
+            result["disparity_index"] = result["outcome_rate"].apply(
+                lambda x: min(1.0, best_rate / x) if x > 0 else 1.0
+            )
+            result["all_groups_perfect"] = False
     else:
         # For other metrics (like PH exits), highest rate is best
-        max_rate = result["outcome_rate"].max()
-        result["disparity_index"] = result["outcome_rate"].apply(
-            lambda x: _safe_div(x, max_rate, default=0.0) if max_rate > 0 else 0.0
-        )
+        best_rate = result["outcome_rate"].max()
+        worst_rate = result["outcome_rate"].min()
+        
+        if best_rate == 100:
+            # SPECIAL CASE: All groups have 100% success rate
+            result["disparity_index"] = 1.0
+            result["all_groups_perfect"] = (worst_rate == 100)
+        elif best_rate == worst_rate:
+            # All groups have the same rate
+            result["disparity_index"] = 1.0
+            result["all_groups_perfect"] = False
+        elif best_rate == 0:
+            # No one succeeded
+            result["disparity_index"] = 0.0
+            result["all_groups_perfect"] = False
+        else:
+            # DI = group_rate / best_rate
+            result["disparity_index"] = result["outcome_rate"].apply(
+                lambda x: min(1.0, x / best_rate)
+            )
+            result["all_groups_perfect"] = False
     
     # Step 8: Calculate potential impact
     if "return" in str(_outcome_metric).lower():
         # For returns, calculate reduction in returns if all groups had lowest rate
         min_group = result.loc[result["outcome_rate"].idxmin()]
         min_rate = min_group["outcome_rate"]
-        result["potential_improvement"] = np.floor(
-            (result["outcome_rate"]/100 - min_rate/100) * result["population"]
-        ).clip(lower=0).astype(int) * -1  # Negative = reduction in returns
+        
+        # If best rate is 0, only groups with non-zero rates have potential improvement
+        result["potential_improvement"] = result.apply(
+            lambda row: -int(np.floor((row["outcome_rate"]/100) * row["population"])) 
+            if row["outcome_rate"] > min_rate else 0,
+            axis=1
+        )
     else:
         # For PH exits, calculate increase if all groups had highest rate
         max_group = result.loc[result["outcome_rate"].idxmax()]
@@ -252,6 +493,9 @@ def equity_analysis(
     result["sig_marker"] = ""
     for level, marker in zip([0.001, 0.01, 0.05], ["***", "**", "*"]):
         result.loc[result["p_value"] <= level, "sig_marker"] = marker
+
+    # Add renamed group column for consistency
+    result["group"] = result[demographic_col]
 
     return result
 
@@ -286,7 +530,10 @@ def render_equity_analysis(df_filt: DataFrame, full_df: Optional[DataFrame] = No
     
     # Fallback for full_df
     if full_df is None:
-        full_df = df_filt.copy()
+        full_df = st.session_state.get("df")
+        if full_df is None:
+            st.error("Original dataset not found. Equity analysis requires full data.")
+            return
 
     # Check if cache is valid
     filter_timestamp = get_filter_timestamp()
@@ -299,45 +546,147 @@ def render_equity_analysis(df_filt: DataFrame, full_df: Optional[DataFrame] = No
             if k not in ["last_updated"]:
                 state.pop(k, None)
 
-    # Header and description
-    st.subheader("⚖️ Equity Analysis")
-    st.markdown("""
-    Identify and address disparities in outcomes across demographic groups. This analysis helps:
+    # Header with help button
+    col_header, col_info = st.columns([6, 1])
+    with col_header:
+        st.subheader("⚖️ Equity Analysis")
+    with col_info:
+        with st.popover("ℹ️ Help", use_container_width=True):
+            st.markdown("""
+            ### Understanding Equity Analysis
+            
+            This section uses statistical methods to identify significant outcome disparities across demographic groups, helping ensure equitable service delivery.
+            
+            **Available Analyses:**
+            
+            **1. Permanent Housing Exits**
+            - **Population**: All unique clients who exited during the period
+            - **Outcome**: Exited to permanent housing destination
+            - **Rate**: (PH exits ÷ Total exits) × 100
+            - **Goal**: Higher rates are better (more successful placements)
+            
+            **2. Returns to Homelessness**
+            - **Population**: All unique clients who exited to PH during the period
+            - **Outcome**: Returned to homelessness within tracking window (7-1095 days)
+            - **Rate**: (Returns ÷ PH exits) × 100
+            - **Goal**: Lower rates are better (fewer returns)
+            - **Note**: Uses HUD-compliant logic with exclusions for short PH stays
+            
+            **Statistical Methods:**
+            - **Chi-square test**: Used when all cells have n ≥ 5 (with Yates' correction)
+            - **Fisher's exact test**: Used for smaller samples
+            - **Significance levels**: * p<0.05, ** p<0.01, *** p<0.001
+            - **Minimum group size**: Filters out groups below threshold (default 30)
+            
+            **Disparity Index (DI) Calculation:**
+            
+            For PH Exits (higher is better):
+            - DI = Group Rate ÷ Highest Rate
+            - Best group gets DI = 1.0
+            
+            For Returns (lower is better):
+            - DI = Lowest Rate ÷ Group Rate (when lowest > 0)
+            - Special handling when best group has 0% returns
+            - Groups with 0% returns get DI = 1.0
+            
+            **Disparity Categories:**
+            - **Minimal** (DI: 0.95-1.0): Within 5% of best performer ✅
+            - **Moderate** (DI: 0.80-0.94): 5-20% gap from best 🔵
+            - **Significant** (DI: 0.50-0.79): 20-50% gap from best 🟠
+            - **Severe** (DI: <0.50): Over 50% gap from best 🔴
+            
+            **Visual Components:**
+            
+            **1. Outcome Rates Chart**
+            - Bar chart showing rates for each group
+            - Sorted from best to worst performance
+            - Color-coded by disparity level
+            - Shows statistical significance markers
+            - Includes population percentage as secondary metric
+            
+            **2. Disparity Index Chart**
+            - Horizontal bars showing DI values
+            - Reference line at 1.0 (parity)
+            - Color-coded by severity level
+            - Shows gap from best performer
+            
+            **3. Key Findings Summary**
+            - Best and worst performing groups
+            - Performance gap in percentage points
+            - Potential system impact if all groups matched best
+            - Groups with statistically significant disparities
+            
+            **Interpretation Guide:**
+            - **Focus on significant disparities**: Look for * markers and DI < 0.8
+            - **Consider group size**: Larger groups provide more reliable estimates
+            - **Check both metrics**: High PH exits + low returns = best outcomes
+            - **Potential improvement**: Shows additional successes if all matched best group
+            
+            **Filter Options:**
+            - **Demographic dimension**: Choose which characteristic to analyze
+            - **Outcome measure**: PH exits or returns to homelessness
+            - **Minimum group size**: Ensure statistical reliability (10-5000)
+            - **Return tracking window**: Days to monitor returns (7-1095)
+            - **Project types**: Include/exclude specific program types
+            - **Demographic groups**: Select specific groups to compare
+            
+            **Important Considerations:**
+            - **Correlation vs Causation**: Disparities show associations, not causes
+            - **Unmeasured factors**: Many variables may influence outcomes
+            - **Intersectionality**: Single dimensions don't capture full complexity
+            - **Sample size matters**: Small groups may show extreme results
+            - **Returns are system-wide**: Tracked across all programs regardless of filters
+            
+            **Using Results for Action:**
+            1. Identify groups with severe disparities (DI < 0.5)
+            2. Review if disparities are statistically significant
+            3. Consider group size and representation
+            4. Investigate potential causes (barriers, service gaps)
+            5. Design targeted interventions
+            6. Monitor progress over time
+            """)
     
-    - **Detect significant inequities** that may require targeted interventions
-    - **Measure the equity impact** of program design and resource allocation 
-    - **Track progress** toward reducing disparities over time
-    """)
+    # Introduction box
+    intro_html = f"""
+    <div style="background-color: rgba(33,102,172,0.1); border: 1px solid {MAIN_COLOR}; 
+                border-radius: 10px; padding: 15px; margin-bottom: 20px;">
+        <p style="margin: 0;">
+            <strong>Purpose:</strong> This analysis helps ensure all populations receive equitable services and outcomes. 
+            It identifies groups that may face additional barriers or need targeted interventions.
+        </p>
+    </div>
+    """
+    st.html(intro_html)
 
     # Control panel - first row
     c1, c2, c3 = st.columns(3)
     
     # Dimension selection
     equity_label = c1.selectbox(
-        "Dimension",
+        "Compare by",
         [lbl for lbl, _ in DEMOGRAPHIC_DIMENSIONS],
         key=f"equity_dim_{filter_timestamp}",
-        help="Select the demographic characteristic to analyze for disparities"
+        help="Select which demographic characteristic to analyze"
     )
     dim_col = dict(DEMOGRAPHIC_DIMENSIONS)[equity_label]
 
     # Outcome selection
     outcome_label = c2.selectbox(
-        "Outcome",
-        ["Permanent-housing exits", "Return to homelessness after PH exit"],
+        "Outcome to measure",
+        ["Permanent housing exits", "Returns to homelessness"],
         key=f"equity_outcome_{filter_timestamp}",
-        help="Select which outcome to analyze for disparities across groups"
+        help="Select which outcome to analyze"
     )
     
     # Minimum group size
     min_pop = c3.number_input(
-        "Min group size",
+        "Minimum group size",
         min_value=10,
         max_value=5000,
         value=30,
         step=10,
         key=f"equity_min_pop_{filter_timestamp}",
-        help="Minimum sample size required for each group to be included in analysis"
+        help="Groups smaller than this won't be shown (ensures statistical reliability)"
     )
 
     # Group filter
@@ -347,51 +696,48 @@ def render_equity_analysis(df_filt: DataFrame, full_df: Optional[DataFrame] = No
         unique_groups.sort()
         
         subdimension_selected = st.multiselect(
-            f"Filter {equity_label} groups to include",
+            f"Select {equity_label} groups to include",
             options=unique_groups,
             default=unique_groups,
             key=f"equity_subdim_{filter_timestamp}",
-            help=f"Only include these {equity_label} groups. Default is all."
+            help=f"Choose which {equity_label} groups to analyze"
         )
     except Exception as e:
         st.error(f"Error loading groups: {e}")
         return
 
     # Additional options based on outcome
-    if outcome_label == "Return to homelessness after PH exit":
-        st.markdown("##### Additional Options for Returns Analysis")
+    if outcome_label == "Returns to homelessness":
+        st.markdown("##### Return Analysis Options")
         d1, d2 = st.columns(2)
         
         return_window = d1.number_input(
-            "Return window (days)",
+            "Days to track returns",
             min_value=7,
             max_value=1095,
             value=180,
             step=30,
             key=f"equity_return_window_{filter_timestamp}",
-            help="Number of days after PH exit to check for returns to homelessness"
+            help="How many days after exit to check for returns"
         )
         
         all_types = sorted(df_filt["ProjectTypeCode"].dropna().unique())
         proj_selected = d2.multiselect(
-            "Project Types (to INCLUDE)",
+            "Project types to analyze",
             options=all_types,
             default=all_types,
             key=f"equity_proj_types_return_{filter_timestamp}",
-            help="Which ProjectTypeCodes to check for PH exits (returns will be tracked in ALL programs)"
+            help="Which project types to include"
         )
-        
-        short_thresh = 90  # Not used for returns analysis
     else:  # PH exits
         all_types = sorted(df_filt["ProjectTypeCode"].dropna().unique())
         proj_selected = st.multiselect(
-            "Project Types (to INCLUDE)",
+            "Project types to analyze",
             options=all_types,
             default=all_types,
             key=f"equity_proj_types_ph_{filter_timestamp}",
-            help="Which ProjectTypeCodes to include in PH exit analysis."
+            help="Which project types to include"
         )
-        short_thresh = 90  # Not used for PH exits
         return_window = 730  # Not used for PH exits
 
     # Check date range
@@ -399,56 +745,56 @@ def render_equity_analysis(df_filt: DataFrame, full_df: Optional[DataFrame] = No
     t1 = st.session_state.get("t1")
     
     if not (t0 and t1):
-        st.warning("Please set your date range in the sidebar first.")
+        st.warning("Please set your date range in the filter panel.")
         return
 
-    # Apply group filter
+    # Apply filters
     if not subdimension_selected:
-        st.warning(f"No {equity_label} groups selected. Please select at least one group.")
+        st.warning(f"Please select at least one {equity_label} group.")
         return
     
     df_subset = df_filt[df_filt[dim_col].astype(str).isin([str(s) for s in subdimension_selected])]
     
     if df_subset.empty:
-        st.warning(f"No data found for the selected {equity_label} group(s). Please check your selections.")
+        st.warning(f"No data found for the selected {equity_label} groups.")
         return
 
     # Apply project type filter
     if not proj_selected:
-        st.warning("No project types selected. Please select at least one project type.")
+        st.warning("Please select at least one project type.")
         return
     
     df_subset = df_subset[df_subset["ProjectTypeCode"].isin(proj_selected)]
     
     if df_subset.empty:
-        st.warning("No data available for the selected project types. Please adjust your selection.")
+        st.warning("No data available for the selected project types.")
         return
 
     # Import necessary functions based on outcome type
-    if outcome_label == "Permanent-housing exits":
+    if outcome_label == "Permanent housing exits":
         from analysis.general.data_utils import ph_exit_clients
         outcome_func = ph_exit_clients
         pop_filter_fn = ph_exit_pop_filter
-        outcome_name = "Permanent-housing exits"
-    else:  # Return to homelessness after PH exit
+        outcome_name = "Permanent Housing Exits"
+    else:  # Returns to homelessness
         from analysis.general.data_utils import return_after_exit
         # Create a wrapper function that includes the return_window parameter
         outcome_func = lambda df_sub, s, e: return_after_exit(df_sub, full_df, s, e, return_window)
         pop_filter_fn = returns_pop_filter
-        outcome_name = f"Returns within {return_window} days of PH exit"
+        outcome_name = f"Returns Within {return_window} Days"
 
     # Create cache key
     key = (
         f"{equity_label}|{outcome_name}|min{min_pop}|"
         f"{t0.date()}–{t1.date()}|"
-        + (f"rw{return_window}|" if "Return to homelessness" in outcome_label else "")
+        + (f"rw{return_window}|" if "Returns" in outcome_label else "")
         + f"subdim:{','.join(sorted(map(str, subdimension_selected)))}|"
         + ",".join(sorted(map(str, proj_selected)))
     )
 
     # Check if we need to run the analysis
     if state.get("cache_key") != key or "equity_data" not in state:
-        with st.spinner("Computing disparities…"):
+        with st.spinner("Analyzing equity..."):
             try:
                 # Run equity analysis
                 df_disp = equity_analysis(
@@ -468,13 +814,8 @@ def render_equity_analysis(df_filt: DataFrame, full_df: Optional[DataFrame] = No
                     st.info("No groups meet the minimum size threshold.")
                     return
 
-                # Sort based on outcome type
-                if outcome_label == "Return to homelessness after PH exit":
-                    # For returns, sort by rate ascending (lower is better)
-                    df_disp = df_disp.sort_values("outcome_rate", ascending=True)
-                else:
-                    # For PH exits, sort by rate descending (higher is better)
-                    df_disp = df_disp.sort_values("outcome_rate", ascending=False)
+                # Don't re-sort here - keep the disparity index as calculated
+                # The equity_analysis function already handles the calculations correctly
                 
                 # Categorize disparity levels
                 df_disp["disparity_magnitude"] = pd.cut(
@@ -501,542 +842,536 @@ def render_equity_analysis(df_filt: DataFrame, full_df: Optional[DataFrame] = No
         st.info("No groups meet the minimum size threshold.")
         return
 
-    # Display interpretation guide
-    if outcome_label == "Permanent-housing exits":
-        st.info("**Interpretation guide:** Higher rates indicate better outcomes (more exits to permanent housing).")
-        better_direction = "higher"
-        use_inverse_color = False
-    else:  # Return to homelessness after PH exit
-        st.info("**Interpretation guide:** Lower rates indicate better outcomes (fewer returns to homelessness).")
-        better_direction = "lower"
-        use_inverse_color = True
+    blue_divider()
 
-    # Create outcome rate chart
-    st.subheader(f"{outcome_name} by {equity_label}")
-    
-    # Special handling for returns - sort and color differently
-    if outcome_label == "Return to homelessness after PH exit":
-        # For returns, sort ascending (lower is better)
-        chart_df = df_disp.sort_values("outcome_rate", ascending=True).copy()
+    # Display clear interpretation guide
+    is_returns = "Returns" in outcome_name
+    if is_returns:
+        interpretation_html = f"""
+        <div style="background-color: rgba(33,102,172,0.1); border: 1px solid {MAIN_COLOR}; 
+                    border-radius: 8px; padding: 12px; margin-bottom: 20px;">
+            <p style="margin: 0;"><strong>📊 For returns to homelessness: Lower rates are BETTER (fewer people returning)</strong></p>
+        </div>
+        """
+    else:
+        interpretation_html = f"""
+        <div style="background-color: rgba(33,102,172,0.1); border: 1px solid {MAIN_COLOR}; 
+                    border-radius: 8px; padding: 12px; margin-bottom: 20px;">
+            <p style="margin: 0;"><strong>📊 For housing exits: Higher rates are BETTER (more people housed)</strong></p>
+        </div>
+        """
+    st.html(interpretation_html)
+
+    # Create tabs for different views
+    tab_overview, tab_disparity, tab_details = st.tabs([
+        "📊 Outcome Rates", "📈 Disparity Analysis", "📋 Data & Methodology"
+    ])
+
+    with tab_overview:
+        # Create outcome rate chart
+        st.markdown(f"### {outcome_name} by {equity_label}")
         
-        # Recalculate disparity index for visualization if needed
-        if "disparity_index" in chart_df.columns:
-            # Make sure we're showing disparity correctly for returns
+        # Add sorting explanation
+        if is_returns:
+            sort_explanation_html = f"""
+            <div style="background-color: rgba(75,181,67,0.1); border: 1px solid {SUCCESS_COLOR}; 
+                        border-radius: 8px; padding: 10px; margin-bottom: 15px;">
+                <p style="margin: 0; font-size: 14px;">
+                    📊 <strong>Sorted from best to worst:</strong> Lowest return rates (best) appear first
+                </p>
+            </div>
+            """
+        else:
+            sort_explanation_html = f"""
+            <div style="background-color: rgba(75,181,67,0.1); border: 1px solid {SUCCESS_COLOR}; 
+                        border-radius: 8px; padding: 10px; margin-bottom: 15px;">
+                <p style="margin: 0; font-size: 14px;">
+                    📊 <strong>Sorted from best to worst:</strong> Highest exit rates (best) appear first
+                </p>
+            </div>
+            """
+        st.html(sort_explanation_html)
+        
+        # Prepare chart data - ensure proper sorting and DI values
+        if is_returns:
+            # For returns, sort ascending (0% first, then higher rates)
+            chart_df = df_disp.sort_values("outcome_rate", ascending=True).copy()
+            
+            # Recalculate DI to ensure correctness after any data manipulation
             min_rate = chart_df["outcome_rate"].min()
-            if min_rate > 0:  # Avoid division by zero
-                chart_df["disparity_index_returns"] = min_rate / chart_df["outcome_rate"]
-                # This will be 1.0 for the best group (lowest return rate) and lower for worse groups
-                chart_df["disparity_index"] = chart_df["disparity_index_returns"]
-    else:
-        # For PH exits, sort descending (higher is better)
-        chart_df = df_disp.sort_values("outcome_rate", ascending=False).copy()
-    
-    # Create the outcome rate bar chart
-    fig = go.Figure()
-    
-    # Determine bar colors based on outcome type
-    if outcome_label == "Return to homelessness after PH exit":
-        # For returns, lower values are better (blue) and higher values are worse (red)
-        bar_colors = [
-            MAIN_COLOR if i == 0 or r == chart_df["outcome_rate"].min() else SECONDARY_COLOR
-            for i, r in enumerate(chart_df["outcome_rate"])
-        ]
-    else:
-        # For PH exits, higher values are better (blue) and lower values are worse (red)
-        bar_colors = [
-            MAIN_COLOR if i == 0 or r == chart_df["outcome_rate"].max() else SECONDARY_COLOR
-            for i, r in enumerate(chart_df["outcome_rate"])
-        ]
-    
-    # Add bar chart with improved formatting
-    fig.add_bar(
-        x=chart_df[dim_col],
-        y=chart_df["outcome_rate"],
-        name="Outcome rate (%)",
-        text=[f"{x:.1f}%" + (f" {s}" if s else "") for x, s in zip(chart_df["outcome_rate"], chart_df["sig_marker"])],
-        textposition="outside",
-        marker_color=bar_colors,
-        hoverinfo="text",
-        hovertext=[f"{group}: {rate:.1f}%<br>Population: {pop:,} ({pop_pct:.1f}%)<br>Significance: {sig}" 
-                  for group, rate, pop, pop_pct, sig in zip(
-                      chart_df[dim_col], 
-                      chart_df["outcome_rate"], 
-                      chart_df["population"],
-                      chart_df["population_pct"],
-                      chart_df["sig_marker"] if chart_df["sig_marker"].astype(bool).any() else ["None"] * len(chart_df)
-                  )]
-    )
-    
-    # Add population as a secondary element
-    fig.add_scatter(
-        x=chart_df[dim_col],
-        y=chart_df["population_pct"],
-        name="% of Population",
-        yaxis="y2",
-        mode="markers",
-        marker=dict(
-            size=10,
-            symbol="circle",
-            color=NEUTRAL_COLOR,
-            line=dict(color="white", width=1)
-        ),
-        opacity=0.7
-    )
-    
-    # Add reference line for system average
-    avg_rate = chart_df["outcome_rate"].mean()
-    fig.add_shape(
-        type="line",
-        x0=-0.5,
-        x1=len(chart_df) - 0.5,
-        y0=avg_rate,
-        y1=avg_rate,
-        line=dict(color="white", width=1.5, dash="dash"),
-    )
-    
-    # Add annotation for system average
-    fig.add_annotation(
-        x=len(chart_df) / 2,
-        y=avg_rate,
-        text=f"System average: {avg_rate:.1f}%",
-        showarrow=False,
-        yshift=10,
-        font=dict(size=12, color="white"),
-        bgcolor="rgba(0,0,0,0.5)",
-        bordercolor="white",
-        borderwidth=1,
-        borderpad=4,
-        opacity=0.8
-    )
-    
-    # Add significance explanation if needed
-    significance_note = "* p<0.05   ** p<0.01   *** p<0.001" if any(chart_df["sig_marker"].astype(bool)) else ""
-    
-    # Add directional note
-    better_worse_note = "Higher values (blue) are better" if better_direction == "higher" else "Lower values (blue) are better"
-    
-    # Create title with notes
-    title_with_note = f"{outcome_name} by {equity_label}"
-    if significance_note:
-        title_with_note += f"<br><span style='font-size:12px'>{significance_note}</span>"
-    if better_worse_note:
-        title_with_note += f"<br><span style='font-size:12px'>{better_worse_note}</span>"
-    
-    # Apply consistent styling
-    fig.update_layout(
-        title=dict(
-            text=title_with_note,
-            font=dict(size=16)
-        ),
-        yaxis=dict(
-            title="Outcome rate (%)",
-            gridcolor='rgba(233,233,233,0.3)',
-            zeroline=False
-        ),
-        yaxis2=dict(
-            title="Group % of population",
-            overlaying="y",
-            side="right",
-            range=[0, min(100, chart_df["population_pct"].max() * 1.5)],
-            gridcolor='rgba(233,233,233,0.1)',
-            zeroline=False
-        ),
-        template=PLOT_TEMPLATE,
-        legend=dict(
-            orientation="h",
-            yanchor="bottom",
-            y=1.02,
-            xanchor="center",
-            x=0.5,
-            bgcolor="rgba(0,0,0,0.5)",
-            bordercolor="white",
-            borderwidth=1
-        ),
-        margin=dict(t=100, b=80, l=50, r=50),
-        xaxis=dict(
-            tickangle=-45,
-            title="",
-            gridcolor='rgba(233,233,233,0.1)'
-        ),
-        height=500 if len(chart_df) > 6 else 400
-    )
-    
-    # Display the chart
-    st.plotly_chart(fig, use_container_width=True)
-
-    # Create Equity Gap Analysis visualization
-    st.subheader("Equity Gap Analysis")
-    
-    # Special handling for returns vs PH exits
-    if outcome_label == "Return to homelessness after PH exit":
-        # For returns, the lowest rate is the best performer
-        gap_df = chart_df.copy()
-    else:
-        # For PH exits, sort by disparity_index (already calculated correctly)
-        gap_df = chart_df.sort_values("disparity_index").copy()
-    
-    # Create custom hover text
-    hover_text = [
-        f"{group}: {di:.2f} disparity index<br>" +
-        f"Outcome rate: {rate:.1f}% ({(di*100):.1f}% of {('lowest' if outcome_label == 'Return to homelessness after PH exit' else 'top')} group)<br>" +
-        f"Population: {pop:,} ({pop_pct:.1f}%)<br>" +
-        (f"Significance: p={pval:.3f} {sig}" if sig else "Not statistically significant")
-        for group, di, rate, pop, pop_pct, pval, sig in zip(
-            gap_df[dim_col],
-            gap_df["disparity_index"],
-            gap_df["outcome_rate"],
-            gap_df["population"],
-            gap_df["population_pct"],
-            gap_df["p_value"],
-            gap_df["sig_marker"]
+            max_rate = chart_df["outcome_rate"].max()
+            
+            if max_rate == min_rate:
+                chart_df["disparity_index"] = 1.0
+            elif min_rate == 0:
+                # Groups with 0% get DI = 1.0, others scaled down
+                chart_df["disparity_index"] = chart_df["outcome_rate"].apply(
+                    lambda x: 1.0 - (x / max_rate) if max_rate > 0 else 1.0
+                )
+            else:
+                # Normal case
+                chart_df["disparity_index"] = chart_df["outcome_rate"].apply(
+                    lambda x: min(1.0, min_rate / x) if x > 0 else 1.0
+                )
+        else:
+            # For PH exits, sort descending (higher is better, best at top)
+            chart_df = df_disp.sort_values("outcome_rate", ascending=False).copy()
+        
+        # Calculate dynamic height
+        num_groups = len(chart_df)
+        chart_height = _calculate_chart_height(num_groups)
+        
+        # Create the outcome rate bar chart
+        fig = go.Figure()
+        
+        # Determine best and worst rates based on outcome type
+        if is_returns:
+            # For returns: lower is better
+            best_rate = chart_df["outcome_rate"].min()
+            worst_rate = chart_df["outcome_rate"].max()
+        else:
+            # For PH exits: higher is better
+            best_rate = chart_df["outcome_rate"].max()
+            worst_rate = chart_df["outcome_rate"].min()
+        
+        # Color bars based on disparity index
+        bar_colors = []
+        for idx, row in chart_df.iterrows():
+            di_val = row["disparity_index"]
+            color = _get_disparity_color(di_val)
+            bar_colors.append(color)
+        
+        # Add bars
+        fig.add_bar(
+            x=chart_df['group'],
+            y=chart_df["outcome_rate"],
+            name="Outcome rate (%)",
+            text=[f"{x:.1f}%" + (f" {s}" if s else "") for x, s in zip(chart_df["outcome_rate"], chart_df["sig_marker"])],
+            textposition="outside",
+            textfont=dict(color="white", size=12),
+            marker_color=bar_colors,
+            hoverinfo="text",
+            hovertext=[f"{group}: {rate:.1f}%<br>Population: {pop:,} ({pop_pct:.1f}%)<br>Significance: {sig if sig else 'None'}" 
+                      for group, rate, pop, pop_pct, sig in zip(
+                          chart_df['group'], 
+                          chart_df["outcome_rate"], 
+                          chart_df["population"],
+                          chart_df["population_pct"],
+                          chart_df["sig_marker"]
+                      )]
         )
-    ]
-    
-    # Define color scale based on outcome type
-    if use_inverse_color:
-        # For returns (Lower is better)
-        color_scale = [[0, "#2171b5"], [0.5, "#9ecae1"], [1, "#f4a582"]]  # Blue to light blue to salmon
-    else:
-        # For PH exits (Higher is better)
-        color_scale = [[0, "#f4a582"], [0.5, "#9ecae1"], [1, "#2171b5"]]  # Salmon to light blue to blue
-    
-    # Create horizontal bar chart
-    di_fig = go.Figure()
-    
-    # Add bars with better hover information
-    di_fig.add_bar(
-        x=gap_df["disparity_index"],
-        y=gap_df[dim_col],
-        orientation='h',
-        marker=dict(
-            color=gap_df["disparity_index"],
-            colorscale=color_scale,
-            colorbar=dict(
-                title="Disparity<br>Index",
-                tickvals=[0, 0.5, 0.8, 1],
-                ticktext=["0<br>Severe", "0.5<br>Significant", "0.8<br>Moderate", "1.0<br>None"],
-                lenmode="fraction",
-                len=0.8
+        
+        # Add population as a secondary element
+        fig.add_scatter(
+            x=chart_df['group'],
+            y=chart_df["population_pct"],
+            name="% of Population",
+            yaxis="y2",
+            mode="markers",
+            marker=dict(
+                size=10,
+                symbol="circle",
+                color=NEUTRAL_COLOR,
+                line=dict(color="white", width=1)
             ),
-            line=dict(width=1, color="white")
-        ),
-        text=[f"{di:.2f}" + (f" {m}" if m else "") for di, m in zip(gap_df["disparity_index"], gap_df["sig_marker"])],
-        textposition="auto",
-        hoverinfo="text",
-        hovertext=hover_text
-    )
-    
-    # Add reference line for parity
-    di_fig.add_shape(
-        type="line",
-        x0=1,
-        x1=1,
-        y0=-0.5,
-        y1=len(gap_df) - 0.5,
-        line=dict(color="white", width=1.5, dash="dash"),
-    )
-    
-    # Add colored background zones
-    di_fig.add_shape(
-        type="rect", 
-        x0=0, 
-        x1=0.5, 
-        y0=-0.5, 
-        y1=len(gap_df) - 0.5,
-        fillcolor="rgba(244,165,130,0.15)", 
-        line=dict(width=0), 
-        layer="below"
-    )
-    di_fig.add_shape(
-        type="rect", 
-        x0=0.5, 
-        x1=0.8, 
-        y0=-0.5, 
-        y1=len(gap_df) - 0.5,
-        fillcolor="rgba(186,186,186,0.15)", 
-        line=dict(width=0), 
-        layer="below"
-    )
-    di_fig.add_shape(
-        type="rect", 
-        x0=0.8, 
-        x1=0.95, 
-        y0=-0.5, 
-        y1=len(gap_df) - 0.5,
-        fillcolor="rgba(158,202,225,0.15)", 
-        line=dict(width=0), 
-        layer="below"
-    )
-    
-    # Add zone labels
-    for label, x_pos, y_shift in [("Severe<br>disparity", 0.25, 0), 
-                                ("Significant<br>disparity", 0.65, 0),
-                                ("Moderate<br>disparity", 0.88, 0),
-                                ("Parity", 1.03, 0)]:
-        di_fig.add_annotation(
-            x=x_pos,
-            y=len(gap_df) - 0.5,
-            yshift=y_shift,
-            text=label,
-            showarrow=False,
-            font=dict(size=10, color="white"),
-            align="center",
-            bordercolor="white",
-            borderwidth=1,
-            borderpad=3,
-            bgcolor="rgba(0,0,0,0.5)",
             opacity=0.7
         )
-    
-    # Apply consistent styling
-    di_fig.update_layout(
-        title=dict(
-            text="Disparity Index: Comparison to Highest Performing Group",
-            font=dict(size=16)
-        ),
-        xaxis=dict(
-            title="Disparity Index (1.0 = parity with top group)",
-            range=[0, max(1.1, df_disp["disparity_index"].max() * 1.05)],
-            gridcolor='rgba(233,233,233,0.3)',
-            zeroline=False
-        ),
-        yaxis=dict(
-            title="",
-            autorange="reversed"  # This puts the highest disparity at the bottom
-        ),
-        margin=dict(l=10, r=10, t=60, b=50),
-        template=PLOT_TEMPLATE,
-        height=500 if len(gap_df) > 6 else 400
-    )
-    
-    # Display the chart
-    st.plotly_chart(di_fig, use_container_width=True)
-
-    # Add explanation of the disparity index
-    with st.expander("Understanding the Disparity Index"):
-        if outcome_label == "Return to homelessness after PH exit":
-            st.markdown(f"""
-            The **Disparity Index** for returns to homelessness measures how each group's return rate compares to the group with the lowest return rate:
-            
-            - **1.0** = Equal to the group with lowest returns (parity)
-            - **0.8** = Return rate is 1.25x higher than the best group (moderate disparity)  
-            - **0.5** = Return rate is 2x higher than the best group (significant disparity)
-            - **< 0.5** = Return rate is more than 2x higher than the best group (severe disparity)
-            
-            Statistical significance is indicated by asterisks:
-            - * = p < 0.05 (significant)
-            - ** = p < 0.01 (highly significant)
-            - *** = p < 0.001 (extremely significant)
-            
-            Where p-value represents the probability that the observed disparity occurred by chance.
-            """)
-        else:
-            st.markdown(f"""
-            The **Disparity Index** measures how each group's outcome rate compares to the highest performing group:
-            
-            - **1.0** = Equal to the top group (parity)
-            - **0.8** = 80% of the top group's rate (moderate disparity)  
-            - **0.5** = 50% of the top group's rate (significant disparity)
-            - **< 0.5** = Less than half of the top group's rate (severe disparity)
-            
-            Statistical significance is indicated by asterisks:
-            - * = p < 0.05 (significant)
-            - ** = p < 0.01 (highly significant)
-            - *** = p < 0.001 (extremely significant)
-            
-            Where p-value represents the probability that the observed disparity occurred by chance.
-            """)
-
-    # Data table with formatting
-    st.subheader("Detailed Results")
-    display_df = chart_df[[
-        dim_col, "population", "population_pct", "outcome_count", "outcome_rate",
-        "disparity_index", "p_value", "sig_marker", "potential_improvement"
-    ]].copy()
-    
-    display_df.columns = [
-        "Group", "Population", "% of Total", "Outcome Count", "Outcome Rate",
-        "Disparity Index", "p-value", "Significance", "Potential Improvement"
-    ]
-
-    # Create a custom colormap
-    cmap_name = "PuOr" if use_inverse_color else "BuGn"
-
-    # Display the table with formatting
-    st.dataframe(
-        display_df.style
-        .format({
-            "Population": "{:,}",
-            "% of Total": "{:.1f}%",
-            "Outcome Count": "{:,}",
-            "Outcome Rate": "{:.1f}%",
-            "Disparity Index": "{:.2f}",
-            "p-value": "{:.3f}",
-            "Potential Improvement": "{:+,}"  # Add plus sign for better readability
-        })
-        .background_gradient(
-            subset=["Disparity Index"],
-            cmap=cmap_name,
-            vmin=0,
-            vmax=1
+        
+        # Add reference line for system average
+        avg_rate = chart_df["outcome_rate"].mean()
+        fig.add_shape(
+            type="line",
+            x0=-0.5,
+            x1=len(chart_df) - 0.5,
+            y0=avg_rate,
+            y1=avg_rate,
+            line=dict(color="white", width=2, dash="dash"),
         )
-        # Highlight statistically significant values
-        .apply(lambda x: ['background-color: rgba(255,255,0,0.2)' if v else '' 
-                         for v in x == "*"], subset=["Significance"])
-        .apply(lambda x: ['background-color: rgba(255,165,0,0.2)' if v else '' 
-                         for v in x == "**"], subset=["Significance"])
-        .apply(lambda x: ['background-color: rgba(255,0,0,0.2)' if v else '' 
-                         for v in x == "***"], subset=["Significance"]),
-        use_container_width=True
-    )
-    
-    # Key findings visualization
-    # Get top and bottom groups based on outcome type
-    if outcome_label == "Return to homelessness after PH exit":
-        # For returns, lowest rate is best (sorted ascending above)
-        top = chart_df.iloc[0]  # Lowest return rate (best performer)
-        bot = chart_df.iloc[-1]  # Highest return rate (worst performer)
-        gap = bot["outcome_rate"] - top["outcome_rate"]  # Gap is high minus low
-    else:
-        # For PH exits, highest rate is best (sorted descending above)
-        top = chart_df.iloc[0]  # Highest PH exit rate (best performer)
-        bot = chart_df.iloc[-1]  # Lowest PH exit rate (worst performer)
-        gap = top["outcome_rate"] - bot["outcome_rate"]  # Gap is high minus low
-    
-    # Calculate system-wide impact
-    total_improvement = chart_df["potential_improvement"].sum()
-    
-    # Adjust impact description based on outcome type
-    if outcome_label == "Permanent-housing exits":
-        impact_desc = f"If all groups achieved the same PH exit rate as the {top[dim_col]} group"
-    else:  # Return to homelessness after PH exit
-        impact_desc = f"If all groups had the same low return rate as the {top[dim_col]} group"
-    
-    # Create key findings section
-    st.markdown("### Key Findings")
-    
-    # Create three columns for key metrics
-    k1, k2, k3 = st.columns(3)
-    
-    # Adjust labels based on outcome type
-    highest_label = "Highest Rate" if outcome_label == "Permanent-housing exits" else "Lowest Rate (Best)"
-    lowest_label = "Lowest Rate" if outcome_label == "Permanent-housing exits" else "Highest Rate (Worst)"
-    
-    with k1:
-        st.markdown(f"""
-        <div style="background-color:rgba(73,160,181,0.2); padding:10px; border-radius:5px; text-align:center;">
-        <h4>{highest_label}</h4>
-        <h2>{top[dim_col]}</h2>
-        <h3>{fmt_pct(top["outcome_rate"])}</h3>
-        </div>
-        """, unsafe_allow_html=True)
         
-    with k2:
-        st.markdown(f"""
-        <div style="background-color:rgba(255,99,71,0.2); padding:10px; border-radius:5px; text-align:center;">
-        <h4>{lowest_label}</h4>
-        <h2>{bot[dim_col]}</h2>
-        <h3>{fmt_pct(bot["outcome_rate"])}</h3>
-        </div>
-        """, unsafe_allow_html=True)
+        # Apply consistent styling
+        fig.update_layout(
+            yaxis=dict(
+                title="Outcome Rate (%)",
+                gridcolor='rgba(255,255,255,0.1)',
+                zeroline=False,
+                range=[0, max(chart_df["outcome_rate"].max() * 1.15, 10)]  # Add 15% padding
+            ),
+            yaxis2=dict(
+                title="% of Population",
+                overlaying="y",
+                side="right",
+                range=[0, min(100, chart_df["population_pct"].max() * 1.5)],
+                gridcolor='rgba(255,255,255,0.05)',
+                zeroline=False
+            ),
+            template=PLOT_TEMPLATE,
+            legend=dict(
+                orientation="h",
+                yanchor="bottom",
+                y=1.02,
+                xanchor="center",
+                x=0.5,
+                bgcolor="rgba(0,0,0,0.5)",
+                bordercolor="white",
+                borderwidth=1
+            ),
+            margin=dict(t=80, b=100, l=80, r=80),  # Generous margins
+            xaxis=dict(
+                tickangle=-45 if len(chart_df) > 6 else 0,
+                title="",
+                gridcolor='rgba(255,255,255,0.05)',
+                automargin=True
+            ),
+            height=chart_height,
+            bargap=0.2
+        )
         
-    with k3:
-        st.markdown(f"""
-        <div style="background-color:rgba(128,128,128,0.2); padding:10px; border-radius:5px; text-align:center;">
-        <h4>Gap Between Groups</h4>
-        <h2>{fmt_pct(gap)}</h2>
-        <h3>percentage points</h3>
-        </div>
-        """, unsafe_allow_html=True)
-    
-    # Impact information in a highlighted box
-    impact_sign = "" if total_improvement < 0 else "+"
-    impact_color = "rgba(73,160,181,0.1)" if total_improvement >= 0 else "rgba(255,99,71,0.1)"
-    
-    st.markdown(f"""
-    <div style="background-color:{impact_color}; padding:15px; border-radius:5px; margin-top:15px;">
-    <h4>System-wide Impact Potential</h4>
-    <p>{impact_desc}, approximately <strong style="font-size:1.2em;">{impact_sign}{total_improvement:,}</strong> additional clients would achieve the positive outcome.</p>
-    </div>
-    """, unsafe_allow_html=True)
-
-    # Display significant disparities and recommendations
-    sig = chart_df[(chart_df["p_value"] < 0.05) & (chart_df["disparity_index"] < 0.8)]
-    if not sig.empty:
-        # Sort by disparity index to find the most disparate groups
-        sig_sorted = sig.sort_values("disparity_index")
+        # Add annotations outside the plot area
+        fig.add_annotation(
+            text=f"System Average: {avg_rate:.1f}%",
+            xref="paper", yref="paper",
+            x=0.02, y=0.98,
+            showarrow=False,
+            font=dict(size=12, color="white"),
+            bgcolor="rgba(0,0,0,0.7)",
+            bordercolor="white",
+            borderwidth=1,
+            borderpad=4
+        )
         
-        st.markdown("""
-        <div style="background-color:rgba(255,99,71,0.1); padding:15px; border-radius:5px; margin-top:20px;">
-        <h3>⚠️ Significant Disparities Detected</h3>
-        """, unsafe_allow_html=True)
+        # Add direction indicator for clarity
+        if is_returns:
+            fig.add_annotation(
+                text="← Better (Lower rates)",
+                xref="paper", yref="paper",
+                x=0.98, y=0.98,
+                showarrow=False,
+                font=dict(size=12, color=SUCCESS_COLOR, weight="bold"),
+                bgcolor="rgba(0,0,0,0.7)",
+                bordercolor=SUCCESS_COLOR,
+                borderwidth=1,
+                borderpad=4,
+                xanchor="right"
+            )
+        else:
+            fig.add_annotation(
+                text="Better (Higher rates) →",
+                xref="paper", yref="paper",
+                x=0.98, y=0.98,
+                showarrow=False,
+                font=dict(size=12, color=SUCCESS_COLOR, weight="bold"),
+                bgcolor="rgba(0,0,0,0.7)",
+                bordercolor=SUCCESS_COLOR,
+                borderwidth=1,
+                borderpad=4,
+                xanchor="right"
+            )
         
-        # Create a list of all significant disparities with better formatting
-        for idx, row in sig_sorted.iterrows():
-            st.markdown(f"""
-            <div style="border-left: 3px solid #ff6347; padding-left: 15px; margin-bottom: 15px;">
-            <h4>{row[dim_col]}</h4>
-            <ul style="list-style-type: none; padding-left: 0;">
-                <li>📊 Population: <strong>{fmt_int(row['population'])}</strong> people</li>
-                <li>📈 Outcome rate: <strong>{fmt_pct(row['outcome_rate'])}</strong> ({fmt_pct(row['disparity_index'] * 100)} of top group)</li>
-                <li>🔍 Statistical significance: p = <strong>{row['p_value']:.3f}</strong> {row['sig_marker']}</li>
-                <li>💡 Potential impact: <strong>{row['potential_improvement']:,}</strong> additional clients with improved outcomes</li>
-            </ul>
+        # Display the chart
+        st.plotly_chart(fig, use_container_width=True)
+        
+        # Add color explanation with clear legend
+        color_guide_html = f"""
+        <div style="background-color: rgba(0,0,0,0.2); border-radius: 8px; padding: 12px; margin: 10px 0;">
+            <p style="margin: 0 0 10px 0; font-weight: bold;">Bar Color = Disparity Level:</p>
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px;">
+                <div style="display: flex; align-items: center; gap: 10px;">
+                    <div style="width: 30px; height: 20px; background-color: {SUCCESS_COLOR}; border-radius: 3px; border: 1px solid white;"></div>
+                    <span><strong>Green</strong> = Minimal (DI ≥ 0.95)</span>
+                </div>
+                <div style="display: flex; align-items: center; gap: 10px;">
+                    <div style="width: 30px; height: 20px; background-color: {MAIN_COLOR}; border-radius: 3px; border: 1px solid white;"></div>
+                    <span><strong>Blue</strong> = Moderate (DI 0.80-0.94)</span>
+                </div>
+                <div style="display: flex; align-items: center; gap: 10px;">
+                    <div style="width: 30px; height: 20px; background-color: {WARNING_COLOR}; border-radius: 3px; border: 1px solid white;"></div>
+                    <span><strong>Orange</strong> = Significant (DI 0.50-0.79)</span>
+                </div>
+                <div style="display: flex; align-items: center; gap: 10px;">
+                    <div style="width: 30px; height: 20px; background-color: {DANGER_COLOR}; border-radius: 3px; border: 1px solid white;"></div>
+                    <span><strong>Red</strong> = Severe (DI < 0.50)</span>
+                </div>
             </div>
-            """, unsafe_allow_html=True)
-        
-        # Add recommendations section
-        st.markdown("""
-        <h3>🎯 Action Recommendations</h3>
+            <p style="margin: 10px 0 0 0; font-size: 13px; font-style: italic;">
+                DI = Disparity Index (1.0 means equal to best group, lower values mean larger gaps)
+            </p>
         </div>
-        """, unsafe_allow_html=True)
+        """
+        st.html(color_guide_html)
+
+    with tab_disparity:
+        st.markdown("### Disparity Index Analysis")
         
-    else:
-        st.markdown("""
-        <div style="background-color:rgba(0,204,0,0.1); padding:20px; border-radius:5px; margin-top:20px;">
-        <h3>✅ No Statistically Significant Disparities Detected</h3>
-        <p>No statistically significant disparities were found in this analysis (p < 0.05). This suggests that the system is producing relatively equitable outcomes across the analyzed groups for this specific measure.</p>
+        # Explanation of disparity index
+        di_explanation_html = f"""
+        <div style="background-color: rgba(0,0,0,0.2); border-radius: 8px; padding: 15px; margin-bottom: 20px;">
+            <p style="margin: 0; font-size: 14px;">
+                <strong>What is the Disparity Index?</strong> It shows how far each group is from the best performer.
+                <br>• <strong>1.0</strong> = Equal to best group
+                <br>• <strong>0.8</strong> = 20% gap from best group  
+                <br>• <strong>0.5</strong> = 50% gap from best group
+                <br>• <strong>Lower values</strong> = Larger disparities
+            </p>
         </div>
-        """, unsafe_allow_html=True)
-    
-    # Add methodology notes
-    with st.expander("Methodology Notes"):
-        st.markdown(f"""
-        ### Analysis Parameters
-        | Parameter | Value |
-        | --- | --- |
-        | Demographic dimension | {equity_label} |
-        | Outcome measure | {outcome_name} |
-        | Date range | {t0.date()} to {t1.date()} |
-        | Minimum group size | {min_pop} |
+        """
+        st.html(di_explanation_html)
         
-        ### Statistical Methods
-        - Chi-square test with Yates' correction used for groups with sufficient data
-        - Fisher's exact test used for smaller groups
-        - p < 0.05 threshold for statistical significance
-        - Groups smaller than the minimum size threshold were excluded
+        # Sort by disparity index for this view (worst to best)
+        gap_df = chart_df.sort_values("disparity_index", ascending=True).copy()
         
-        ### Outcome Definitions
-        """)
+        # Calculate height
+        num_groups_di = len(gap_df)
+        di_chart_height = max(450, min(700, 400 + num_groups_di * 40))
         
-        if outcome_label == "Permanent-housing exits":
-            st.markdown("""
-            **Permanent housing exits** are defined as:
-            - Clients who exited to a permanent housing destination during the reporting period
-            - Base population includes all clients who exited programs during the reporting period
-            """)
-        else:  # Return to homelessness after PH exit
-            st.markdown(f"""
-            **Returns to homelessness** are defined as:
-            - Clients who exited to permanent housing and then returned to a homeless program within {return_window} days
-            - Returns do not include enrollments in prevention, coordinated entry, or services-only projects
-            - When a client moved directly into permanent housing with a move-in date matching their project start date, this is not counted as a return
-            """)
+        # Create horizontal bar chart for disparity index
+        di_fig = go.Figure()
         
-        st.markdown(f"""
-        ### Limitations
-        - Disparities indicate correlation, not necessarily causation
-        - Multiple factors may influence outcomes beyond the analyzed demographic dimension
-        - This analysis only examines one outcome; comprehensive equity assessment requires multiple measures
-        {"- Returns analysis requires both exit and re-entry data, which may be incomplete" if outcome_label == "Return to homelessness after PH exit" else ""}
-        """)
+        # Add each bar individually with its specific color based on DI value
+        for idx, row in gap_df.iterrows():
+            di_val = row["disparity_index"]
+            color = _get_disparity_color(di_val)
+            
+            # Add individual bar
+            di_fig.add_trace(go.Bar(
+                x=[di_val],
+                y=[row['group']],
+                orientation='h',
+                marker=dict(
+                    color=color,
+                    line=dict(width=2, color="white")
+                ),
+                text=f"{di_val:.2f}" + (f" {row['sig_marker']}" if row['sig_marker'] else ""),
+                textposition="outside",
+                textfont=dict(color="white", size=12, weight="bold"),
+                hoverinfo="text",
+                hovertext=f"{row['group']}: {di_val:.2f} disparity index<br>" +
+                         f"Rate: {row['outcome_rate']:.1f}%<br>" +
+                         f"Gap from best: {((1-di_val)*100):.0f}%<br>" +
+                         (f"p-value: {row['p_value']:.3f}" if row['sig_marker'] else "Not significant"),
+                showlegend=False,
+                name=row['group']
+            ))
+        
+        # Add reference line for parity
+        di_fig.add_shape(
+            type="line",
+            x0=1,
+            x1=1,
+            y0=-0.5,
+            y1=len(gap_df) - 0.5,
+            line=dict(color="white", width=3, dash="dash"),
+        )
+        
+        # Add annotation for parity line
+        di_fig.add_annotation(
+            x=1,
+            y=len(gap_df),
+            text="Parity Line",
+            showarrow=False,
+            yshift=15,
+            font=dict(size=12, color="white", weight="bold"),
+            bgcolor="rgba(0,0,0,0.7)",
+            bordercolor="white",
+            borderwidth=1,
+            borderpad=4
+        )
+        
+        # Apply styling with better spacing
+        di_fig.update_layout(
+            xaxis=dict(
+                title=dict(
+                    text="Disparity Index (1.0 = Equal to Best Group)",
+                    font=dict(size=14)
+                ),
+                range=[0, 1.15],  # Fixed range for clarity
+                gridcolor='rgba(255,255,255,0.1)',
+                zeroline=False,
+                tickformat=".1f",
+                tickmode="array",
+                tickvals=[0, 0.25, 0.5, 0.75, 0.8, 0.95, 1.0],
+                ticktext=["0", "0.25", "0.5<br><span style='font-size:10px'>Severe</span>", 
+                         "0.75", "0.8<br><span style='font-size:10px'>Moderate</span>", 
+                         "0.95", "1.0<br><span style='font-size:10px'>Parity</span>"],
+                tickfont=dict(size=12)
+            ),
+            yaxis=dict(
+                title="",
+                autorange="reversed",
+                automargin=True,
+                tickfont=dict(size=12)
+            ),
+            margin=dict(l=20, r=100, t=80, b=120),  # More bottom margin for labels
+            template=PLOT_TEMPLATE,
+            height=di_chart_height,
+            bargap=0.35,
+            showlegend=False,
+            plot_bgcolor='rgba(0,0,0,0)',
+            paper_bgcolor='rgba(0,0,0,0)'
+        )
+        
+        # Display the chart
+        st.plotly_chart(di_fig, use_container_width=True)
+        
+        # Color legend for disparity levels
+        disparity_legend_html = f"""
+        <div style="background-color: rgba(0,0,0,0.2); border-radius: 8px; padding: 15px; margin-top: 20px;">
+            <p style="margin: 0 0 10px 0; font-weight: bold;">Disparity Level Categories:</p>
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px;">
+                <div style="display: flex; align-items: center; gap: 10px;">
+                    <div style="width: 20px; height: 20px; background-color: {SUCCESS_COLOR}; border-radius: 3px;"></div>
+                    <span><strong>Minimal</strong> (0.95-1.0): Within 5% of best</span>
+                </div>
+                <div style="display: flex; align-items: center; gap: 10px;">
+                    <div style="width: 20px; height: 20px; background-color: {MAIN_COLOR}; border-radius: 3px;"></div>
+                    <span><strong>Moderate</strong> (0.8-0.95): 5-20% gap</span>
+                </div>
+                <div style="display: flex; align-items: center; gap: 10px;">
+                    <div style="width: 20px; height: 20px; background-color: {WARNING_COLOR}; border-radius: 3px;"></div>
+                    <span><strong>Significant</strong> (0.5-0.8): 20-50% gap</span>
+                </div>
+                <div style="display: flex; align-items: center; gap: 10px;">
+                    <div style="width: 20px; height: 20px; background-color: {DANGER_COLOR}; border-radius: 3px;"></div>
+                    <span><strong>Severe</strong> (<0.5): Over 50% gap</span>
+                </div>
+            </div>
+        </div>
+        """
+        st.html(disparity_legend_html)
+
+        blue_divider()
+
+        # Key findings section
+        st.markdown("### Key Findings")
+        
+        # For returns: Find groups with min and max rates
+        if is_returns:
+            # Best = lowest return rate
+            best_idx = chart_df["outcome_rate"].idxmin()
+            best = chart_df.loc[best_idx]
+            
+            # Worst = highest return rate
+            worst_idx = chart_df["outcome_rate"].idxmax()
+            worst = chart_df.loc[worst_idx]
+            
+            # Gap is always positive (worst - best)
+            gap = worst["outcome_rate"] - best["outcome_rate"]
+        else:
+            # For PH exits: best = highest rate
+            best_idx = chart_df["outcome_rate"].idxmax()
+            best = chart_df.loc[best_idx]
+            
+            # Worst = lowest rate
+            worst_idx = chart_df["outcome_rate"].idxmin()
+            worst = chart_df.loc[worst_idx]
+            
+            # Gap is always positive (best - worst)
+            gap = best["outcome_rate"] - worst["outcome_rate"]
+        
+        # Calculate system-wide impact
+        total_improvement = chart_df["potential_improvement"].sum()
+        
+        # Create findings HTML
+        findings_html = _create_disparity_summary_html(
+            best, worst, gap, total_improvement, is_returns, outcome_name
+        )
+        st.html(findings_html)
+        
+        # Significant disparities section
+        sig_disparities = chart_df[(chart_df["p_value"] < 0.05) & (chart_df["disparity_index"] < 0.8)]
+        if not sig_disparities.empty:
+            sig_html = f"""
+            <div style="background-color: rgba(255,99,71,0.1); border: 1px solid {SECONDARY_COLOR}; 
+                        border-radius: 10px; padding: 20px; margin: 20px 0;">
+                <h4 style="color: {SECONDARY_COLOR}; margin: 0 0 15px 0;">
+                    ⚠️ Groups with Significant Disparities
+                </h4>
+            """
+            
+            for _, row in sig_disparities.iterrows():
+                gap_pct = (1 - row['disparity_index']) * 100
+                
+                # Color code based on disparity level
+                level_text = _get_disparity_level(row['disparity_index'])
+                border_color = _get_disparity_color(row['disparity_index'])
+                
+                sig_html += f"""
+                <div style="border-left: 4px solid {border_color}; padding-left: 15px; margin-bottom: 15px; 
+                            background-color: rgba(255,255,255,0.05); padding: 10px 15px; border-radius: 5px;">
+                    <h5 style="margin: 0 0 8px 0; color: {border_color};">{row['group']} - {level_text.upper()} DISPARITY</h5>
+                    <p style="margin: 0; font-size: 14px;">
+                        • Rate: <strong>{fmt_pct(row['outcome_rate'])}</strong><br>
+                        • Disparity Index: <strong>{row['disparity_index']:.2f}</strong> ({gap_pct:.0f}% gap from best)<br>
+                        • Statistical significance: <strong>{row['sig_marker']}</strong> (p={row['p_value']:.3f})<br>
+                        • Affects <strong>{fmt_int(row['population'])}</strong> people
+                    </p>
+                </div>
+                """
+            
+            sig_html += "</div>"
+            st.html(sig_html)
+        else:
+            no_sig_html = f"""
+            <div style="background-color: rgba(75,181,67,0.1); border: 1px solid {SUCCESS_COLOR}; 
+                        border-radius: 10px; padding: 20px; margin: 20px 0;">
+                <h4 style="color: {SUCCESS_COLOR}; margin: 0;">
+                    ✅ No Severe Disparities Detected
+                </h4>
+                <p style="margin: 10px 0 0 0;">
+                    No groups show statistically significant disparities greater than 20% 
+                    from the best performing group.
+                </p>
+            </div>
+            """
+            st.html(no_sig_html)
+
+    with tab_details:
+        # Data table
+        st.markdown("### Detailed Data Export")
+        
+        display_df = chart_df[[
+            dim_col, "population", "population_pct", "outcome_count", "outcome_rate",
+            "disparity_index", "p_value", "sig_marker", "potential_improvement"
+        ]].copy()
+        
+        display_df.columns = [
+            "Group", "Population", "% of Total", "Outcome Count", "Rate (%)",
+            "Disparity Index", "p-value", "Significance", "Potential Impact"
+        ]
+
+        # Display formatted table
+        st.dataframe(
+            display_df.style
+            .format({
+                "Population": "{:,}",
+                "% of Total": "{:.1f}%",
+                "Outcome Count": "{:,}",
+                "Rate (%)": "{:.1f}%",
+                "Disparity Index": "{:.2f}",
+                "p-value": "{:.3f}",
+                "Potential Impact": "{:+,}"
+            })
+            ,
+            use_container_width=True,
+            hide_index=True
+        )
+        
+        # Download button
+        csv = display_df.to_csv(index=False)
+        st.download_button(
+            label="📥 Download Data as CSV",
+            data=csv,
+            file_name=f"equity_analysis_{equity_label}_{outcome_name}_{t0.strftime('%Y%m%d')}.csv",
+            mime="text/csv"
+        )
+        
+        blue_divider()
+        
+        # Methodology section
+        st.markdown("### Methodology & Technical Details")
+        
+        methodology_html = _create_methodology_html(
+            equity_label, outcome_name, t0, t1, min_pop, 
+            return_window if "Returns" in outcome_name else None
+        )
+        
+        st.html(methodology_html)

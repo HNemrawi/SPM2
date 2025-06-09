@@ -196,7 +196,8 @@ def households_served(df: DataFrame, start: Timestamp, end: Timestamp) -> int:
 @st.cache_data(show_spinner=False)
 def inflow(df: DataFrame, start: Timestamp, end: Timestamp) -> Set[int]:
     """
-    Get clients entering during date range.
+    Get clients entering during date range who weren't in any programs 
+    the day before the report start.
     
     Parameters:
     -----------
@@ -213,12 +214,29 @@ def inflow(df: DataFrame, start: Timestamp, end: Timestamp) -> Set[int]:
         Set of ClientIDs
     """
     _need(df, REQUIRED_BASE_COLS)
-    return set(df.loc[df["ProjectStart"].between(start, end), "ClientID"])
+    
+    # Get entries during the period
+    entries_mask = df["ProjectStart"].between(start, end)
+    entries_df = df[entries_mask]
+    
+    # Check who was active the day before
+    day_before = start - pd.Timedelta(days=1)
+    active_before_mask = (
+        ((df["ProjectExit"] >= day_before) | df["ProjectExit"].isna()) & 
+        (df["ProjectStart"] <= day_before)
+    )
+    active_before_ids = set(df.loc[active_before_mask, "ClientID"])
+    
+    # Return entries who weren't active before
+    entry_ids = set(entries_df["ClientID"])
+    return entry_ids - active_before_ids
 
+# Replace the existing outflow function
 @st.cache_data(show_spinner=False)
 def outflow(df: DataFrame, start: Timestamp, end: Timestamp) -> Set[int]:
     """
-    Get clients exiting during date range.
+    Get clients exiting during date range who aren't in any programs 
+    on the last day of the period.
     
     Parameters:
     -----------
@@ -235,7 +253,21 @@ def outflow(df: DataFrame, start: Timestamp, end: Timestamp) -> Set[int]:
         Set of ClientIDs
     """
     _need(df, REQUIRED_BASE_COLS)
-    return set(df.loc[df["ProjectExit"].between(start, end), "ClientID"])
+    
+    # Get exits during the period
+    exits_mask = df["ProjectExit"].between(start, end)
+    exits_df = df[exits_mask]
+    
+    # Check who is still active on the last day
+    active_on_end_mask = (
+        ((df["ProjectExit"] > end) | df["ProjectExit"].isna()) & 
+        (df["ProjectStart"] <= end)
+    )
+    still_active_ids = set(df.loc[active_on_end_mask, "ClientID"])
+    
+    # Return exits who aren't still active
+    exit_ids = set(exits_df["ClientID"])
+    return exit_ids - still_active_ids
 
 @st.cache_data(show_spinner=False)
 def ph_exit_clients(df: DataFrame, start: Timestamp, end: Timestamp) -> Set[int]:
@@ -263,23 +295,89 @@ def ph_exit_clients(df: DataFrame, start: Timestamp, end: Timestamp) -> Set[int]
     return set(df.loc[mask, "ClientID"])
 
 @st.cache_data(show_spinner=False)
-def ph_exit_rate(outflow_ids: Set[int], ph_ids: Set[int]) -> float:
+def ph_exit_rate(df: DataFrame, start: Timestamp, end: Timestamp) -> float:
     """
-    Calculate PH exits ÷ total outflow as percentage.
+    Calculate PH exits ÷ total exits as percentage.
     
     Parameters:
     -----------
-    outflow_ids : set
-        Set of all exited client IDs
-    ph_ids : set
-        Set of clients who exited to permanent housing
+    df : DataFrame
+        DataFrame of client enrollments
+    start : Timestamp
+        Start date of reporting period
+    end : Timestamp
+        End date of reporting period
         
     Returns:
     --------
     float
-        Percentage of exits to permanent housing
+        Percentage of all exits that were to permanent housing
     """
-    return _safe_div(len(ph_ids), len(outflow_ids), multiplier=100)
+    _need(df, ["ClientID", "ProjectExit", "ExitDestinationCat"])
+    
+    # Get all exits during the period
+    all_exits_mask = df["ProjectExit"].between(start, end)
+    total_exits = df.loc[all_exits_mask, "ClientID"].nunique()
+    
+    # Get PH exits during the period
+    ph_exits_mask = (
+        (df["ExitDestinationCat"] == "Permanent Housing Situations") & 
+        df["ProjectExit"].between(start, end)
+    )
+    ph_exits = df.loc[ph_exits_mask, "ClientID"].nunique()
+    
+    return _safe_div(ph_exits, total_exits, multiplier=100)
+
+@st.cache_data(show_spinner=False)
+def period_comparison(
+    df: DataFrame, 
+    current_start: Timestamp, 
+    current_end: Timestamp,
+    previous_start: Timestamp,
+    previous_end: Timestamp
+) -> Dict[str, Set[int]]:
+    """
+    Compare client populations between two time periods.
+    
+    Parameters:
+    -----------
+    df : DataFrame
+        DataFrame of client enrollments
+    current_start : Timestamp
+        Start of current period
+    current_end : Timestamp
+        End of current period
+    previous_start : Timestamp
+        Start of previous period
+    previous_end : Timestamp
+        End of previous period
+        
+    Returns:
+    --------
+    dict
+        Dictionary with:
+        - 'current_clients': Clients active in current period
+        - 'previous_clients': Clients active in previous period
+        - 'carryover': Clients active in both periods
+        - 'new': Clients in current but not previous
+        - 'exited': Clients in previous but not current
+    """
+    # Get clients active in each period
+    current_clients = served_clients(df, current_start, current_end)
+    previous_clients = served_clients(df, previous_start, previous_end)
+    
+    # Calculate the different groups
+    carryover = current_clients.intersection(previous_clients)
+    new = current_clients - previous_clients
+    exited = previous_clients - current_clients
+    
+    return {
+        'current_clients': current_clients,
+        'previous_clients': previous_clients,
+        'carryover': carryover,
+        'new': new,
+        'exited': exited
+    }
 
 @st.cache_data(show_spinner=False)
 def return_after_exit(
@@ -291,7 +389,7 @@ def return_after_exit(
 ) -> Set[int]:
     """
     Identify clients who exited to PH in the reporting period and returned
-    to homelessness within return_window days.
+    to homelessness within return_window days using HUD-compliant logic.
     
     Parameters:
     -----------
@@ -312,14 +410,8 @@ def return_after_exit(
         Set of ClientIDs who returned to homelessness within return_window days
         of a PH exit
     """
-    _need(
-        df_filtered,
-        REQUIRED_BASE_COLS + ["ExitDestinationCat"]
-    )
-    _need(
-        full_df,
-        REQUIRED_BASE_COLS + ["ProjectTypeCode"]
-    )
+    _need(df_filtered, REQUIRED_BASE_COLS + ["ExitDestinationCat"])
+    _need(full_df, REQUIRED_BASE_COLS + ["ProjectTypeCode", "HouseholdMoveInDate", "EnrollmentID"])
     
     # Get PH exits during the reporting period
     exits = df_filtered[
@@ -327,7 +419,6 @@ def return_after_exit(
         (df_filtered["ExitDestinationCat"] == "Permanent Housing Situations")
     ].copy()
     
-    # Early return if no qualifying exits
     if exits.empty:
         return set()
     
@@ -335,10 +426,10 @@ def return_after_exit(
     exited_clients = set(exits["ClientID"])
     returners = set()
     
-    # Check each client for returns
+    # Check each client for returns using HUD logic
     for client_id in exited_clients:
         # Get all enrollments for this client
-        client_enrollments = full_df[full_df["ClientID"] == client_id].sort_values("ProjectStart")
+        client_enrollments = full_df[full_df["ClientID"] == client_id].copy()
         
         # Get this client's qualifying exits
         client_exits = exits[exits["ClientID"] == client_id].sort_values("ProjectExit")
@@ -346,38 +437,115 @@ def return_after_exit(
         # For each qualifying exit, scan forward for returns
         for _, exit_row in client_exits.iterrows():
             exit_date = exit_row["ProjectExit"]
+            exit_enrollment_id = exit_row.get("EnrollmentID", -1)
             
-            # Look for enrollments that started after this exit but within the window
-            reentries = client_enrollments[
-                (client_enrollments["ProjectStart"] > exit_date) &
-                (client_enrollments["ProjectStart"] <= exit_date + pd.Timedelta(days=return_window))
-            ]
-            
-            # Check each potential return against exclusion criteria
-            for _, reentry in reentries.iterrows():
-                proj_type = reentry.get("ProjectTypeCode", None)
-                move_in_date = reentry.get("HouseholdMoveInDate", pd.NaT)
-                proj_start = reentry["ProjectStart"]
-                
-                # Skip non-homeless projects (services, prevention, etc.)
-                if proj_type in NON_HOMELESS_PROJECTS:
-                    continue
-                
-                # Skip PH projects with move-in date matching project start
-                # (indicates direct transfer to another PH program, not a return)
-                if (
-                    str(proj_type) in [str(pt) for pt in PH_PROJECTS] and
-                    pd.notna(move_in_date) and
-                    pd.Timestamp(move_in_date).date() == pd.Timestamp(proj_start).date()
-                ):
-                    continue
-                
-                # Valid return found
+            # Check if client returned using HUD logic
+            if _check_return_to_homelessness(
+                client_enrollments, 
+                exit_date, 
+                exit_enrollment_id, 
+                return_window
+            ):
                 returners.add(client_id)
                 break  # Stop after first valid return
-        
+    
     return returners
 
+def _check_return_to_homelessness(
+    client_df: pd.DataFrame,
+    exit_date: pd.Timestamp,
+    exit_enrollment_id: int,
+    max_days: int = 730
+) -> bool:
+    """
+    Check if a client returns to homelessness after an exit using HUD logic.
+    
+    Parameters:
+    -----------
+    client_df : DataFrame
+        All enrollments for a single client
+    exit_date : Timestamp
+        The PH exit date to check returns after
+    exit_enrollment_id : int
+        The enrollment ID of the exit (to skip)
+    max_days : int
+        Maximum days to check for returns
+        
+    Returns:
+    --------
+    bool
+        True if client returned to homelessness, False otherwise
+    """
+    # Filter to enrollments after exit date within window
+    df_next = client_df[
+        (client_df["ProjectStart"] > exit_date) &
+        (client_df["ProjectStart"] <= exit_date + pd.Timedelta(days=max_days)) &
+        (~client_df["ProjectTypeCode"].isin(NON_HOMELESS_PROJECTS))
+    ].sort_values(["ProjectStart", "EnrollmentID"])
+    
+    if df_next.empty:
+        return False
+    
+    # Track exclusion windows for short PH stays
+    exclusion_windows: List[Tuple[pd.Timestamp, pd.Timestamp]] = []
+    
+    def _merge_window(
+        new_win: Tuple[pd.Timestamp, pd.Timestamp],
+        windows: List[Tuple[pd.Timestamp, pd.Timestamp]],
+    ) -> List[Tuple[pd.Timestamp, pd.Timestamp]]:
+        """Merge overlapping exclusion windows."""
+        new_start, new_end = new_win
+        merged: List[Tuple[pd.Timestamp, pd.Timestamp]] = []
+        for ws, we in windows:
+            if new_start <= we and new_end >= ws:
+                new_start = min(new_start, ws)
+                new_end = max(new_end, we)
+            else:
+                merged.append((ws, we))
+        merged.append((new_start, new_end))
+        merged.sort(key=lambda w: w[0])
+        return merged
+    
+    # Check each potential return enrollment
+    for _, row in df_next.iterrows():
+        if row.get("EnrollmentID", -1) == exit_enrollment_id:
+            continue
+            
+        is_ph = row["ProjectTypeCode"] in PH_PROJECTS
+        gap_days = (row["ProjectStart"] - exit_date).days
+        
+        if is_ph:
+            # Skip PH entries where ProjectStart == HouseholdMoveInDate
+            if pd.notna(row.get("HouseholdMoveInDate")) and row["ProjectStart"] == row["HouseholdMoveInDate"]:
+                continue
+                
+            # Exclude short stays (≤14d)
+            if gap_days <= 14:
+                if pd.notnull(row.get("ProjectExit")):
+                    exclusion_windows = _merge_window(
+                        (row["ProjectStart"] + pd.Timedelta(days=1),
+                         row["ProjectExit"] + pd.Timedelta(days=14)),
+                        exclusion_windows
+                    )
+                continue
+                
+            # Exclude if within any prior exclusion window
+            if any(ws <= row["ProjectStart"] <= we for ws, we in exclusion_windows):
+                if pd.notnull(row.get("ProjectExit")):
+                    exclusion_windows = _merge_window(
+                        (row["ProjectStart"] + pd.Timedelta(days=1),
+                         row["ProjectExit"] + pd.Timedelta(days=14)),
+                        exclusion_windows
+                    )
+                continue
+                
+            # This is a valid PH return to homelessness
+            return True
+        else:
+            # Non-PH enrollment is an immediate return to homelessness
+            return True
+    
+    return False
 # ────────────────────────── Demographic Helpers ────────────────────────── #
 
 def category_counts(df: DataFrame, ids: Set[int], group_col: str, name: str) -> Series:

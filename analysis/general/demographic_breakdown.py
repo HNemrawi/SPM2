@@ -1,5 +1,5 @@
 """
-Demographic breakdown section for HMIS dashboard.
+Demographic breakdown section for HMIS dashboard - Improved Version
 """
 
 import numpy as np
@@ -12,14 +12,15 @@ from typing import Dict, List, Set, Tuple, Optional, Any
 
 from analysis.general.data_utils import (
     DEMOGRAPHIC_DIMENSIONS, _safe_div, category_counts, inflow, 
-    outflow, ph_exit_clients, return_after_exit, served_clients
+    outflow, ph_exit_clients, ph_exit_rate, return_after_exit, served_clients
 )
 from analysis.general.filter_utils import (
     get_filter_timestamp, hash_data, init_section_state, is_cache_valid, invalidate_cache
 )
 from analysis.general.theme import (
     CUSTOM_COLOR_SEQUENCE, MAIN_COLOR, PLOT_TEMPLATE, SECONDARY_COLOR, SUCCESS_COLOR,
-    WARNING_COLOR, apply_chart_style, create_insight_container, fmt_int, fmt_pct
+    WARNING_COLOR, NEUTRAL_COLOR, apply_chart_style, create_insight_container, 
+    fmt_int, fmt_pct, blue_divider
 )
 
 # Constants
@@ -62,24 +63,34 @@ def _calculate_breakdown_data(
     outflow_ids = outflow(df_filt, t0, t1)
     ph_ids = ph_exit_clients(df_filt, t0, t1)
     
-    # Get PH exits for return rate calculation
-    ph_exits = set(
-        df_filt.loc[
-            (df_filt["ProjectExit"].between(t0, t1))
-            & (df_filt["ExitDestinationCat"] == "Permanent Housing Situations"),
-            "ClientID",
-        ]
+    # Get ALL unique clients who exited for PH exit rate calculation
+    all_exits_mask = df_filt["ProjectExit"].between(t0, t1)
+    all_exit_ids = set(df_filt.loc[all_exits_mask, "ClientID"])
+    
+    # Calculate returns using HUD-compliant logic with FULL dataset
+    # First, get the PH exits subset for returns calculation
+    ph_exits_mask = (
+        (df_filt["ProjectExit"].between(t0, t1))
+        & (df_filt["ExitDestinationCat"] == "Permanent Housing Situations")
     )
+    ph_exits_df = df_filt[ph_exits_mask]
+    ph_exits_ids = set(ph_exits_df["ClientID"].unique())
     
-    # Calculate returns
-    return_ids = return_after_exit(df_filt, full_df, t0, t1, return_window)
+    # Calculate returns only for those who exited to PH
+    return_ids = return_after_exit(ph_exits_df, full_df, t0, t1, return_window)
     
-    # Calculate counts by demographic dimension
+    # Validate returns are subset of PH exits
+    if not return_ids.issubset(ph_exits_ids):
+        print(f"WARNING: {len(return_ids - ph_exits_ids)} returns not in PH exits set")
+        return_ids = return_ids.intersection(ph_exits_ids)
+    
+    # Calculate counts by demographic dimension - ensuring unique clients
     bdf = pd.concat(
         [
             category_counts(df_filt, served_ids, dim_col, "Served"),
             category_counts(df_filt, inflow_ids, dim_col, "Inflow"),
             category_counts(df_filt, outflow_ids, dim_col, "Outflow"),
+            category_counts(df_filt, all_exit_ids, dim_col, "Total Exits"),
             category_counts(df_filt, ph_ids, dim_col, "PH Exits"),
         ],
         axis=1,
@@ -89,14 +100,31 @@ def _calculate_breakdown_data(
     if bdf.empty:
         return pd.DataFrame()
     
-    # Calculate PH Exit Rate where Outflow > 0
-    bdf["PH Exit Rate"] = (
-        bdf["PH Exits"] / bdf["Outflow"] * 100
-    ).where(bdf["Outflow"] > 0).round(1)
+    # FIXED: Calculate PH Exit Rate using the same logic as ph_exit_rate()
+    # For each demographic group, calculate rate properly
+    ph_exit_rates = []
+    for _, row in bdf.iterrows():
+        demo_value = row[dim_col]
+        
+        # Use safe division with same logic as ph_exit_rate function
+        total_exits = row["Total Exits"]
+        ph_exits = row["PH Exits"]
+        
+        if total_exits > 0:
+            rate = (ph_exits / total_exits) * 100
+        else:
+            rate = 0.0
+        
+        ph_exit_rates.append(round(rate, 1))
     
-    # Prepare returns by demographic
+    bdf["PH Exit Rate"] = ph_exit_rates
+    
+    # FIXED: Prepare returns by demographic using validated return IDs
+    # Get demographic info for clients
     clients_demo = df_filt[["ClientID", dim_col]].drop_duplicates()
-    ph_demo = clients_demo[clients_demo["ClientID"].isin(ph_exits)]
+    
+    # Filter to PH exits and returns
+    ph_demo = clients_demo[clients_demo["ClientID"].isin(ph_exits_ids)]
     ret_demo = clients_demo[clients_demo["ClientID"].isin(return_ids)]
     
     # Get counts by group
@@ -113,36 +141,45 @@ def _calculate_breakdown_data(
     
     # Merge return counts
     returns_df = pd.merge(ph_counts, ret_counts, on=dim_col, how="left")
-    returns_df["PH Exit Count"] = returns_df["PH Exit Count"].fillna(0)
-    returns_df["Returns Count"] = returns_df["Returns Count"].fillna(0)
+    returns_df["PH Exit Count"] = returns_df["PH Exit Count"].fillna(0).astype(int)
+    returns_df["Returns Count"] = returns_df["Returns Count"].fillna(0).astype(int)
     
-    # Calculate Returns Rate where PH Exit Count > 0
-    returns_df["Returns to Homelessness Rate"] = (
-        returns_df["Returns Count"] / returns_df["PH Exit Count"] * 100
-    ).where(returns_df["PH Exit Count"] > 0).round(1)
+    # Calculate Returns Rate with proper validation
+    returns_df["Returns to Homelessness Rate"] = returns_df.apply(
+        lambda row: round((row["Returns Count"] / row["PH Exit Count"]) * 100, 1) 
+        if row["PH Exit Count"] > 0 else np.nan,
+        axis=1
+    )
     
     # Merge with main breakdown dataframe
     bdf = pd.merge(bdf, returns_df, on=dim_col, how="left")
+    
+    # Fill any missing values appropriately
+    bdf["PH Exit Count"] = bdf["PH Exit Count"].fillna(0).astype(int)
+    bdf["Returns Count"] = bdf["Returns Count"].fillna(0).astype(int)
+    bdf["Returns to Homelessness Rate"] = bdf["Returns to Homelessness Rate"].fillna(np.nan)
+    
+    # Add net flow column
+    bdf["Net Flow"] = bdf["Inflow"] - bdf["Outflow"]
+    
+    # Ensure all numeric columns are properly typed
+    numeric_cols = ["Served", "Inflow", "Outflow", "Total Exits", "PH Exits", 
+                    "PH Exit Count", "Returns Count", "Net Flow"]
+    for col in numeric_cols:
+        if col in bdf.columns:
+            bdf[col] = bdf[col].astype(int)
     
     return bdf
 
 def _create_counts_chart(df: DataFrame, dim_col: str) -> go.Figure:
     """
-    Create counts chart for demographic breakdown.
-    
-    Parameters:
-    -----------
-    df : DataFrame
-        Breakdown data
-    dim_col : str
-        Demographic dimension column name
-        
-    Returns:
-    --------
-    Figure
-        Plotly figure
+    Create counts chart for demographic breakdown with improved layout.
     """
-    # Reshape for plotting
+    # Determine optimal chart height based on number of groups
+    num_groups = len(df[dim_col].unique())
+    chart_height = max(500, min(900, 450 + (num_groups * 25)))
+    
+    # Reshape for plotting - exclude Total Exits from visual to avoid clutter
     counts_df = df.melt(
         id_vars=dim_col,
         value_vars=["Served", "Inflow", "Outflow", "PH Exits", "Returns Count"],
@@ -150,32 +187,194 @@ def _create_counts_chart(df: DataFrame, dim_col: str) -> go.Figure:
         value_name="Count",
     )
     
-    # Create grouped bar chart
-    fig = px.bar(
-        counts_df,
-        x=dim_col,
-        y="Count",
-        color="Metric",
-        barmode="group",
-        template=PLOT_TEMPLATE,
-        text_auto=".0f",
-        title=f"Client Counts by {dim_col}",
-        color_discrete_sequence=CUSTOM_COLOR_SEQUENCE,
-    )
+    # Calculate label characteristics
+    labels = df[dim_col].astype(str).tolist()
+    max_label_length = max(len(label) for label in labels)
     
-    # Apply consistent styling
-    fig = apply_chart_style(
-        fig,
-        xaxis_title=dim_col,
-        yaxis_title="Number of Clients",
-        height=500
-    )
+    # For very long labels, use horizontal bar chart instead
+    if max_label_length > 50 or num_groups > 15:
+        # Create horizontal bar chart
+        fig = px.bar(
+            counts_df,
+            y=dim_col,  # Note: x and y are swapped
+            x="Count",
+            color="Metric",
+            orientation='h',
+            barmode="group",
+            template=PLOT_TEMPLATE,
+            text_auto=".0f",
+            title=f"Client Count by {dim_col}",
+            color_discrete_sequence=CUSTOM_COLOR_SEQUENCE,
+        )
+        
+        # Update text positioning
+        fig.update_traces(
+            textposition='outside',
+            textfont=dict(size=9)
+        )
+        
+        # Calculate left margin based on label length
+        left_margin = max(150, min(400, 100 + (max_label_length * 5)))
+        
+        # Update layout
+        fig.update_layout(
+            legend=dict(
+                orientation="h",
+                yanchor="bottom",
+                y=1.02,
+                xanchor="center",
+                x=0.5,
+                bgcolor="rgba(0,0,0,0.5)",
+                bordercolor="white",
+                borderwidth=1
+            ),
+            margin=dict(
+                l=left_margin,
+                r=80,
+                t=120,
+                b=80
+            ),
+            height=chart_height,
+            bargap=0.2,
+            bargroupgap=0.1
+        )
+        
+        fig.update_xaxes(
+            title="Count",
+            automargin=True
+        )
+        
+        fig.update_yaxes(
+            title="",
+            automargin=True,
+            tickmode='linear',
+            dtick=1
+        )
+        
+    else:
+        # Create vertical bar chart with aggressive label handling
+        fig = px.bar(
+            counts_df,
+            x=dim_col,
+            y="Count",
+            color="Metric",
+            barmode="group",
+            template=PLOT_TEMPLATE,
+            text_auto=".0f",
+            title=f"Client Count by {dim_col}",
+            color_discrete_sequence=CUSTOM_COLOR_SEQUENCE,
+        )
+        
+        # Update text positioning
+        fig.update_traces(
+            textposition='outside',
+            textfont=dict(size=10)
+        )
+        
+        # Smart label wrapping for vertical charts
+        if max_label_length > 25:
+            wrapped_labels = []
+            for label in labels:
+                if len(label) > 25:
+                    # Prioritize natural break points
+                    if ',' in label:
+                        parts = label.split(',', 1)
+                        wrapped = parts[0].strip() + ',<br>' + parts[1].strip()
+                    elif ' or ' in label:
+                        wrapped = label.replace(' or ', '<br>or ')
+                    elif '/' in label:
+                        parts = label.split('/', 1)
+                        wrapped = parts[0].strip() + '/<br>' + parts[1].strip()
+                    elif ' - ' in label:
+                        parts = label.split(' - ', 1)
+                        wrapped = parts[0].strip() + ' -<br>' + parts[1].strip()
+                    else:
+                        # Find best space to break at
+                        words = label.split()
+                        if len(words) > 1:
+                            mid_point = len(label) // 2
+                            best_break = 0
+                            min_diff = float('inf')
+                            
+                            current_pos = 0
+                            for i, word in enumerate(words[:-1]):
+                                current_pos += len(word) + 1
+                                diff = abs(current_pos - mid_point)
+                                if diff < min_diff:
+                                    min_diff = diff
+                                    best_break = i
+                            
+                            wrapped = ' '.join(words[:best_break+1]) + '<br>' + ' '.join(words[best_break+1:])
+                        else:
+                            wrapped = label
+                else:
+                    wrapped = label
+                wrapped_labels.append(wrapped)
+            
+            # Create mapping for wrapped labels
+            label_mapping = dict(zip(df[dim_col], wrapped_labels))
+            counts_df = counts_df.copy()
+            counts_df[dim_col] = counts_df[dim_col].map(label_mapping)
+        
+        # Calculate rotation and margins
+        if num_groups <= 4 and max_label_length <= 20:
+            rotation_angle = 0
+            bottom_margin = 120
+        elif num_groups <= 6 and max_label_length <= 30:
+            rotation_angle = -30
+            bottom_margin = 150
+        elif num_groups <= 10:
+            rotation_angle = -45
+            bottom_margin = 200
+        else:
+            rotation_angle = -60
+            bottom_margin = 250
+        
+        # Add extra margin for wrapped labels
+        if max_label_length > 25:
+            bottom_margin += 50
+        
+        # Update layout
+        fig.update_layout(
+            legend=dict(
+                orientation="h",
+                yanchor="bottom",
+                y=1.02,
+                xanchor="center",
+                x=0.5,
+                bgcolor="rgba(0,0,0,0.5)",
+                bordercolor="white",
+                borderwidth=1
+            ),
+            margin=dict(
+                l=80,
+                r=80,
+                t=120,
+                b=bottom_margin
+            ),
+            height=chart_height,
+            bargap=0.2,
+            bargroupgap=0.1,
+            xaxis=dict(
+                tickangle=rotation_angle,
+                automargin=True,
+                title_standoff=30,
+                tickmode='linear',
+                dtick=1,
+                tickfont=dict(size=11 if max_label_length > 40 else 12)
+            ),
+            yaxis=dict(
+                title_standoff=20,
+                automargin=True,
+                rangemode="tozero"
+            )
+        )
     
     return fig
 
 def _create_rates_charts(df: DataFrame, dim_col: str, return_window: int) -> Tuple[go.Figure, go.Figure]:
     """
-    Create rate charts for PH exits and returns.
+    Create rate charts for PH exits and returns with improved layout.
     
     Parameters:
     -----------
@@ -191,54 +390,229 @@ def _create_rates_charts(df: DataFrame, dim_col: str, return_window: int) -> Tup
     Tuple[Figure, Figure]
         Tuple of PH exit rate and returns rate figures
     """
+    # Helper function to handle long labels
+    def process_labels_for_display(labels_list):
+        """Process labels to prevent overlap and improve readability"""
+        processed = []
+        max_len = max(len(str(label)) for label in labels_list)
+        
+        for label in labels_list:
+            label_str = str(label)
+            # For very long labels, abbreviate intelligently
+            if max_len > 40 and len(label_str) > 40:
+                if 'American Indian, Alaska Native, or Indigenous' in label_str:
+                    processed.append('AI/AN/Indigenous')
+                elif 'Black, African American, or African' in label_str:
+                    processed.append('Black/African American')
+                elif 'Hispanic/Latina/e/o' in label_str:
+                    processed.append('Hispanic/Latino')
+                elif ',' in label_str:
+                    # Keep first part before comma and abbreviate
+                    parts = label_str.split(',')
+                    processed.append(parts[0] + '...')
+                else:
+                    processed.append(label_str[:35] + '...')
+            else:
+                processed.append(label_str)
+        return processed
+    
+    # Get all unique groups from both dataframes to ensure consistent ordering
+    all_groups = sorted(df[dim_col].unique())
+    
+    # Process labels once for consistency
+    display_labels_map = dict(zip(all_groups, process_labels_for_display(all_groups)))
+    
+    # Determine layout parameters based on all groups
+    num_groups = len(all_groups)
+    max_label_len = max(len(label) for label in display_labels_map.values())
+    use_horizontal = num_groups > 8 or max_label_len > 30
+    
+    # Calculate consistent dimensions for both charts
+    if use_horizontal:
+        chart_height = max(400, min(800, 300 + (num_groups * 35)))
+        left_margin = min(400, max(150, max_label_len * 7))
+        layout_params = {
+            'height': chart_height,
+            'margin': dict(l=left_margin, r=80, t=100, b=80),
+            'showlegend': False
+        }
+    else:
+        chart_height = max(450, min(700, 400 + (num_groups * 30)))
+        
+        # Calculate rotation angle
+        if num_groups <= 3 and max_label_len <= 15:
+            angle = 0
+            bottom_margin = 100
+        elif num_groups <= 5 and max_label_len <= 20:
+            angle = -30
+            bottom_margin = 150
+        else:
+            angle = -45
+            import math
+            vertical_space = max_label_len * 7 * abs(math.sin(math.radians(45)))
+            bottom_margin = max(200, int(vertical_space + 80))
+        
+        layout_params = {
+            'height': chart_height,
+            'margin': dict(l=60, r=60, t=100, b=bottom_margin),
+            'showlegend': False,
+            'xaxis': dict(
+                tickangle=angle,
+                automargin=False,
+                tickmode='linear',
+                dtick=1,
+                tickfont=dict(size=10 if max_label_len > 25 else 11)
+            )
+        }
+    
     # PH Exit Rate chart
     ph_df = df.dropna(subset=["PH Exit Rate"])
-    fig_ph = px.bar(
-        ph_df,
-        x=dim_col,
-        y="PH Exit Rate",
-        template=PLOT_TEMPLATE,
-        text_auto=".1f",
-        title="Permanent Housing Exit Rate (%)",
-        color="PH Exit Rate",
-        color_continuous_scale="Blues",
-    )
-    fig_ph.update_traces(texttemplate="%{y:.1f}%")
     
-    # Apply consistent styling
-    fig_ph = apply_chart_style(
-        fig_ph,
-        xaxis_title=dim_col,
-        yaxis_title="PH Exit Rate (%)",
-        height=400
-    )
+    if not ph_df.empty:
+        # Sort by group name
+        ph_df_plot = ph_df.sort_values(dim_col).copy()
+        ph_df_plot['display_label'] = ph_df_plot[dim_col].map(display_labels_map)
+        
+        if use_horizontal:
+            fig_ph = px.bar(
+                ph_df_plot,
+                y='display_label',
+                x="PH Exit Rate",
+                orientation='h',
+                template=PLOT_TEMPLATE,
+                title="Permanent Housing Exit Rate (%)",
+                color="PH Exit Rate",
+                color_continuous_scale="Blues",
+            )
+            
+            fig_ph.update_layout(
+                **layout_params,
+                xaxis=dict(range=[0, max(100, ph_df_plot["PH Exit Rate"].max() * 1.2)])
+            )
+            
+            fig_ph.update_traces(
+                texttemplate='%{x:.1f}%',
+                textposition='outside',
+                textfont=dict(size=11)
+            )
+            
+        else:
+            fig_ph = px.bar(
+                ph_df_plot,
+                x='display_label',
+                y="PH Exit Rate",
+                template=PLOT_TEMPLATE,
+                title="Permanent Housing Exit Rate (%)",
+                color="PH Exit Rate",
+                color_continuous_scale="Blues",
+            )
+            
+            fig_ph.update_layout(
+                **layout_params,
+                yaxis=dict(
+                    range=[0, max(100, ph_df_plot["PH Exit Rate"].max() * 1.3)],
+                    automargin=True
+                )
+            )
+            
+            fig_ph.update_traces(
+                texttemplate='%{y:.1f}%',
+                textposition='outside',
+                textfont=dict(size=11)
+            )
+            
+        # Add hover data with full labels
+        fig_ph.update_traces(
+            customdata=ph_df_plot[[dim_col, "PH Exits", "Total Exits"]].values,
+            hovertemplate='<b>%{customdata[0]}</b><br>' +
+                         'PH Exit Rate: %{y:.1f}%<br>' +
+                         'PH Exits: %{customdata[1]}<br>' +
+                         'Total Exits: %{customdata[2]}<extra></extra>'
+        )
+    else:
+        fig_ph = go.Figure()
+        fig_ph.update_layout(
+            **layout_params,
+            title="Permanent Housing Exit Rate (%)",
+            annotations=[{
+                "text": "No PH exit data available",
+                "xref": "paper",
+                "yref": "paper",
+                "x": 0.5,
+                "y": 0.5,
+                "showarrow": False
+            }]
+        )
     
     # Returns Rate chart
     ret_df = df.dropna(subset=["Returns to Homelessness Rate"])
+    
     if not ret_df.empty:
-        fig_ret = px.bar(
-            ret_df,
-            x=dim_col,
-            y="Returns to Homelessness Rate",
-            template=PLOT_TEMPLATE,
-            text_auto=".1f",
-            title=f"Returns to Homelessness within {return_window} days (%)",
-            color="Returns to Homelessness Rate",
-            color_continuous_scale="Reds",
-        )
-        fig_ret.update_traces(texttemplate="%{y:.1f}%")
+        # Sort by group name (same order as PH chart)
+        ret_df_plot = ret_df.sort_values(dim_col).copy()
+        ret_df_plot['display_label'] = ret_df_plot[dim_col].map(display_labels_map)
         
-        # Apply consistent styling
-        fig_ret = apply_chart_style(
-            fig_ret,
-            xaxis_title=dim_col,
-            yaxis_title="Returns Rate (%)",
-            height=400
+        if use_horizontal:
+            fig_ret = px.bar(
+                ret_df_plot,
+                y='display_label',
+                x="Returns to Homelessness Rate",
+                orientation='h',
+                template=PLOT_TEMPLATE,
+                title=f"Returns to Homelessness within {return_window} days (%)",
+                color="Returns to Homelessness Rate",
+                color_continuous_scale="Reds",
+            )
+            
+            fig_ret.update_layout(
+                **layout_params,
+                xaxis=dict(range=[0, max(50, ret_df_plot["Returns to Homelessness Rate"].max() * 1.3)])
+            )
+            
+            fig_ret.update_traces(
+                texttemplate='%{x:.1f}%',
+                textposition='outside',
+                textfont=dict(size=11)
+            )
+            
+        else:
+            fig_ret = px.bar(
+                ret_df_plot,
+                x='display_label',
+                y="Returns to Homelessness Rate",
+                template=PLOT_TEMPLATE,
+                title=f"Returns to Homelessness within {return_window} days (%)",
+                color="Returns to Homelessness Rate",
+                color_continuous_scale="Reds",
+            )
+            
+            fig_ret.update_layout(
+                **layout_params,
+                yaxis=dict(
+                    range=[0, max(50, ret_df_plot["Returns to Homelessness Rate"].max() * 1.3)],
+                    automargin=True
+                )
+            )
+            
+            fig_ret.update_traces(
+                texttemplate='%{y:.1f}%',
+                textposition='outside',
+                textfont=dict(size=11)
+            )
+        
+        # Add hover data with full labels
+        fig_ret.update_traces(
+            customdata=ret_df_plot[[dim_col, "Returns Count", "PH Exit Count"]].values,
+            hovertemplate='<b>%{customdata[0]}</b><br>' +
+                         'Return Rate: %{y:.1f}%<br>' +
+                         'Returns: %{customdata[1]}<br>' +
+                         'PH Exits: %{customdata[2]}<extra></extra>'
         )
     else:
-        # Create empty figure if no returns data
+        # Create empty figure with same dimensions
         fig_ret = go.Figure()
         fig_ret.update_layout(
+            **layout_params,
             title=f"Returns to Homelessness within {return_window} days (%)",
             annotations=[{
                 "text": "No returns data available",
@@ -249,18 +623,12 @@ def _create_rates_charts(df: DataFrame, dim_col: str, return_window: int) -> Tup
                 "showarrow": False
             }]
         )
-        fig_ret = apply_chart_style(
-            fig_ret,
-            xaxis_title=dim_col,
-            yaxis_title="Returns Rate (%)",
-            height=400
-        )
     
     return fig_ph, fig_ret
 
 def _create_outcome_quadrant_chart(df: DataFrame, dim_col: str) -> go.Figure:
     """
-    Create outcome quadrant chart comparing PH exits and returns.
+    Create outcome quadrant chart comparing PH exits and returns with improved layout.
     
     Parameters:
     -----------
@@ -289,9 +657,10 @@ def _create_outcome_quadrant_chart(df: DataFrame, dim_col: str) -> go.Figure:
                 "x": 0.5,
                 "y": 0.5,
                 "showarrow": False
-            }]
+            }],
+            height=600
         )
-        return apply_chart_style(fig, height=600)
+        return fig
     
     # Averages for quadrant lines
     avg_exit_rate = comparison_df["PH Exit Rate"].mean()
@@ -318,38 +687,44 @@ def _create_outcome_quadrant_chart(df: DataFrame, dim_col: str) -> go.Figure:
     fig.add_shape(
         type="line",
         x0=avg_exit_rate, x1=avg_exit_rate,
-        y0=comparison_df["Returns to Homelessness Rate"].min(),
-        y1=comparison_df["Returns to Homelessness Rate"].max(),
-        line=dict(color="white", dash="dash"),
+        y0=comparison_df["Returns to Homelessness Rate"].min() - 5,
+        y1=comparison_df["Returns to Homelessness Rate"].max() + 5,
+        line=dict(color="white", dash="dash", width=2),
     )
     fig.add_shape(
         type="line",
-        x0=comparison_df["PH Exit Rate"].min(),
-        x1=comparison_df["PH Exit Rate"].max(),
+        x0=comparison_df["PH Exit Rate"].min() - 5,
+        x1=comparison_df["PH Exit Rate"].max() + 5,
         y0=avg_return_rate, y1=avg_return_rate,
-        line=dict(color="white", dash="dash"),
+        line=dict(color="white", dash="dash", width=2),
     )
     
-    # Add quadrant annotations
+    # Calculate positions for quadrant annotations to avoid overlap
+    x_range = comparison_df["PH Exit Rate"].max() - comparison_df["PH Exit Rate"].min()
+    y_range = comparison_df["Returns to Homelessness Rate"].max() - comparison_df["Returns to Homelessness Rate"].min()
+    
+    # Add quadrant annotations with better positioning
     fig.add_annotation(
-        x=avg_exit_rate + 5,
-        y=avg_return_rate - 5,
-        text="🏆 Ideal: High Exits, Low Returns",
+        x=comparison_df["PH Exit Rate"].max() - (x_range * 0.15),
+        y=comparison_df["Returns to Homelessness Rate"].min() + (y_range * 0.1),
+        text="🏆 Ideal:<br>High Exits, Low Returns",
         showarrow=False,
-        font=dict(size=14, color="green"),
+        font=dict(size=12, color="green"),
         bgcolor="rgba(0,0,0,0.7)",
         bordercolor="green",
         borderwidth=1,
+        align="center"
     )
     fig.add_annotation(
-        x=avg_exit_rate - 10,
-        y=avg_return_rate + 5,
-        text="⚠️ Concern: Low Exits, High Returns",
+        x=comparison_df["PH Exit Rate"].min() + (x_range * 0.15),
+        y=comparison_df["Returns to Homelessness Rate"].max() - (y_range * 0.1),
+        text="⚠️ Concern:<br>Low Exits, High Returns",
         showarrow=False,
-        font=dict(size=14, color="red"),
+        font=dict(size=12, color="red"),
         bgcolor="rgba(0,0,0,0.7)",
         bordercolor="red",
         borderwidth=1,
+        align="center"
     )
     
     # Highlight best-performing group
@@ -361,32 +736,156 @@ def _create_outcome_quadrant_chart(df: DataFrame, dim_col: str) -> go.Figure:
     if not best_groups.empty:
         best_group = best_groups.iloc[0]
         best_label = best_group[dim_col]
+        
+        # Position annotation to avoid overlap
         fig.add_annotation(
             x=best_group["PH Exit Rate"],
             y=best_group["Returns to Homelessness Rate"],
-            text=f"🌟 Best: {best_label}",
+            text=f"🌟 Best:<br>{best_label}",
             showarrow=True,
             arrowhead=2,
             ax=40,
             ay=-40,
             bgcolor="gold",
-            font=dict(color="black", size=14)
+            font=dict(color="black", size=11),
+            align="center"
         )
     
-    # Apply consistent styling
-    fig = apply_chart_style(
-        fig, 
-        xaxis_title="PH Exit Rate (%)",
-        yaxis_title="Returns to Homelessness Rate (%)",
-        height=650
+    # Update layout with better margins and dynamic height
+    num_groups = len(comparison_df)
+    chart_height = max(700, min(900, 650 + (num_groups * 5)))
+    
+    fig.update_layout(
+        legend=dict(
+            orientation="v",
+            yanchor="middle",
+            y=0.5,
+            xanchor="left",
+            x=1.05,
+            bgcolor="rgba(0,0,0,0.5)",
+            bordercolor="white",
+            borderwidth=1
+        ),
+        margin=dict(l=80, r=180, t=120, b=100),  # Generous margins
+        height=chart_height,
+        xaxis=dict(
+            title_standoff=25,
+            range=[
+                max(0, comparison_df["PH Exit Rate"].min() - 10),
+                min(100, comparison_df["PH Exit Rate"].max() + 10)
+            ],
+            automargin=True
+        ),
+        yaxis=dict(
+            title_standoff=25,
+            range=[
+                max(0, comparison_df["Returns to Homelessness Rate"].min() - 5),
+                min(100, comparison_df["Returns to Homelessness Rate"].max() + 5)
+            ],
+            automargin=True
+        )
     )
     
+    return fig
+
+def _create_flow_balance_chart(df: DataFrame, dim_col: str) -> go.Figure:
+    """
+    Create a chart showing net flow (inflow - outflow) by demographic.
+    """
+    # Sort by net flow for visual impact
+    flow_df = df.sort_values("Net Flow", ascending=True)
+    
+    # Color bars based on positive/negative
+    colors = [SUCCESS_COLOR if x >= 0 else WARNING_COLOR for x in flow_df["Net Flow"]]
+    
+    # Create horizontal bar chart for better label visibility
+    fig = go.Figure()
+    
+    fig.add_trace(go.Bar(
+        x=flow_df["Net Flow"],
+        y=flow_df[dim_col],
+        orientation='h',
+        marker_color=colors,
+        text=flow_df["Net Flow"].apply(lambda x: f"{x:+,.0f}"),
+        textposition='outside',
+        textfont=dict(size=12, color="white"),
+        hovertemplate='<b>%{y}</b><br>Net Flow: %{x:+,}<br>Inflow: %{customdata[0]:,}<br>Outflow: %{customdata[1]:,}<extra></extra>',
+        customdata=np.column_stack((flow_df["Inflow"], flow_df["Outflow"]))
+    ))
+    
+    # Calculate height
+    num_groups = len(flow_df)
+    chart_height = max(400, min(800, 350 + (num_groups * 30)))
+    
+    # Update layout
+    fig.update_layout(
+        title="System Flow Balance by Group",
+        template=PLOT_TEMPLATE,
+        height=chart_height,
+        showlegend=False,
+        xaxis=dict(
+            title="Net Flow (Inflow - Outflow)",
+            zeroline=True,
+            zerolinewidth=2,
+            zerolinecolor='white',
+            automargin=True
+        ),
+        yaxis=dict(
+            automargin=True,
+            title=""
+        ),
+        margin=dict(
+            l=max(150, 50 + (flow_df[dim_col].astype(str).str.len().max() * 8)),
+            r=80,
+            t=80,
+            b=80
+        )
+    )
+    
+    # Add annotation for context
+    total_net = flow_df["Net Flow"].sum()
+    fig.add_annotation(
+        text=f"Total System Net Flow: {total_net:+,}",
+        xref="paper", yref="paper",
+        x=0.5, y=1.05,
+        showarrow=False,
+        font=dict(size=14, color="white", weight='bold'),
+        bgcolor="rgba(0,0,0,0.7)",
+        bordercolor="white",
+        borderwidth=1,
+        borderpad=4
+    )
+    
+    return fig
+
+def _create_empty_figure(message: str) -> go.Figure:
+    """Create an empty figure with a message."""
+    fig = go.Figure()
+    fig.update_layout(
+        title=message,
+        template=PLOT_TEMPLATE,
+        height=400,
+        annotations=[{
+            "text": message,
+            "xref": "paper",
+            "yref": "paper", 
+            "x": 0.5,
+            "y": 0.5,
+            "showarrow": False,
+            "font": {"size": 16, "color": "gray"}
+        }]
+    )
     return fig
 
 @st.fragment
 def render_breakdown_section(df_filt: DataFrame, full_df: Optional[DataFrame] = None) -> None:
     """
     Render demographic breakdown with enhanced visualizations.
+    
+    This section allows users to:
+    - Analyze key metrics broken down by demographic dimensions
+    - Compare PH exit rates and return rates across groups
+    - Identify disparities and opportunities for intervention
     
     Parameters:
     -----------
@@ -395,13 +894,15 @@ def render_breakdown_section(df_filt: DataFrame, full_df: Optional[DataFrame] = 
     full_df : DataFrame, optional
         Full DataFrame for returns analysis
     """
-    # fallback
+    # Ensure we have the full dataset for returns
     if full_df is None:
-        full_df = df_filt.copy()
+        full_df = st.session_state.get("df")
+        if full_df is None:
+            st.error("Original dataset not found. Returns analysis requires full data.")
+            return
 
     # Initialize or retrieve section state
     state: Dict[str, Any] = init_section_state(BREAKDOWN_SECTION_KEY)
-    summary_state = st.session_state.get(f"state_summary_metrics", {})
 
     # Check if cache is valid
     filter_ts = get_filter_timestamp()
@@ -410,251 +911,400 @@ def render_breakdown_section(df_filt: DataFrame, full_df: Optional[DataFrame] = 
     if not cache_valid:
         invalidate_cache(state, filter_ts)
         state.pop("breakdown_df", None)
+        state.pop("return_window", None)
+        state.pop("min_group_size", None)
 
-    # Header and description
-    st.subheader("👥 Breakdown by Demographics", help="Analyze how key metrics distribute across different demographic groups")
-    st.markdown("""
-    Analyze how key metrics distribute across different demographic groups.
-    Choose a dimension to break down the data and identify patterns or disparities.
-    """)
+    # Header with info button
+    col_header, col_info = st.columns([6, 1])
+    with col_header:
+        st.subheader("👥 Demographic Breakdown Analysis")
+    with col_info:
+        with st.popover("ℹ️ Help", use_container_width=True):
+            st.markdown("""
+            ### Understanding Demographic Breakdowns
+            
+            This section analyzes key metrics broken down by demographic dimensions to identify disparities and opportunities for targeted interventions.
+            
+            **Available Dimensions:**
+            - Race/Ethnicity, Gender, Entry Age Tier
+            - Program CoC, Local CoC, Agency Name, Program Name
+            - Project Type, Household Type, Head of Household
+            - Veteran Status, Chronic Homelessness, Currently Fleeing DV
+            
+            **Metrics Calculated for Each Group:**
+            
+            **Population & Flow:**
+            - **Served**: Unique clients active during the period (enrolled at any point)
+            - **Inflow**: Clients entering who weren't in any programs the day before
+            - **Outflow**: Clients exiting who aren't in any programs at period end
+            - **Net Flow**: Inflow - Outflow (positive = growth, negative = reduction)
+            
+            **Housing Outcomes:**
+            - **Total Exits**: Unique clients with any exit during the period
+            - **PH Exits**: Unique clients exiting to permanent housing destinations
+            - **PH Exit Rate**: (PH Exits ÷ Total Exits) × 100
+            
+            **Housing Stability:**
+            - **Returns Count**: PH exits who returned to homelessness within tracking window
+            - **Returns to Homelessness Rate**: (Returns ÷ PH Exits) × 100
+            - **Return tracking**: Always system-wide, even with filters active
+            
+            **Important Notes:**
+            - **Minimum group size filter**: Hide small groups for statistical reliability
+            - **When filters are active**: Inflow/outflow only track movement within filtered programs
+            - **Returns are different**: Always tracked across ALL programs regardless of filters
+            - **Each client counted once**: Even with multiple enrollments
+            
+            **How to Interpret:**
+            - **High PH Exit Rate** (>40%): Strong housing placement outcomes
+            - **Low Return Rate** (<10%): Good housing stability
+            - **Positive Net Flow**: Group is growing in the system
+            - **Large disparities**: May indicate need for targeted interventions
+            
+            **Visual Components:**
+            - **Client Movement Chart**: Compare served, inflow, outflow, PH exits, and returns
+            - **System Flow Balance**: Visualize net flow (growth/reduction) by group
+            - **Performance Metrics**: PH exit rates and return rates by category
+            - **Outcome Comparison**: Quadrant chart plotting PH exits vs returns
+            
+            **Tips for Analysis:**
+            - Compare PH exit rates across groups to find disparities
+            - Look for groups with high return rates needing stability support
+            - Identify groups with negative net flow (more leaving than entering)
+            - Use the quadrant chart to find best performers (high PH exits, low returns)
+            - Consider group size when interpreting - larger groups are more reliable
+            """)
 
-    # Get required data from summary metrics
-    served_ids = summary_state.get("served_ids", set())
-    inflow_ids = summary_state.get("inflow_ids", set())
-    outflow_ids = summary_state.get("outflow_ids", set())
-    ph_ids = summary_state.get("ph_ids", set())
-    return_window = summary_state.get("return_window", 180)
-
-    # Check if we have the necessary data
-    if not all([served_ids, inflow_ids, outflow_ids, ph_ids]):
-        st.warning("Please calculate summary metrics first.")
+    # Get time boundaries
+    t0 = st.session_state.get("t0")
+    t1 = st.session_state.get("t1")
+    
+    if not all([t0, t1]):
+        st.warning("⚠️ Please set date ranges in the filter panel before viewing breakdowns.")
         return
 
-    # Choose breakdown dimension
-    key_suffix = hash_data(filter_ts)
-    dim_label = st.selectbox(
-        "Break down by…",
-        [lbl for lbl, _ in DEMOGRAPHIC_DIMENSIONS],
-        key=f"breakdown_dim_{key_suffix}",
-        help="Choose a demographic dimension for analysis"
-    )
-    dim_col = dict(DEMOGRAPHIC_DIMENSIONS)[dim_label]
+    # Check for active filters warning
+    active_filters = st.session_state.get("filters", {})
+    if any(active_filters.values()):
+        filter_warning_html = f"""
+        <div style="background-color: rgba(255,165,0,0.1); border: 2px solid {WARNING_COLOR}; 
+                    border-radius: 10px; padding: 15px; margin-bottom: 20px;">
+            <strong>🔍 Filtered View Active</strong><br>
+            Breakdown shows data for filtered subset only. Inflow/outflow are within this subset.
+            Returns are tracked system-wide.
+        </div>
+        """
+        st.html(filter_warning_html)
 
-    # If dimension changed, clear cache
-    if state.get("selected_dimension") != dim_label:
-        state["selected_dimension"] = dim_label
+    # Settings row
+    col1, col2, col3 = st.columns([3, 2, 2])
+    
+    with col1:
+        # Choose breakdown dimension
+        key_suffix = hash_data(filter_ts)
+        dim_label = st.selectbox(
+            "📊 Select dimension to analyze",
+            [lbl for lbl, _ in DEMOGRAPHIC_DIMENSIONS],
+            key=f"breakdown_dim_{key_suffix}",
+            help="Choose how to segment your data"
+        )
+        dim_col = dict(DEMOGRAPHIC_DIMENSIONS)[dim_label]
+    
+    with col2:
+        # Return window setting
+        return_window = st.number_input(
+            "Return tracking days",
+            min_value=30,
+            max_value=730,
+            value=state.get("return_window", 180),
+            step=30,
+            key=f"return_window_{key_suffix}",
+            help="Days after PH exit to track returns"
+        )
+        state["return_window"] = return_window
+    
+    with col3:
+        # Minimum group size filter
+        min_group_size = st.number_input(
+            "Min group size",
+            min_value=1,
+            max_value=100,
+            value=state.get("min_group_size", 10),
+            step=5,
+            key=f"min_group_{key_suffix}",
+            help="Hide groups smaller than this"
+        )
+
+    # Check if any key parameters changed that require recalculation
+    params_changed = (
+        state.get("selected_dimension") != dim_label or
+        state.get("cached_return_window") != return_window or
+        state.get("min_group_size") != min_group_size
+    )
+
+    # Update state
+    state["selected_dimension"] = dim_label
+    state["min_group_size"] = min_group_size
+
+    # If parameters changed, clear cache
+    if params_changed:
         state.pop("breakdown_df", None)
 
-    # Group filter: let user focus on specific categories
+    # Check if column exists
+    if dim_col not in df_filt.columns:
+        st.error(f"❌ Column '{dim_col}' not found in the dataset.")
+        return
+
+    # Group selection
     try:
         unique_groups = sorted(df_filt[dim_col].dropna().unique())
-        selected_groups = st.multiselect(
-            f"Focus on specific {dim_label} group(s):",
-            options=unique_groups,
-            default=unique_groups,
-            key=f"group_filter_{key_suffix}",
-            help=f"Select one or more {dim_label} values to filter results"
-        )
+        
+        if not unique_groups:
+            st.warning(f"⚠️ No data available for {dim_label}.")
+            return
+        
+        # Show group selector if more than 10 groups
+        if len(unique_groups) > 10:
+            selected_groups = st.multiselect(
+                f"Filter {dim_label} groups (showing all by default)",
+                options=unique_groups,
+                default=unique_groups,
+                key=f"group_filter_{key_suffix}",
+                help="Select specific groups to analyze"
+            )
+        else:
+            selected_groups = unique_groups
+            
     except Exception as e:
-        st.error(f"Error loading groups: {e}")
+        st.error(f"❌ Error loading categories: {e}")
         return
 
     if not selected_groups:
-        st.info(f"Select one or more {dim_label} group(s) to continue.")
+        st.info(f"ℹ️ Please select at least one {dim_label} category.")
         return
 
     # Compute breakdown if needed
     if "breakdown_df" not in state:
-        if dim_col not in df_filt.columns:
-            st.error(f"Column '{dim_col}' not found in the dataset.")
-            return
-
-        with st.spinner(f"Calculating breakdown by {dim_label}..."):
+        with st.spinner(f"📊 Calculating breakdown by {dim_label}..."):
             try:
-                # Calculate breakdown data with improved metrics
+                # Calculate breakdown data
                 bdf = _calculate_breakdown_data(
-                    df_filt, full_df, dim_col, 
-                    st.session_state.get("t0"), 
-                    st.session_state.get("t1"),
-                    return_window
+                    df_filt, full_df, dim_col, t0, t1, return_window
                 )
                 
                 if bdf.empty:
-                    st.info("No data available for the selected breakdown.")
+                    st.info(f"ℹ️ No data available for breakdown by {dim_label}.")
                     return
-                    
-                # Sort by served count for consistent display
-                bdf = bdf.sort_values("Served", ascending=False)
                 
-                # Cache the result
+                # Cache the FULL result before any filtering
                 state["breakdown_df"] = bdf
+                state["cached_return_window"] = return_window
                 
             except Exception as e:
-                st.error(f"Error calculating breakdown: {e}")
+                st.error(f"❌ Error calculating breakdown: {e}")
                 return
-    else:
-        bdf = state["breakdown_df"]
-
-    # Apply group filter
-    bdf = bdf[bdf[dim_col].isin(selected_groups)]
-
-    if bdf.empty:
-        st.info("No data available for the selected breakdown.")
+    
+    # Get the cached data
+    bdf = state["breakdown_df"].copy()  # Make a copy to avoid modifying cached data
+    
+    # Apply minimum group size filter
+    bdf_filtered = bdf[bdf["Served"] >= min_group_size]
+    
+    if bdf_filtered.empty:
+        st.info(f"ℹ️ No groups meet the minimum size threshold of {min_group_size}.")
+        st.caption(f"The largest group has {bdf['Served'].max()} clients.")
         return
+    
+    # Apply group filter
+    bdf_filtered = bdf_filtered[bdf_filtered[dim_col].isin(selected_groups)]
 
-    # Display analysis in tabs
-    tab_counts, tab_rates, tab_table = st.tabs(
-        ["Counts", "Outcome Rates", "Data Table"]
-    )
-
-    with tab_counts:
-        st.subheader("Key Metrics by Category")
+    if bdf_filtered.empty:
+        st.info(f"ℹ️ No data available for the selected criteria.")
+        return
         
-        # Create counts chart
-        fig_counts = _create_counts_chart(bdf, dim_col)
+    # Sort by served count for consistent display
+    bdf_filtered = bdf_filtered.sort_values("Served", ascending=False)
+
+    blue_divider()
+
+    # Create organized layout with tabs
+    tab_overview, tab_flow, tab_outcomes, tab_data = st.tabs([
+        "📊 Overview", "🔄 System Flow", "🎯 Outcomes Analysis", "📋 Data Table"
+    ])
+
+    with tab_overview:
+        # Summary metrics at top
+        st.markdown("### Key Metrics Summary")
+        
+        # Calculate summary stats
+        total_served = bdf_filtered["Served"].sum()
+        total_inflow = bdf_filtered["Inflow"].sum()
+        total_outflow = bdf_filtered["Outflow"].sum()
+        total_ph_exits = bdf_filtered["PH Exits"].sum()
+        total_returns = bdf_filtered["Returns Count"].sum()
+        
+        # Display summary metrics
+        summary_cols = st.columns(5)
+        summary_cols[0].metric("Total Served", fmt_int(total_served))
+        summary_cols[1].metric("Total Inflow", fmt_int(total_inflow))
+        summary_cols[2].metric("Total Outflow", fmt_int(total_outflow))
+        summary_cols[3].metric("Total PH Exits", fmt_int(total_ph_exits))
+        summary_cols[4].metric("Total Returns", fmt_int(total_returns))
+        
+        # Volume comparison chart
+        st.markdown("### Client Count by Group")
+        fig_counts = _create_counts_chart(bdf_filtered, dim_col)
         st.plotly_chart(fig_counts, use_container_width=True)
 
-    with tab_rates:
+    with tab_flow:
+        st.markdown("### System Flow Analysis")
+        
+        # Net flow visualization
+        fig_flow = _create_flow_balance_chart(bdf_filtered, dim_col)
+        st.plotly_chart(fig_flow, use_container_width=True)
+        
+        # Flow insights
+        with st.expander("📊 Flow Insights", expanded=True):
+            # Groups with highest growth/reduction
+            growth_groups = bdf_filtered[bdf_filtered["Net Flow"] > 0].sort_values("Net Flow", ascending=False)
+            reduction_groups = bdf_filtered[bdf_filtered["Net Flow"] < 0].sort_values("Net Flow", ascending=True)
+            
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                st.markdown("#### 📈 Growing Groups")
+                if not growth_groups.empty:
+                    for _, row in growth_groups.head(3).iterrows():
+                        net_pct = (row["Net Flow"] / row["Served"] * 100) if row["Served"] > 0 else 0
+                        st.markdown(f"**{row[dim_col]}**: +{row['Net Flow']} ({net_pct:.1f}% of served)")
+                else:
+                    st.info("No groups showing growth")
+            
+            with col2:
+                st.markdown("#### 📉 Reducing Groups")
+                if not reduction_groups.empty:
+                    for _, row in reduction_groups.head(3).iterrows():
+                        net_pct = (row["Net Flow"] / row["Served"] * 100) if row["Served"] > 0 else 0
+                        st.markdown(f"**{row[dim_col]}**: {row['Net Flow']} ({net_pct:.1f}% of served)")
+                else:
+                    st.info("No groups showing reduction")
+
+    with tab_outcomes:
+        st.markdown("### Performance Metrics by Category")
+        st.caption("Analyze success rates and identify high-performing groups")
+        
         # Create two-column layout for rate charts
         col1, col2 = st.columns(2)
         
         with col1:
-            st.subheader("PH Exit Rate by Category")
-            fig_ph, _ = _create_rates_charts(bdf, dim_col, return_window)
+            fig_ph, _ = _create_rates_charts(bdf_filtered, dim_col, return_window)
             st.plotly_chart(fig_ph, use_container_width=True)
+            st.caption("📈 Higher rates indicate better housing placement outcomes")
 
         with col2:
-            st.subheader(f"Returns to Homelessness Rate ({return_window}d)")
-            _, fig_ret = _create_rates_charts(bdf, dim_col, return_window)
+            _, fig_ret = _create_rates_charts(bdf_filtered, dim_col, return_window)
             st.plotly_chart(fig_ret, use_container_width=True)
+            st.caption("📉 Lower rates indicate better housing stability")
 
         # Outcome Comparison (quadrant chart)
-        st.subheader("PH Exit vs Return Rate: Which Groups Are Succeeding?")
-        fig_outcome = _create_outcome_quadrant_chart(bdf, dim_col)
+        st.markdown("### Outcome Comparison: Finding Success Patterns")
+        st.caption("Groups in the bottom-right quadrant have the best outcomes (high PH exits, low returns)")
+        
+        fig_outcome = _create_outcome_quadrant_chart(bdf_filtered, dim_col)
         st.plotly_chart(fig_outcome, use_container_width=True)
+        
+        # Add interpretation help
+        with st.expander("📖 Understanding the charts", expanded=False):
+            st.markdown("""
+            **Rate Charts:**
+            - **PH Exit Rate**: Percentage of ALL exits that went to permanent housing
+            - **Return Rate**: Percentage of PH exits who returned within the tracking window
+            
+            **Quadrant Chart:**
+            - **X-axis (PH Exit Rate)**: Higher is better - more exits to permanent housing
+            - **Y-axis (Return Rate)**: Lower is better - fewer returns to homelessness
+            - **Bubble size**: Represents the number of clients served
+            
+            The chart is divided into four quadrants by the average rates:
+            - **Bottom-Right (🏆)**: High PH exits, low returns - best outcomes
+            - **Top-Left (⚠️)**: Low PH exits, high returns - needs intervention
+            - **Top-Right**: High PH exits but also high returns - housing stability issues
+            - **Bottom-Left**: Low PH exits but also low returns - stable but limited housing placements
+            """)
 
-    with tab_table:
-        st.subheader("Detailed Data Table")
-        display_cols = [
-            dim_col,
-            "Served",
-            "Inflow",
-            "Outflow",
-            "PH Exits",
-            "PH Exit Rate",
-            "Returns Count",
-            "Returns to Homelessness Rate",
+    with tab_data:
+        st.markdown("### Detailed Data Export")
+        
+        # Prepare export dataframe
+        export_df = bdf_filtered.copy()
+        
+        # Reorder columns for clarity
+        column_order = [
+            dim_col, "Served", "Inflow", "Outflow", "Net Flow",
+            "Total Exits", "PH Exits", "PH Exit Rate",
+            "PH Exit Count", "Returns Count", "Returns to Homelessness Rate"
         ]
-        display_cols = [c for c in display_cols if c in bdf.columns]
-        display_df = bdf[display_cols].copy().sort_values("Served", ascending=False)
-
-        # Format the table
+        
+        # Only include columns that exist
+        column_order = [col for col in column_order if col in export_df.columns]
+        export_df = export_df[column_order]
+        
+        # Format for display
         format_dict = {
-            "Served": fmt_int,
-            "Inflow": fmt_int,
-            "Outflow": fmt_int,
-            "PH Exits": fmt_int,
+            "Served": "{:,.0f}",
+            "Inflow": "{:,.0f}",
+            "Outflow": "{:,.0f}",
+            "Net Flow": "{:+,.0f}",
+            "Total Exits": "{:,.0f}",
+            "PH Exits": "{:,.0f}",
             "PH Exit Rate": "{:.1f}%",
-            "Returns Count": fmt_int,
+            "PH Exit Count": "{:,.0f}",
+            "Returns Count": "{:,.0f}",
             "Returns to Homelessness Rate": "{:.1f}%",
         }
-        format_dict = {k: v for k, v in format_dict.items() if k in display_df.columns}
-
-        st.dataframe(
-            display_df
-            .style.format(format_dict)
-            .background_gradient(subset=["PH Exit Rate"], cmap="Blues")
-            .background_gradient(
-                subset=["Returns to Homelessness Rate"] if "Returns to Homelessness Rate" in display_df.columns else [],
-                cmap="Reds"
-            )
+        
+        # Apply formatting
+        styled_export = export_df.style.format(
+            {k: v for k, v in format_dict.items() if k in export_df.columns}
         )
-    
-    # Add insightful commentary
-    if not bdf.empty:
-        with st.expander("Analysis & Insights", expanded=True):
-            # Find groups with highest/lowest PH exit rates
-            ph_rate_filtered = bdf.dropna(subset=["PH Exit Rate"])
-            if not ph_rate_filtered.empty:
-                best_ph_idx = ph_rate_filtered["PH Exit Rate"].idxmax()
-                worst_ph_idx = ph_rate_filtered["PH Exit Rate"].idxmin()
-                
-                if best_ph_idx is not None and worst_ph_idx is not None:
-                    best_ph_row = ph_rate_filtered.loc[best_ph_idx]
-                    worst_ph_row = ph_rate_filtered.loc[worst_ph_idx]
-                    ph_gap = best_ph_row["PH Exit Rate"] - worst_ph_row["PH Exit Rate"]
-                    
-                    st.markdown(f"""
-                    ### Exit Rate Analysis
-                    * The **{best_ph_row[dim_col]}** group has the highest permanent housing exit rate at **{fmt_pct(best_ph_row['PH Exit Rate'])}**
-                    * The **{worst_ph_row[dim_col]}** group has the lowest rate at **{fmt_pct(worst_ph_row['PH Exit Rate'])}**
-                    * Gap between highest and lowest: **{fmt_pct(ph_gap)}**
-                    """)
+        
+        st.dataframe(styled_export, use_container_width=True, height=500)
+        
+        # Download options
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            csv = export_df.to_csv(index=False)
+            st.download_button(
+                label="📥 Download as CSV",
+                data=csv,
+                file_name=f"breakdown_{dim_col}_{t0.strftime('%Y%m%d')}_{t1.strftime('%Y%m%d')}.csv",
+                mime="text/csv",
+                use_container_width=True
+            )
+        
+        with col2:
+            # Create a simple text download of key insights
+            insights_text = f"""Demographic Breakdown Analysis
+Date Range: {t0.strftime('%Y-%m-%d')} to {t1.strftime('%Y-%m-%d')}
+Dimension: {dim_col}
+Return Window: {return_window} days
+Minimum Group Size: {min_group_size}
+
+Key Metrics:
+- Total Served: {export_df['Served'].sum():,}
+- Total PH Exits: {export_df['PH Exits'].sum():,}
+- Average PH Exit Rate: {export_df['PH Exit Rate'].mean():.1f}%
+- Average Return Rate: {export_df['Returns to Homelessness Rate'].mean():.1f}%
+
+Groups Shown: {len(export_df)} of {len(bdf)} total
+Filtered Out: {len(bdf) - len(export_df)} groups with < {min_group_size} clients
+"""
             
-            # Add returns analysis if data available
-            if "Returns to Homelessness Rate" in bdf.columns and not bdf["Returns Count"].sum() == 0:
-                # Only analyze groups with sufficient PH exits
-                returns_df = bdf[bdf["PH Exit Count"] >= 5].copy()
-                
-                if not returns_df.empty:
-                    try:
-                        best_returns_idx = returns_df["Returns to Homelessness Rate"].idxmin()
-                        worst_returns_idx = returns_df["Returns to Homelessness Rate"].idxmax()
-                        
-                        if best_returns_idx is not None and worst_returns_idx is not None:
-                            best_returns_row = returns_df.loc[best_returns_idx]
-                            worst_returns_row = returns_df.loc[worst_returns_idx]
-                            returns_gap = worst_returns_row["Returns to Homelessness Rate"] - best_returns_row["Returns to Homelessness Rate"]
-                            
-                            st.markdown(f"""
-                            ### Returns to Homelessness Analysis
-                            * The **{best_returns_row[dim_col]}** group has the lowest returns rate at **{fmt_pct(best_returns_row['Returns to Homelessness Rate'])}**
-                            * The **{worst_returns_row[dim_col]}** group has the highest returns rate at **{fmt_pct(worst_returns_row['Returns to Homelessness Rate'])}**
-                            * Gap between highest and lowest: **{fmt_pct(returns_gap)}**
-                            """)
-                    except Exception as e:
-                        st.warning(f"Couldn't generate returns insights: {e}")
-            
-            # Nuanced insight based on inflow vs outflow
-            try:
-                inflow_max_idx = bdf["Inflow"].idxmax()
-                if inflow_max_idx is not None:
-                    high = bdf.loc[inflow_max_idx]
-                    inflow_val = high["Inflow"]
-                    outflow_val = high["Outflow"]
-                    gap = inflow_val - outflow_val
-                    gap_pct = (gap / outflow_val * 100) if outflow_val else 0
-                    stable_threshold = 1.0  # percent
-                    
-                    st.markdown("### System Flow Analysis")
-                    
-                    if abs(gap_pct) < stable_threshold:
-                        st.markdown(
-                            f"* The **{high[dim_col]}** group has roughly the same inflow "
-                            f"({fmt_int(inflow_val)}) and outflow ({fmt_int(outflow_val)}), indicating a stable population."
-                        )
-                    else:
-                        direction = "higher" if gap > 0 else "lower"
-                        sign = "+" if gap > 0 else ""
-                        st.markdown(
-                            f"* The **{high[dim_col]}** group has {abs(gap_pct):.1f}% {direction} inflow "
-                            f"({fmt_int(inflow_val)}) than outflow ({fmt_int(outflow_val)}), indicating "
-                            f"a {'growing' if gap > 0 else 'shrinking'} population ({sign}{fmt_int(gap)})."
-                        )
-            except Exception as e:
-                st.warning(f"Couldn't generate flow insights: {e}")
-            
-            # Find groups with unusual patterns
-            try:
-                bdf["PH_to_outflow_ratio"] = bdf["PH Exits"] / bdf["Outflow"].replace(0, np.nan)
-                unusual = bdf[bdf["PH_to_outflow_ratio"] < 0.2]  # Less than 20% of exits to PH
-                
-                if not unusual.empty and len(unusual) < len(bdf) / 2:  # Only if it's not too many groups
-                    groups = ", ".join(f"**{row[dim_col]}**" for _, row in unusual.iterrows())
-                    st.markdown(f"""
-                    ### Intervention Opportunities
-                    * **Exit rate intervention focus:** {groups} show unusually low PH exit rates
-                      relative to their total outflow. Consider targeted strategies for these groups.
-                    """)
-            except Exception as e:
-                st.warning(f"Couldn't generate intervention insights: {e}")
+            st.download_button(
+                label="📝 Download Summary",
+                data=insights_text,
+                file_name=f"breakdown_summary_{dim_col}_{t0.strftime('%Y%m%d')}.txt",
+                mime="text/plain",
+                use_container_width=True
+            )

@@ -1,5 +1,5 @@
 """
-Trend explorer section for HMIS dashboard.
+Trend explorer section for HMIS dashboard with enhanced UI and auto-adjusting charts.
 """
 
 from typing import Any, Dict, List, Optional, Set, Tuple
@@ -21,11 +21,270 @@ from analysis.general.filter_utils import (
 )
 from analysis.general.theme import (
     CUSTOM_COLOR_SEQUENCE, MAIN_COLOR, NEUTRAL_COLOR, PLOT_TEMPLATE, SECONDARY_COLOR,
-    SUCCESS_COLOR, WARNING_COLOR, apply_chart_style, fmt_int, fmt_pct
+    SUCCESS_COLOR, WARNING_COLOR, apply_chart_style, fmt_int, fmt_pct, blue_divider
 )
 
 # Constants
 TREND_SECTION_KEY = "trend_explorer"
+
+# Define metric colors with meaningful associations
+METRIC_COLORS = {
+    "Active Clients": MAIN_COLOR,  # Neutral blue
+    "Inflow": MAIN_COLOR,          # Neutral blue
+    "Outflow": MAIN_COLOR,         # Neutral blue
+    "PH Exits": SUCCESS_COLOR,     # Success green
+}
+
+def _get_metric_color(metric_name: str) -> str:
+    """Get appropriate color for a metric based on its type."""
+    if "Returns to Homelessness" in metric_name:
+        return SECONDARY_COLOR  # Warning/danger color
+    return METRIC_COLORS.get(metric_name, MAIN_COLOR)
+
+def _get_hover_template(freq: str) -> str:
+    """Get appropriate hover template based on frequency."""
+    if freq == "D":
+        return "<b>%{x|%b %d, %Y}</b><br>Value: %{y:,.0f}<extra></extra>"
+    elif freq == "W":
+        return "<b>Week of %{x|%b %d, %Y}</b><br>Value: %{y:,.0f}<extra></extra>"
+    elif freq in ["M", "Q"]:
+        return "<b>%{x|%b %Y}</b><br>Value: %{y:,.0f}<extra></extra>"
+    else:  # Year
+        return "<b>%{x|%Y}</b><br>Value: %{y:,.0f}<extra></extra>"
+
+def _get_x_axis_angle(freq: str, num_points: int) -> int:
+    """Determine optimal x-axis label rotation to prevent overlap."""
+    if freq == "D" and num_points > 30:
+        return -90
+    elif freq == "W" and num_points > 20:
+        return -45
+    elif freq == "M" and num_points > 24:
+        return -45
+    else:
+        return 0
+
+def _calculate_dynamic_height(num_points: int, base_height: int = 400) -> int:
+    """Calculate dynamic chart height based on number of data points."""
+    if num_points <= 12:
+        return base_height
+    elif num_points <= 24:
+        return base_height + 50
+    elif num_points <= 52:
+        return base_height + 100
+    else:
+        return min(base_height + 200, 700)
+
+def _calculate_dynamic_margins(num_points: int, has_text_labels: bool = False) -> dict:
+    """Calculate dynamic margins to prevent cutoff."""
+    base_margins = {"l": 80, "r": 80, "t": 100, "b": 100}
+    
+    # Increase bottom margin for rotated labels
+    if num_points > 20:
+        base_margins["b"] = 140
+    elif num_points > 10:
+        base_margins["b"] = 120
+    
+    # Increase top/bottom margins significantly for text labels
+    if has_text_labels:
+        base_margins["t"] = 120
+        base_margins["b"] = max(base_margins["b"], 120)
+        # Extra padding for value labels that appear above/below bars
+        base_margins["t"] += 40
+        base_margins["b"] += 20
+    
+    return base_margins
+
+def _get_trend_icon(total_change: float, increase_is_negative: bool = False) -> str:
+    """Get appropriate emoji icon for trend direction."""
+    if abs(total_change) < 0.001:
+        return "➡️"
+    elif total_change > 0:
+        return "📉" if increase_is_negative else "📈"
+    else:
+        return "📈" if increase_is_negative else "📉"
+
+def _get_trend_color(change: float, increase_is_negative: bool = False) -> str:
+    """Get appropriate color for a change value."""
+    if abs(change) < 0.001:
+        return "gray"
+    elif (change > 0 and not increase_is_negative) or (change < 0 and increase_is_negative):
+        return "green"
+    else:
+        return "red"
+
+def _format_period_label(freq_label: str) -> str:
+    """Convert frequency label to user-friendly period name."""
+    period_map = {
+        "Days": "day",
+        "Weeks": "week", 
+        "Months": "month",
+        "Quarters": "quarter",
+        "Years": "year"
+    }
+    return period_map.get(freq_label, "period")
+
+def _render_metric_explanation_card():
+    """Render a well-formatted metric explanation card using HTML."""
+    explanation_html = """
+    <div style="background-color: rgba(17, 24, 39, 0.8); border: 1px solid rgba(55, 65, 81, 0.5); 
+                border-radius: 12px; padding: 20px; margin-bottom: 20px;">
+        <h4 style="color: #60A5FA; margin-top: 0; margin-bottom: 16px; font-size: 18px;">
+            📊 Understanding the Metrics
+        </h4>
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px;">
+            <div style="background-color: rgba(31, 41, 55, 0.5); padding: 12px; border-radius: 8px;">
+                <strong style="color: #93C5FD;">Active Clients</strong>
+                <p style="margin: 4px 0; color: #E5E7EB; font-size: 14px;">
+                    All clients enrolled at any point during the time period
+                </p>
+            </div>
+            <div style="background-color: rgba(31, 41, 55, 0.5); padding: 12px; border-radius: 8px;">
+                <strong style="color: #93C5FD;">Inflow</strong>
+                <p style="margin: 4px 0; color: #E5E7EB; font-size: 14px;">
+                    Clients entering during the period who weren't enrolled the day before it started
+                </p>
+            </div>
+            <div style="background-color: rgba(31, 41, 55, 0.5); padding: 12px; border-radius: 8px;">
+                <strong style="color: #93C5FD;">Outflow</strong>
+                <p style="margin: 4px 0; color: #E5E7EB; font-size: 14px;">
+                    Clients who exited during the period and aren't enrolled on the last day
+                </p>
+            </div>
+            <div style="background-color: rgba(16, 185, 129, 0.1); padding: 12px; border-radius: 8px; 
+                        border: 1px solid rgba(16, 185, 129, 0.3);">
+                <strong style="color: #34D399;">PH Exits</strong> 
+                <span style="color: #10B981; font-size: 12px;">✓ Positive Outcome</span>
+                <p style="margin: 4px 0; color: #E5E7EB; font-size: 14px;">
+                    Clients exiting to permanent housing during the period
+                </p>
+            </div>
+            <div style="background-color: rgba(239, 68, 68, 0.1); padding: 12px; border-radius: 8px;
+                        border: 1px solid rgba(239, 68, 68, 0.3);">
+                <strong style="color: #F87171;">Returns to Homelessness</strong>
+                <span style="color: #EF4444; font-size: 12px;">✗ Negative Outcome</span>
+                <p style="margin: 4px 0; color: #E5E7EB; font-size: 14px;">
+                    Clients who exited to PH and returned within the specified window
+                </p>
+            </div>
+        </div>
+    </div>
+    """
+    st.html(explanation_html)
+
+def _render_insight_card(metric_name: str, df: DataFrame, period_label: str, 
+                        increase_is_negative: bool, is_neutral_metric: bool):
+    """Render a well-formatted insight card using HTML."""
+    # Calculate insights
+    avg_change = df["delta"].mean()
+    total_change = df["delta"].sum()
+    recent_periods = min(3, len(df) - 1)
+    recent_change = df["delta"].iloc[-recent_periods:].mean() if recent_periods > 0 else 0
+    
+    max_increase = df["delta"].max()
+    max_increase_date = df.loc[df["delta"].idxmax(), "bucket"]
+    max_decrease = df["delta"].min()
+    max_decrease_date = df.loc[df["delta"].idxmin(), "bucket"]
+    
+    # Get trend icon and direction
+    trend_icon = _get_trend_icon(total_change, increase_is_negative)
+    
+    if total_change > 0:
+        if increase_is_negative:
+            trend_direction = "Increasing (Negative Trend)"
+            trend_color = "#EF4444"
+        else:
+            trend_direction = "Increasing (Positive Trend)"
+            trend_color = "#10B981"
+    elif total_change < 0:
+        if increase_is_negative:
+            trend_direction = "Decreasing (Positive Trend)"
+            trend_color = "#10B981"
+        else:
+            trend_direction = "Decreasing (Negative Trend)"
+            trend_color = "#EF4444"
+    else:
+        trend_direction = "Stable"
+        trend_color = "#6B7280"
+    
+    if is_neutral_metric:
+        trend_color = "#60A5FA"
+        trend_direction = trend_direction.split(" (")[0]  # Remove positive/negative label
+    
+    insight_html = f"""
+    <div style="background-color: rgba(31, 41, 55, 0.5); border-radius: 12px; padding: 20px; height: 100%;">
+        <h3 style="color: #E5E7EB; margin-top: 0; margin-bottom: 16px; font-size: 20px;">
+            Key Insights {trend_icon}
+        </h3>
+        
+        <div style="background-color: rgba(17, 24, 39, 0.5); border-radius: 8px; padding: 12px; margin-bottom: 16px;">
+            <p style="margin: 0; color: #9CA3AF; font-size: 14px;">Current Trend</p>
+            <p style="margin: 4px 0; color: {trend_color}; font-size: 18px; font-weight: bold;">
+                {trend_direction}
+            </p>
+        </div>
+        
+        <div style="display: grid; gap: 12px;">
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+                <span style="color: #9CA3AF; font-size: 14px;">Average Change</span>
+                <span style="color: #E5E7EB; font-size: 16px; font-weight: 500;">
+                    {avg_change:+,.0f} per {period_label}
+                </span>
+            </div>
+            
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+                <span style="color: #9CA3AF; font-size: 14px;">Total Change</span>
+                <span style="color: #E5E7EB; font-size: 16px; font-weight: 500;">
+                    {total_change:+,.0f} clients
+                </span>
+            </div>
+            
+            <hr style="border-color: rgba(55, 65, 81, 0.5); margin: 8px 0;">
+            
+            <div style="color: #9CA3AF; font-size: 14px; margin-bottom: 8px;">Notable Changes</div>
+            
+            <div style="background-color: rgba(16, 185, 129, 0.1); border-radius: 6px; padding: 8px;">
+                <div style="color: #34D399; font-size: 13px;">Largest Increase</div>
+                <div style="color: #E5E7EB; font-size: 15px; font-weight: 500;">
+                    {max_increase:+,.0f} ({max_increase_date:%b %Y})
+                </div>
+            </div>
+            
+            <div style="background-color: rgba(239, 68, 68, 0.1); border-radius: 6px; padding: 8px;">
+                <div style="color: #F87171; font-size: 13px;">Largest Decrease</div>
+                <div style="color: #E5E7EB; font-size: 15px; font-weight: 500;">
+                    {max_decrease:+,.0f} ({max_decrease_date:%b %Y})
+                </div>
+            </div>
+        </div>
+    </div>
+    """
+    st.html(insight_html)
+
+def _render_interpretation_note(metric_name: str, is_neutral_metric: bool, increase_is_negative: bool):
+    """Render a clear interpretation note using HTML."""
+    if is_neutral_metric:
+        icon = "ℹ️"
+        color = "#60A5FA"
+        message = f"{metric_name} is a <strong>volume metric</strong>. Changes show fluctuations in client numbers but are neither positive nor negative outcomes."
+    elif increase_is_negative:
+        icon = "⚠️"
+        color = "#F59E0B"
+        message = f"For {metric_name}, <strong style='color: #EF4444;'>increases are negative</strong> - we want to see this number go down."
+    else:
+        icon = "✅"
+        color = "#10B981"
+        message = f"For {metric_name}, <strong style='color: #10B981;'>increases are positive</strong> - we want to see this number go up."
+    
+    note_html = f"""
+    <div style="background-color: rgba(31, 41, 55, 0.5); border: 1px solid {color}40; 
+                border-radius: 8px; padding: 12px; margin-top: 16px; display: flex; align-items: center; gap: 12px;">
+        <span style="font-size: 24px;">{icon}</span>
+        <p style="margin: 0; color: #E5E7EB; font-size: 14px;">
+            {message}
+        </p>
+    </div>
+    """
+    st.html(note_html)
 
 def _get_trend_data(
     df_filt: DataFrame,
@@ -158,17 +417,94 @@ def render_trend_explorer(df_filt: DataFrame, full_df: Optional[DataFrame] = Non
             if k not in ["last_updated"]:
                 state.pop(k, None)
 
-    # Header and description
-    st.subheader("📈 Trend Analysis")
-    st.markdown("Track how metrics change over time, identify patterns, and forecast trends.")
-    
-    with st.expander("How to use this section"):
-        st.markdown("""
-        - **Compare metrics**: Select multiple metrics to analyze side-by-side
-        - **Break down by demographics**: View how trends differ across groups
-        - **Smooth data**: Apply rolling averages to see underlying patterns
-        - **View changes**: Explore period-over-period differences
-        """)
+    # Header with better styling
+    header_html = """
+    <div style="margin-bottom: 24px;">
+        <h2 style="color: #E5E7EB; margin-bottom: 8px; font-size: 28px;">
+            📈 Trend Analysis
+        </h2>
+        <p style="color: #9CA3AF; font-size: 16px; margin: 0;">
+            Track how metrics change over time, identify patterns, and understand your data trends
+        </p>
+    </div>
+    """
+    col_header, col_info = st.columns([6, 1])
+    with col_header:
+        st.html(header_html)
+    with col_info:
+        with st.popover("ℹ️ Help", use_container_width=True):
+            st.markdown("""
+            ### Understanding Trend Analysis
+            
+            This section tracks how metrics change over time, revealing patterns, seasonality, and the impact of interventions.
+            
+            **Available Metrics:**
+            
+            **Volume Metrics (Neutral - neither good nor bad):**
+            - **Active Clients**: All unique clients enrolled at any point during each time period
+            - **Inflow**: Clients entering who weren't in programs the day before
+            - **Outflow**: Clients exiting who aren't in programs at period end
+            
+            **Outcome Metrics:**
+            - **PH Exits** ✅: Clients exiting to permanent housing (increases are positive)
+            - **Returns to Homelessness** ❌: PH exits who returned within tracking window (increases are negative)
+            
+            **Time Aggregation Options:**
+            - **Days**: Daily values (best for short periods)
+            - **Weeks**: Weekly aggregates (good for 1-3 month views)
+            - **Months**: Monthly totals (recommended for most analyses)
+            - **Quarters**: Quarterly summaries (good for annual views)
+            - **Years**: Annual totals (for long-term trends)
+            
+            **Analysis Features:**
+            
+            **1. Overall Trends (No breakdown):**
+            - Line charts showing metric values over time
+            - Rolling averages (3-period default, auto-adjusts by frequency)
+            - Period-over-period change analysis
+            - Combined view for comparing multiple metrics
+            
+            **2. Demographic Breakdowns:**
+            - Compare trends across demographic groups
+            - Automatic limiting to top groups for clarity
+            - Growth rate analysis (first vs last period)
+            - Disparity tracking over time
+            
+            **Key Calculations:**
+            - **Each time period is calculated independently** using full metric logic
+            - **Not simple counts** - proper deduplication and business rules applied
+            - **Period changes**: Show both absolute and percentage changes
+            - **Growth rates**: (Last Value - First Value) ÷ First Value × 100
+            
+            **Visual Components:**
+            
+            **1. Trend Line Charts:**
+            - Actual values with markers at each data point
+            - Rolling average lines (dashed) for smoothing
+            - Auto-scaling axes and dynamic height
+            - Smart date formatting based on frequency
+            
+            **2. Change Analysis Charts:**
+            - Bar charts showing period-over-period changes
+            - Color-coded: Green = improvement, Red = decline
+            - Special handling for metrics where decrease is good
+            - Text labels showing exact change values
+            
+            **3. Insights Panel:**
+            - Current trend direction and total change
+            - Average change per period
+            - Largest increases and decreases with dates
+            - Volatility assessment (stability indicator)
+            
+            **4. Growth Analysis (for breakdowns):**
+            - Side-by-side growth comparisons
+            - Fastest growing and declining groups
+            - Current disparity ratios
+            - Resource utilization patterns
+            """)
+        
+    # Add metric explanations with better formatting
+    _render_metric_explanation_card()
 
     # Define available metrics
     metric_opts = {
@@ -209,11 +545,11 @@ def render_trend_explorer(df_filt: DataFrame, full_df: Optional[DataFrame] = Non
             default=default_metrics,
             key=metrics_key,
             on_change=on_metrics_change,
-            help="Select multiple metrics to compare over time"
+            help="Select multiple metrics to compare trends over time"
         )
     
     with filter_col2:
-        # Time bucket selection
+        # Time bucket selection with user-friendly label
         freq_key = f"trend_freq_{key_suffix}"
         
         # Function to handle frequency change
@@ -243,9 +579,9 @@ def render_trend_explorer(df_filt: DataFrame, full_df: Optional[DataFrame] = Non
         if "prev_trend_freq" in st.session_state:
             freq_default = st.session_state["prev_trend_freq"]
         
-        # Frequency selectbox with properly initialized value
+        # Frequency selectbox with user-friendly label
         sel_freq_label = st.selectbox(
-            "Time bucket",
+            "View by",  # Changed from "Time bucket"
             list(FREQUENCY_MAP.keys()),
             index=list(FREQUENCY_MAP.keys()).index(freq_default),
             key=freq_key,
@@ -257,7 +593,7 @@ def render_trend_explorer(df_filt: DataFrame, full_df: Optional[DataFrame] = Non
         sel_freq = FREQUENCY_MAP[sel_freq_label]
     
     with filter_col3:
-        # Demographic breakdown selection
+        # Demographic breakdown selection with user-friendly label
         breakdown_opts = [("None (overall)", None)] + DEMOGRAPHIC_DIMENSIONS
         
         break_key = f"trend_break_{key_suffix}"
@@ -280,21 +616,18 @@ def render_trend_explorer(df_filt: DataFrame, full_df: Optional[DataFrame] = Non
         # Get index for the selected breakdown
         break_options = [lbl for lbl, _ in breakdown_opts]
         
-        # Breakdown selectbox with properly initialized value
+        # Breakdown selectbox with user-friendly label
         sel_break = st.selectbox(
-            "Break down by",
+            "Compare across",  # Changed from "Break down by"
             break_options,
             index=break_options.index(break_default),
             key=break_key,
             on_change=on_break_change,
-            help="Choose a demographic dimension to break down the metrics"
+            help="Choose a demographic dimension to compare trends across different groups"
         )
         
         # Get the actual column name
         group_col = dict(breakdown_opts)[sel_break]
-    
-    # REMOVED: Analysis Options section
-    # Instead, set default values for previously optional settings
     
     # Default settings for rolling average
     roll_win_key = f"trend_roll_win_{key_suffix}"
@@ -336,6 +669,9 @@ def render_trend_explorer(df_filt: DataFrame, full_df: Optional[DataFrame] = Non
         m: m.startswith("Returns to Homelessness")
         for m in sel_metrics
     }
+    
+    # Define which metrics should use neutral colors (neither good nor bad)
+    neutral_metrics = {"Active Clients", "Inflow", "Outflow"}
 
     # Get time boundaries
     t0 = st.session_state.get("t0")
@@ -386,7 +722,7 @@ def render_trend_explorer(df_filt: DataFrame, full_df: Optional[DataFrame] = Non
         return
 
     # Show a divider before the visualizations
-    st.divider()
+    blue_divider()
     
     # Render charts based on display mode and breakdown
     if group_col is None:
@@ -409,6 +745,13 @@ def render_trend_explorer(df_filt: DataFrame, full_df: Optional[DataFrame] = Non
                 st.info("No data available for the selected metrics.")
                 return
             
+            # Create color mapping for metrics
+            color_map = {m: _get_metric_color(m) for m in sel_metrics}
+            
+            # Calculate dynamic height
+            num_points = len(combined_df["bucket"].unique())
+            chart_height = _calculate_dynamic_height(num_points)
+            
             # Create combined line chart
             fig = px.line(
                 combined_df, 
@@ -423,7 +766,7 @@ def render_trend_explorer(df_filt: DataFrame, full_df: Optional[DataFrame] = Non
                     "count": "Value", 
                     "metric": "Metric"
                 },
-                color_discrete_sequence=CUSTOM_COLOR_SEQUENCE
+                color_discrete_map=color_map
             )
             
             # Add rolling average lines if enabled
@@ -436,36 +779,50 @@ def render_trend_explorer(df_filt: DataFrame, full_df: Optional[DataFrame] = Non
                             x=df["bucket"],
                             y=df["rolling"],
                             mode="lines",
-                            name=f"{metric_name} (avg)",
+                            name=f"{metric_name} ({roll_window}-{_format_period_label(sel_freq_label)} avg)",
                             line=dict(dash="dash", width=1.5),
                             opacity=0.6,
                             showlegend=True
                         )
             
-            # Apply consistent styling
+            # Apply consistent styling with dynamic height
             fig = apply_chart_style(
                 fig,
                 xaxis_title="Time Period",
-                yaxis_title="Value",
-                height=450,
+                yaxis_title="Number of Clients",
+                height=chart_height,
                 legend_orientation="h"
             )
             
-            # Format x-axis dates based on frequency
-            fig.update_xaxes(
-                tickformat="%b %Y" if sel_freq in ["M", "Q"] else ("%Y" if sel_freq == "Y" else "%b %d"),
-                tickangle=-45 if sel_freq in ["D", "W"] else 0
+            # Update layout with dynamic margins
+            margins = _calculate_dynamic_margins(num_points)
+            fig.update_layout(
+                margin=margins,
+                legend=dict(
+                    orientation="h",
+                    yanchor="bottom",
+                    y=1.02,
+                    xanchor="center",
+                    x=0.5
+                )
             )
             
-            # Improve hover template
-            fig.update_traces(hovertemplate="<b>%{x|%b %Y}</b><br>%{y:.0f}<extra></extra>")
+            # Format x-axis dates based on frequency with smart rotation
+            fig.update_xaxes(
+                tickformat="%b %Y" if sel_freq in ["M", "Q"] else ("%Y" if sel_freq == "Y" else "%b %d"),
+                tickangle=_get_x_axis_angle(sel_freq, num_points)
+            )
+            
+            # Improve hover template based on frequency
+            fig.update_traces(hovertemplate=_get_hover_template(sel_freq))
             
             # Display the chart
             st.plotly_chart(fig, use_container_width=True)
             
             # Show period changes if enabled
             if do_delta:
-                with st.expander("Period-over-Period Changes", expanded=True):
+                period_label = _format_period_label(sel_freq_label)
+                with st.expander(f"📊 {period_label.capitalize()}-to-{period_label} Changes", expanded=True):
                     # Create tabs for each metric
                     metric_tabs = st.tabs(sel_metrics)
                     
@@ -482,15 +839,24 @@ def render_trend_explorer(df_filt: DataFrame, full_df: Optional[DataFrame] = Non
                                 increase_is_negative = metric_interpretation.get(metric_name, False)
                                 
                                 with chart_col:
-                                    # Color bars based on direction
+                                    # Check if this is a neutral metric
+                                    is_neutral_metric = metric_name in neutral_metrics
+                                    
+                                    # Color bars based on direction and interpretation
                                     bar_colors = []
                                     for x in df["delta"]:
                                         if abs(x) < 0.001:
                                             bar_colors.append("#cccccc")
+                                        elif is_neutral_metric:
+                                            # Use main blue color for neutral metrics
+                                            bar_colors.append(MAIN_COLOR)
                                         elif (x > 0 and not increase_is_negative) or (x < 0 and increase_is_negative):
                                             bar_colors.append(SUCCESS_COLOR)
                                         else:
                                             bar_colors.append(SECONDARY_COLOR)
+                                    
+                                    # Calculate dynamic height for delta chart
+                                    delta_height = _calculate_dynamic_height(len(df), base_height=350)
                                     
                                     # Create delta bar chart
                                     fig_delta = px.bar(
@@ -499,82 +865,68 @@ def render_trend_explorer(df_filt: DataFrame, full_df: Optional[DataFrame] = Non
                                         y="delta",
                                         template=PLOT_TEMPLATE,
                                         title=f"Change in {metric_name}",
-                                        labels={"bucket": "", "delta": "Period Change"},
+                                        labels={"bucket": "", "delta": f"{period_label.capitalize()} Change"},
                                     )
                                     
                                     # Format bars and hover
                                     fig_delta.update_traces(
                                         marker_color=bar_colors,
-                                        texttemplate="%{y:+.0f}",
-                                        hovertemplate="<b>%{x|%b %Y}</b><br>Change: %{y:+.0f}<extra></extra>"
+                                        texttemplate="%{y:+,.0f}",
+                                        textfont=dict(color="white", size=11),
+                                        textposition="outside",
+                                        hovertemplate="<b>%{x|%b %Y}</b><br>Change: %{y:+,.0f}<extra></extra>",
+                                        cliponaxis=False  # Prevent clipping of text
                                     )
                                     
-                                    # Apply consistent styling
+                                    # Apply consistent styling with dynamic height
                                     fig_delta = apply_chart_style(
                                         fig_delta,
                                         xaxis_title="Time Period",
-                                        yaxis_title="Change",
-                                        height=300,
+                                        yaxis_title="Change in Clients",
+                                        height=delta_height,
                                         showlegend=False
+                                    )
+                                    
+                                    # Additional layout updates to ensure labels aren't cut off
+                                    fig_delta.update_layout(
+                                        yaxis=dict(
+                                            # Extend the range to accommodate labels
+                                            range=[
+                                                min(df["delta"].min() * 1.4, df["delta"].min() - 50),
+                                                max(df["delta"].max() * 1.4, df["delta"].max() + 50)
+                                            ]
+                                        )
+                                    )
+                                    
+                                    # Update layout with dynamic margins
+                                    delta_margins = _calculate_dynamic_margins(len(df), has_text_labels=True)
+                                    fig_delta.update_layout(
+                                        margin=delta_margins,
+                                        yaxis=dict(
+                                            automargin=True,
+                                            rangemode="tozero",
+                                            # Add padding to y-axis range for text labels
+                                            range=[min(df["delta"].min() * 1.3, -10), 
+                                                   max(df["delta"].max() * 1.3, 10)]
+                                        )
                                     )
                                     
                                     # Format x-axis dates
                                     fig_delta.update_xaxes(
                                         tickformat="%b %Y" if sel_freq in ["M", "Q"] else ("%Y" if sel_freq == "Y" else "%b %d"),
-                                        tickangle=-45 if sel_freq in ["D", "W"] else 0
+                                        tickangle=_get_x_axis_angle(sel_freq, len(df))
                                     )
                                     
                                     # Display the chart
                                     st.plotly_chart(fig_delta, use_container_width=True)
                                     
-                                    # Note about interpretation
-                                    if increase_is_negative:
-                                        st.caption("*Note: For this metric, increases are considered negative*")
-                                    else:
-                                        st.caption("*Note: For this metric, increases are considered positive*")
+                                    # Render interpretation note
+                                    _render_interpretation_note(metric_name, is_neutral_metric, increase_is_negative)
                                 
                                 with insight_col:
-                                    # Calculate insights
-                                    avg_change = df["delta"].mean()
-                                    total_change = df["delta"].sum()
-                                    recent_periods = min(3, len(df) - 1)
-                                    recent_change = df["delta"].iloc[-recent_periods:].mean()
-                                    
-                                    max_increase = df["delta"].max()
-                                    max_increase_date = df.loc[df["delta"].idxmax(), "bucket"]
-                                    max_decrease = df["delta"].min()
-                                    max_decrease_date = df.loc[df["delta"].idxmin(), "bucket"]
-                                    
-                                    # Determine trend direction
-                                    if total_change > 0:
-                                        trend_direction = "increasing"
-                                        trend_icon = "📈"
-                                    elif total_change < 0:
-                                        trend_direction = "decreasing" 
-                                        trend_icon = "📉"
-                                    else:
-                                        trend_direction = "stable"
-                                        trend_icon = "➡️"
-                                    
-                                    # Display insights
-                                    st.markdown(f"### Key Insights {trend_icon}")
-                                    
-                                    st.markdown(f"""
-                                    **Current trend:** {trend_direction.capitalize()}
-                                    
-                                    **Average change:** {avg_change:.1f} per period
-                                    
-                                    **Total change:** {total_change:.0f} over all periods
-                                    """)
-                                    
-                                    st.markdown("**Notable changes:**")
-                                    st.markdown(f"- Largest increase: **{max_increase:.0f}** ({max_increase_date:%b %Y})")
-                                    st.markdown(f"- Largest decrease: **{max_decrease:.0f}** ({max_decrease_date:%b %Y})")
-                                    
-                                    # Interpretation note
-                                    st.markdown("---")
-                                    if increase_is_negative:
-                                        st.markdown("*Note: For this metric, increases are considered negative.*")
+                                    # Render insight card
+                                    _render_insight_card(metric_name, df, period_label, 
+                                                       increase_is_negative, is_neutral_metric)
 
         else:
             # Separate charts for each metric
@@ -585,6 +937,10 @@ def render_trend_explorer(df_filt: DataFrame, full_df: Optional[DataFrame] = Non
                     
                     # Create expandable section for each metric
                     with st.expander(f"**{metric_name}** Analysis", expanded=True):
+                        # Calculate dynamic height
+                        num_points = len(df)
+                        chart_height = _calculate_dynamic_height(num_points, base_height=350)
+                        
                         # Line chart for metric values
                         fig = px.line(
                             df, 
@@ -593,8 +949,8 @@ def render_trend_explorer(df_filt: DataFrame, full_df: Optional[DataFrame] = Non
                             markers=True,
                             template=PLOT_TEMPLATE,
                             title=f"{metric_name} Trend",
-                            labels={"bucket": "", "count": "Value"},
-                            color_discrete_sequence=[MAIN_COLOR]
+                            labels={"bucket": "", "count": "Number of Clients"},
+                            color_discrete_sequence=[_get_metric_color(metric_name)]
                         )
                         
                         # Add rolling average if enabled
@@ -603,29 +959,33 @@ def render_trend_explorer(df_filt: DataFrame, full_df: Optional[DataFrame] = Non
                                 x=df["bucket"],
                                 y=df["rolling"],
                                 mode="lines",
-                                name=f"{roll_window}-period average",
+                                name=f"{roll_window}-{_format_period_label(sel_freq_label)} average",
                                 line=dict(dash="dash", color=NEUTRAL_COLOR, width=1.5),
                                 opacity=0.7,
-                                hovertemplate="<b>%{x|%b %Y}</b><br>Average: %{y:.1f}<extra></extra>"
+                                hovertemplate="<b>%{x|%b %Y}</b><br>Average: %{y:,.1f}<extra></extra>"
                             )
                         
-                        # Apply consistent styling
+                        # Apply consistent styling with dynamic height
                         fig = apply_chart_style(
                             fig,
                             xaxis_title="Time Period",
-                            yaxis_title="Value",
-                            height=350,
+                            yaxis_title="Number of Clients",
+                            height=chart_height,
                             legend_orientation="h"
                         )
+                        
+                        # Update layout with dynamic margins
+                        margins = _calculate_dynamic_margins(num_points)
+                        fig.update_layout(margin=margins)
                         
                         # Format x-axis dates
                         fig.update_xaxes(
                             tickformat="%b %Y" if sel_freq in ["M", "Q"] else ("%Y" if sel_freq == "Y" else "%b %d"),
-                            tickangle=-45 if sel_freq in ["D", "W"] else 0
+                            tickangle=_get_x_axis_angle(sel_freq, num_points)
                         )
                         
                         # Improve hover template
-                        fig.update_traces(hovertemplate="<b>%{x|%b %Y}</b><br>Value: %{y:.0f}<extra></extra>")
+                        fig.update_traces(hovertemplate=_get_hover_template(sel_freq))
                         
                         # Display the chart
                         st.plotly_chart(fig, use_container_width=True)
@@ -635,21 +995,31 @@ def render_trend_explorer(df_filt: DataFrame, full_df: Optional[DataFrame] = Non
                             # Two-column layout
                             col1, col2 = st.columns(2)
                             
-                            # Determine if increasing is good or bad - MOVED HERE
+                            # Determine if increasing is good or bad
                             increase_is_negative = metric_interpretation.get(metric_name, False)
+                            period_label = _format_period_label(sel_freq_label)
                             
                             with col1:
                                 # Show period-over-period changes if enabled
                                 if do_delta:
+                                    # Check if this is a neutral metric
+                                    is_neutral_metric = metric_name in neutral_metrics
+                                    
                                     # Color bars based on direction
                                     bar_colors = []
                                     for x in df["delta"]:
                                         if abs(x) < 0.001:
                                             bar_colors.append("#cccccc")
+                                        elif is_neutral_metric:
+                                            # Use main blue color for neutral metrics
+                                            bar_colors.append(MAIN_COLOR)
                                         elif (x > 0 and not increase_is_negative) or (x < 0 and increase_is_negative):
                                             bar_colors.append(SUCCESS_COLOR)
                                         else:
                                             bar_colors.append(SECONDARY_COLOR)
+                                    
+                                    # Calculate dynamic height for delta chart
+                                    delta_height = _calculate_dynamic_height(len(df), base_height=350)
                                     
                                     # Create delta bar chart
                                     fig_delta = px.bar(
@@ -657,44 +1027,63 @@ def render_trend_explorer(df_filt: DataFrame, full_df: Optional[DataFrame] = Non
                                         x="bucket", 
                                         y="delta",
                                         template=PLOT_TEMPLATE,
-                                        title="Period-over-Period Change",
+                                        title=f"{period_label.capitalize()}-over-{period_label} Change",
                                         labels={"bucket": "", "delta": "Change"},
                                     )
                                     
                                     # Format bars and hover
                                     fig_delta.update_traces(
                                         marker_color=bar_colors,
-                                        texttemplate="%{y:+.0f}",
-                                        hovertemplate="<b>%{x|%b %Y}</b><br>Change: %{y:+.0f}<extra></extra>"
+                                        texttemplate="%{y:+,.0f}",
+                                        textfont=dict(color="white", size=11),
+                                        textposition="outside",
+                                        hovertemplate="<b>%{x|%b %Y}</b><br>Change: %{y:+,.0f}<extra></extra>",
+                                        cliponaxis=False  # Prevent clipping of text
                                     )
                                     
-                                    # Apply consistent styling
+                                    # Apply consistent styling with dynamic height
                                     fig_delta = apply_chart_style(
                                         fig_delta,
                                         xaxis_title="Time Period",
-                                        yaxis_title="Change",
-                                        height=300,
+                                        yaxis_title="Change in Clients",
+                                        height=delta_height,
                                         showlegend=False
+                                    )
+                                    
+                                    # Update layout with dynamic margins
+                                    delta_margins = _calculate_dynamic_margins(len(df), has_text_labels=True)
+                                    fig_delta.update_layout(
+                                        margin=delta_margins,
+                                        yaxis=dict(
+                                            automargin=True,
+                                            rangemode="tozero",
+                                            # Add padding to y-axis range for text labels
+                                            range=[
+                                                min(df["delta"].min() * 1.4, df["delta"].min() - 50),
+                                                max(df["delta"].max() * 1.4, df["delta"].max() + 50)
+                                            ]
+                                        )
                                     )
                                     
                                     # Format x-axis dates
                                     fig_delta.update_xaxes(
                                         tickformat="%b %Y" if sel_freq in ["M", "Q"] else ("%Y" if sel_freq == "Y" else "%b %d"),
-                                        tickangle=-45 if sel_freq in ["D", "W"] else 0
+                                        tickangle=_get_x_axis_angle(sel_freq, len(df))
                                     )
                                     
                                     # Display the chart
                                     st.plotly_chart(fig_delta, use_container_width=True)
                                     
-                                    # Note about interpretation
-                                    if increase_is_negative:
-                                        st.caption("*Note: For this metric, increases are considered negative*")
-                                    else:
-                                        st.caption("*Note: For this metric, increases are considered positive*")
+                                    # Render interpretation note
+                                    _render_interpretation_note(metric_name, is_neutral_metric, increase_is_negative)
                             
                             with col2:
-                                # Insights section
-                                st.subheader("Insights")
+                                # Insights section with better formatting
+                                insights_content = []
+                                insights_content.append("""
+                                <div style="background-color: rgba(31, 41, 55, 0.5); border-radius: 12px; padding: 20px;">
+                                    <h3 style="color: #E5E7EB; margin-top: 0; margin-bottom: 16px;">Insights</h3>
+                                """)
                                 
                                 # Calculate key metrics
                                 first_value = df["count"].iloc[0]
@@ -707,47 +1096,89 @@ def render_trend_explorer(df_filt: DataFrame, full_df: Optional[DataFrame] = Non
                                 recent_change = recent_values.iloc[-1] - recent_values.iloc[0]
                                 recent_pct = (recent_change / recent_values.iloc[0] * 100) if recent_values.iloc[0] > 0 else 0
                                 
+                                # Get trend icon
+                                trend_icon = _get_trend_icon(total_change, increase_is_negative)
+                                
                                 # Determine trend direction
                                 if total_change > 0:
                                     trend_direction = "increasing"
-                                    trend_icon = "📈"
                                 elif total_change < 0:
                                     trend_direction = "decreasing" 
-                                    trend_icon = "📉"
                                 else:
                                     trend_direction = "stable"
-                                    trend_icon = "➡️"
                                 
-                                # Display trend insights
-                                st.markdown(f"**Current direction:** {trend_direction.capitalize()} {trend_icon}")
-                                st.markdown(f"**Current value:** {last_value:.0f}")
+                                # Check if this is a neutral metric
+                                is_neutral_metric = metric_name in neutral_metrics
                                 
-                                # Determine color based on whether increases are good
-                                change_color = "green" if (total_change > 0 and not increase_is_negative) or \
-                                                         (total_change < 0 and increase_is_negative) else "red"
-                                                         
-                                # Display overall change
-                                st.markdown(f"**Overall change:** <span style='color:{change_color};'>{total_change:+.0f} ({pct_change:+.1f}%)</span> since start", unsafe_allow_html=True)
+                                # Determine color based on metric type
+                                if is_neutral_metric:
+                                    change_color = "#9CA3AF"  # Neutral gray
+                                    recent_color = "#9CA3AF"
+                                else:
+                                    change_color = _get_trend_color(total_change, increase_is_negative)
+                                    recent_color = _get_trend_color(recent_change, increase_is_negative)
                                 
-                                # Determine color for recent change
-                                recent_color = "green" if (recent_change > 0 and not increase_is_negative) or \
-                                                         (recent_change < 0 and increase_is_negative) else "red"
-                                
-                                # Display recent change
-                                st.markdown(f"**Recent change:** <span style='color:{recent_color};'>{recent_change:+.0f} ({recent_pct:+.1f}%)</span> over last {recent_periods} periods", unsafe_allow_html=True)
+                                # Map color names to hex
+                                color_map = {"green": "#10B981", "red": "#EF4444", "gray": "#9CA3AF"}
+                                change_color = color_map.get(change_color, change_color)
+                                recent_color = color_map.get(recent_color, recent_color)
                                 
                                 # Calculate and display volatility
                                 volatility = df["pct_change"].std()
                                 if volatility < 5:
                                     volatility_desc = "Very stable"
+                                    volatility_color = "#10B981"
                                 elif volatility < 10:
                                     volatility_desc = "Moderately stable"
+                                    volatility_color = "#60A5FA"
                                 elif volatility < 20:
                                     volatility_desc = "Somewhat volatile"
+                                    volatility_color = "#F59E0B"
                                 else:
                                     volatility_desc = "Highly volatile"
+                                    volatility_color = "#EF4444"
                                 
-                                st.markdown(f"**Volatility:** {volatility_desc} ({volatility:.1f}%)")
+                                insights_content.append(f"""
+                                    <div style="display: grid; gap: 12px;">
+                                        <div style="background-color: rgba(17, 24, 39, 0.5); border-radius: 8px; padding: 12px;">
+                                            <p style="margin: 0; color: #9CA3AF; font-size: 14px;">Current Direction</p>
+                                            <p style="margin: 4px 0; color: #E5E7EB; font-size: 18px; font-weight: 500;">
+                                                {trend_direction.capitalize()} {trend_icon}
+                                            </p>
+                                        </div>
+                                        
+                                        <div style="background-color: rgba(17, 24, 39, 0.5); border-radius: 8px; padding: 12px;">
+                                            <p style="margin: 0; color: #9CA3AF; font-size: 14px;">Current Value</p>
+                                            <p style="margin: 4px 0; color: #E5E7EB; font-size: 18px; font-weight: 500;">
+                                                {fmt_int(last_value)} clients
+                                            </p>
+                                        </div>
+                                        
+                                        <div style="background-color: rgba(17, 24, 39, 0.5); border-radius: 8px; padding: 12px;">
+                                            <p style="margin: 0; color: #9CA3AF; font-size: 14px;">Overall Change</p>
+                                            <p style="margin: 4px 0; color: {change_color}; font-size: 18px; font-weight: 500;">
+                                                {total_change:+,.0f} ({pct_change:+.1f}%)
+                                            </p>
+                                        </div>
+                                        
+                                        <div style="background-color: rgba(17, 24, 39, 0.5); border-radius: 8px; padding: 12px;">
+                                            <p style="margin: 0; color: #9CA3AF; font-size: 14px;">Recent Change (last {recent_periods} {period_label}s)</p>
+                                            <p style="margin: 4px 0; color: {recent_color}; font-size: 18px; font-weight: 500;">
+                                                {recent_change:+,.0f} ({recent_pct:+.1f}%)
+                                            </p>
+                                        </div>
+                                        
+                                        <div style="background-color: rgba(17, 24, 39, 0.5); border-radius: 8px; padding: 12px;">
+                                            <p style="margin: 0; color: #9CA3AF; font-size: 14px;">Volatility</p>
+                                            <p style="margin: 4px 0; color: {volatility_color}; font-size: 18px; font-weight: 500;">
+                                                {volatility_desc} ({volatility:.1f}%)
+                                            </p>
+                                        </div>
+                                    </div>
+                                </div>
+                                """)
+                                
+                                st.html(''.join(insights_content))
     else:
         # Demographic breakdown - show trends by group
         for metric_name in sel_metrics:
@@ -806,6 +1237,15 @@ def render_trend_explorer(df_filt: DataFrame, full_df: Optional[DataFrame] = Non
                     
                     # Display visualization if we have data
                     if not filtered_df.empty:
+                        # Calculate dynamic height
+                        num_points = len(filtered_df["bucket"].unique())
+                        num_groups = len(filtered_df["group"].unique())
+                        chart_height = _calculate_dynamic_height(num_points, base_height=400)
+                        
+                        # Add extra height for multiple groups
+                        if num_groups > 5:
+                            chart_height += 50
+                        
                         # Create line chart by group
                         fig = px.line(
                             filtered_df, 
@@ -817,30 +1257,34 @@ def render_trend_explorer(df_filt: DataFrame, full_df: Optional[DataFrame] = Non
                             title=f"{metric_name} by {sel_break}",
                             labels={
                                 "bucket": "", 
-                                "count": "Value", 
+                                "count": "Number of Clients", 
                                 "group": sel_break
                             },
-                            line_shape="spline"
+                            color_discrete_sequence=CUSTOM_COLOR_SEQUENCE
                         )
                         
-                        # Apply consistent styling
+                        # Apply consistent styling with dynamic height
                         fig = apply_chart_style(
                             fig,
                             xaxis_title="Time Period",
-                            yaxis_title="Value",
-                            height=400,
-                            legend_orientation="h" if len(filtered_df["group"].unique()) <= 5 else "v"
+                            yaxis_title="Number of Clients",
+                            height=chart_height,
+                            legend_orientation="h" if num_groups <= 5 else "v"
                         )
+                        
+                        # Update layout with dynamic margins
+                        margins = _calculate_dynamic_margins(num_points)
+                        fig.update_layout(margin=margins)
                         
                         # Format x-axis dates
                         fig.update_xaxes(
                             tickformat="%b %Y" if sel_freq in ["M", "Q"] else ("%Y" if sel_freq == "Y" else "%b %d"),
-                            tickangle=-45 if sel_freq in ["D", "W"] else 0
+                            tickangle=_get_x_axis_angle(sel_freq, num_points)
                         )
                         
                         # Improve hover template
                         fig.update_traces(
-                            hovertemplate="<b>%{x|%b %Y}</b><br>%{y:.0f}<extra>%{fullData.name}</extra>"
+                            hovertemplate="<b>%{x|%b %Y}</b><br>Clients: %{y:,.0f}<extra>%{fullData.name}</extra>"
                         )
                         
                         # Display the chart
@@ -854,14 +1298,19 @@ def render_trend_explorer(df_filt: DataFrame, full_df: Optional[DataFrame] = Non
                                 
                                 if not growth_df.empty:
                                     # Create tabs for different views
-                                    tab1, tab2 = st.tabs(["Growth Analysis", "Data Table"])
+                                    tab1, tab2 = st.tabs(["📈 Growth Analysis", "📊 Data Table"])
                                     
                                     with tab1:
                                         # Two-column layout
                                         insight_col, viz_col = st.columns([1, 2])
                                         
                                         with insight_col:
-                                            st.subheader("Key Findings")
+                                            # Build HTML content for insights
+                                            insights_content = []
+                                            insights_content.append("""
+                                            <div style="background-color: rgba(31, 41, 55, 0.5); border-radius: 12px; padding: 20px;">
+                                                <h3 style="color: #E5E7EB; margin-top: 0; margin-bottom: 16px;">Key Findings</h3>
+                                            """)
                                             
                                             if len(growth_df) >= 2:
                                                 try:
@@ -874,19 +1323,32 @@ def render_trend_explorer(df_filt: DataFrame, full_df: Optional[DataFrame] = Non
                                                         max_growth = growth_df.loc[max_growth_idx]
                                                         min_growth = growth_df.loc[min_growth_idx]
                                                         
-                                                        # Display max growth
-                                                        st.markdown(f"**Fastest growing:**")
-                                                        st.markdown(f"**{max_growth['group']}**")
-                                                        st.markdown(f"+{max_growth['growth_pct']:.1f}% increase")
-                                                        st.markdown(f"From {max_growth['first_count']:.0f} to {max_growth['last_count']:.0f}")
-                                                        
-                                                        st.markdown("---")
+                                                        insights_content.append(f"""
+                                                        <div style="background-color: rgba(16, 185, 129, 0.1); border-radius: 8px; padding: 12px; margin-bottom: 12px;">
+                                                            <p style="margin: 0; color: #34D399; font-size: 14px; font-weight: 500;">Fastest Growing Group</p>
+                                                            <p style="margin: 4px 0; color: #E5E7EB; font-size: 16px; font-weight: bold;">{max_growth['group']}</p>
+                                                            <p style="margin: 4px 0; color: #34D399; font-size: 18px;">{fmt_pct(max_growth['growth_pct'])}</p>
+                                                            <p style="margin: 0; color: #9CA3AF; font-size: 13px;">
+                                                                {fmt_int(max_growth['first_count'])} → {fmt_int(max_growth['last_count'])} clients
+                                                            </p>
+                                                        </div>
+                                                        """)
                                                         
                                                         # Display min growth
-                                                        st.markdown(f"**Fastest declining:**")
-                                                        st.markdown(f"**{min_growth['group']}**")
-                                                        st.markdown(f"{min_growth['growth_pct']:.1f}% change")
-                                                        st.markdown(f"From {min_growth['first_count']:.0f} to {min_growth['last_count']:.0f}")
+                                                        color = "#EF4444" if min_growth['growth_pct'] < 0 else "#F59E0B"
+                                                        bg_color = "rgba(239, 68, 68, 0.1)" if min_growth['growth_pct'] < 0 else "rgba(245, 158, 11, 0.1)"
+                                                        label = "Fastest Declining Group" if min_growth['growth_pct'] < 0 else "Slowest Growing Group"
+                                                        
+                                                        insights_content.append(f"""
+                                                        <div style="background-color: {bg_color}; border-radius: 8px; padding: 12px; margin-bottom: 12px;">
+                                                            <p style="margin: 0; color: {color}; font-size: 14px; font-weight: 500;">{label}</p>
+                                                            <p style="margin: 4px 0; color: #E5E7EB; font-size: 16px; font-weight: bold;">{min_growth['group']}</p>
+                                                            <p style="margin: 4px 0; color: {color}; font-size: 18px;">{fmt_pct(min_growth['growth_pct'])}</p>
+                                                            <p style="margin: 0; color: #9CA3AF; font-size: 13px;">
+                                                                {fmt_int(min_growth['first_count'])} → {fmt_int(min_growth['last_count'])} clients
+                                                            </p>
+                                                        </div>
+                                                        """)
                                                     
                                                     # Add disparity analysis
                                                     latest_date = filtered_df["bucket"].max()
@@ -904,73 +1366,187 @@ def render_trend_explorer(df_filt: DataFrame, full_df: Optional[DataFrame] = Non
                                                         if min_group["count"] > 0:
                                                             disparity_ratio = max_group["count"] / min_group["count"]
                                                             
-                                                            st.markdown("---")
-                                                            st.markdown("**Disparity Analysis:**")
-                                                            st.markdown(f"Highest: **{max_group['group']}** ({max_group['count']:.0f})")
-                                                            st.markdown(f"Lowest: **{min_group['group']}** ({min_group['count']:.0f})")
-                                                            st.markdown(f"Ratio: **{disparity_ratio:.1f}x**")
+                                                            insights_content.append(f"""
+                                                            <hr style="border-color: rgba(55, 65, 81, 0.5); margin: 16px 0;">
+                                                            <div style="background-color: rgba(17, 24, 39, 0.5); border-radius: 8px; padding: 12px;">
+                                                                <p style="margin: 0; color: #9CA3AF; font-size: 14px; font-weight: 500; margin-bottom: 8px;">Current Disparity</p>
+                                                                <div style="margin-bottom: 8px;">
+                                                                    <span style="color: #60A5FA;">Highest:</span> 
+                                                                    <span style="color: #E5E7EB; font-weight: bold;">{max_group['group']}</span>
+                                                                    <span style="color: #9CA3AF;">({fmt_int(max_group['count'])} clients)</span>
+                                                                </div>
+                                                                <div style="margin-bottom: 8px;">
+                                                                    <span style="color: #F59E0B;">Lowest:</span> 
+                                                                    <span style="color: #E5E7EB; font-weight: bold;">{min_group['group']}</span>
+                                                                    <span style="color: #9CA3AF;">({fmt_int(min_group['count'])} clients)</span>
+                                                                </div>
+                                                                <div style="background-color: rgba(96, 165, 250, 0.1); border-radius: 6px; padding: 8px; margin-top: 8px;">
+                                                                    <p style="margin: 0; color: #93C5FD; font-size: 15px; text-align: center;">
+                                                                        Ratio: <strong>{disparity_ratio:.1f}x</strong> difference
+                                                                    </p>
+                                                                </div>
+                                                            </div>
+                                                            """)
                                                 except Exception as e:
-                                                    st.markdown(f"Could not calculate group insights: {str(e)}")
+                                                    insights_content.append(f"""
+                                                    <p style="color: #9CA3AF; font-size: 14px;">Could not calculate group insights: {str(e)}</p>
+                                                    """)
                                             else:
-                                                st.info("Not enough groups for comparison. Select more groups to see insights.")
+                                                insights_content.append("""
+                                                <p style="color: #60A5FA; font-size: 14px;">Not enough groups for comparison. Select more groups to see insights.</p>
+                                                """)
+                                            
+                                            insights_content.append("</div>")
+                                            st.html(''.join(insights_content))
                                         
                                         with viz_col:
                                             if len(growth_df) >= 2:
-                                                # Sort for visualization
+                                                # Sort for visualization - limit to top/bottom groups
                                                 growth_vis_df = growth_df.sort_values("growth_pct", ascending=False)
                                                 
                                                 # Mark groups with significant size
                                                 growth_vis_df['significant'] = growth_vis_df['first_count'] >= 5
                                                 
-                                                # Limit to reasonable number of groups
-                                                if len(growth_vis_df) > 15:
+                                                # Limit to reasonable number of groups for clarity
+                                                MAX_GROUPS_TO_SHOW = 12
+                                                if len(growth_vis_df) > MAX_GROUPS_TO_SHOW:
+                                                    # Show top 6 and bottom 6
                                                     growth_vis_df = pd.concat([
-                                                        growth_vis_df.head(8),
-                                                        growth_vis_df.tail(7)
+                                                        growth_vis_df.head(6),
+                                                        growth_vis_df.tail(6)
                                                     ])
+                                                    
+                                                    # Add note about limited display
+                                                    showing_subset = True
+                                                else:
+                                                    showing_subset = False
                                                 
-                                                # Create growth bar chart
-                                                fig_growth = px.bar(
-                                                    growth_vis_df,
-                                                    x="group",
-                                                    y="growth_pct",
-                                                    title=f"Growth Rates by {sel_break}",
-                                                    labels={"group": sel_break, "growth_pct": "Growth (%)", "significant": "Significant Count"},
-                                                    color="growth_pct",
-                                                    color_continuous_scale=["#ff4b4b", "#f7dc6f", "#4bb543"],
-                                                    height=400,
-                                                    opacity=growth_vis_df['significant'].map({True: 1.0, False: 0.4})
+                                                # Calculate dynamic height for growth chart
+                                                growth_height = _calculate_dynamic_height(len(growth_vis_df), base_height=500)
+                                                
+                                                # Create growth bar chart with better design
+                                                fig_growth = go.Figure()
+                                                
+                                                # Add bars with custom colors based on growth direction
+                                                for idx, row in growth_vis_df.iterrows():
+                                                    # Determine color based on growth
+                                                    if row['growth_pct'] > 50:
+                                                        color = '#4BB543'  # Strong green for high growth
+                                                    elif row['growth_pct'] > 0:
+                                                        color = '#90EE90'  # Light green for moderate growth
+                                                    elif row['growth_pct'] > -50:
+                                                        color = '#FFA500'  # Orange for moderate decline
+                                                    else:
+                                                        color = '#FF4B4B'  # Red for strong decline
+                                                    
+                                                    # Adjust opacity for small groups
+                                                    opacity = 1.0 if row['significant'] else 0.6
+                                                    
+                                                    fig_growth.add_trace(go.Bar(
+                                                        x=[row['group']],
+                                                        y=[row['growth_pct']],
+                                                        marker_color=color,
+                                                        opacity=opacity,
+                                                        hovertemplate=(
+                                                            f"<b>{row['group']}</b><br>"
+                                                            f"<br>"
+                                                            f"<b>Growth Rate:</b> {row['growth_pct']:+.1f}%<br>"
+                                                            f"<br>"
+                                                            f"<b>Start Period:</b> {int(row['first_count'])} clients<br>"
+                                                            f"<b>End Period:</b> {int(row['last_count'])} clients<br>"
+                                                            f"<b>Net Change:</b> {int(row['growth'])} clients<br>"
+                                                            f"<extra></extra>"
+                                                        ),
+                                                        showlegend=False
+                                                    ))
+                                                
+                                                # Update layout with better spacing and dynamic height
+                                                fig_growth.update_layout(
+                                                    title=dict(
+                                                        text=f"Growth Rates by {sel_break}",
+                                                        font=dict(size=18),
+                                                        y=0.98
+                                                    ),
+                                                    template=PLOT_TEMPLATE,
+                                                    height=growth_height,
+                                                    margin=_calculate_dynamic_margins(len(growth_vis_df), has_text_labels=True),
+                                                    xaxis=dict(
+                                                        title=dict(
+                                                            text=sel_break,
+                                                            font=dict(size=14)
+                                                        ),
+                                                        tickangle=-45,
+                                                        automargin=True,
+                                                        tickfont=dict(size=11)
+                                                    ),
+                                                    yaxis=dict(
+                                                        title=dict(
+                                                            text="Growth Rate (%)",
+                                                            font=dict(size=14)
+                                                        ),
+                                                        automargin=True,
+                                                        zeroline=True,
+                                                        zerolinewidth=2,
+                                                        zerolinecolor='rgba(255,255,255,0.3)',
+                                                        gridcolor='rgba(255,255,255,0.1)',
+                                                        # Set range to accommodate text labels
+                                                        range=[min(growth_vis_df['growth_pct'].min() * 1.2, -10),
+                                                               max(growth_vis_df['growth_pct'].max() * 1.2, 10)]
+                                                    ),
+                                                    bargap=0.3,  # More space between bars
+                                                    plot_bgcolor='rgba(0,0,0,0)',
+                                                    paper_bgcolor='rgba(0,0,0,0)'
                                                 )
                                                 
-                                                # Add note about opacity
-                                                if not all(growth_vis_df['significant']):
-                                                    fig_growth.add_annotation(
-                                                        text="Groups with fewer than 5 members are shown with lower opacity",
-                                                        xref="paper", yref="paper",
-                                                        x=0.5, y=-0.15,
-                                                        showarrow=False,
-                                                        font=dict(size=10, color="gray")
-                                                    )
-                                                
-                                                # Improve hover and text
-                                                fig_growth.update_traces(
-                                                    texttemplate="%{y:+.1f}%",
-                                                    hovertemplate="<b>%{x}</b><br>Growth: %{y:+.1f}%<br>Count: %{customdata}<extra></extra>",
-                                                    customdata=growth_vis_df[['first_count', 'last_count']].astype(int).values
-                                                )
+                                                # Add value labels on bars with smart positioning
+                                                for i, trace in enumerate(fig_growth.data):
+                                                    y_val = trace.y[0]
+                                                    # Position text inside for large bars, outside for small ones
+                                                    if abs(y_val) > 30:
+                                                        fig_growth.data[i].update(
+                                                            text=[f'{y_val:+.0f}%'],
+                                                            textposition='inside',
+                                                            textfont=dict(color='white', size=12, weight='bold')
+                                                        )
+                                                    else:
+                                                        # For smaller bars, position outside
+                                                        fig_growth.data[i].update(
+                                                            text=[f'{y_val:+.0f}%'],
+                                                            textposition='outside',
+                                                            textfont=dict(color='white', size=10)
+                                                        )
                                                 
                                                 # Apply consistent styling
                                                 fig_growth = apply_chart_style(
                                                     fig_growth,
                                                     xaxis_title=sel_break,
                                                     yaxis_title="Growth Rate (%)",
-                                                    height=400
+                                                    height=growth_height
                                                 )
                                                 
-                                                # Handle long labels
-                                                if max(len(str(x)) for x in growth_vis_df["group"]) > 10:
-                                                    fig_growth.update_layout(
-                                                        xaxis_tickangle=-45
+                                                # Add annotations if needed
+                                                if showing_subset:
+                                                    fig_growth.add_annotation(
+                                                        text=f"📊 Showing top 6 and bottom 6 of {len(growth_df)} total groups for clarity",
+                                                        xref="paper", yref="paper",
+                                                        x=0.5, y=-0.32,
+                                                        showarrow=False,
+                                                        font=dict(size=13, color="white", weight='bold'),
+                                                        bgcolor="rgba(0,0,0,0.7)",
+                                                        bordercolor="rgba(255,255,255,0.3)",
+                                                        borderwidth=1,
+                                                        borderpad=8
+                                                    )
+                                                    
+                                                if not all(growth_vis_df['significant']):
+                                                    fig_growth.add_annotation(
+                                                        text="ℹ️ Groups with fewer than 5 clients shown with reduced opacity",
+                                                        xref="paper", yref="paper",
+                                                        x=0.5, y=1.08,
+                                                        showarrow=False,
+                                                        font=dict(size=11, color="lightgray"),
+                                                        bgcolor="rgba(0,0,0,0.5)",
+                                                        borderpad=4
                                                     )
                                                 
                                                 # Display the chart
@@ -983,13 +1559,17 @@ def render_trend_explorer(df_filt: DataFrame, full_df: Optional[DataFrame] = Non
                                         if not growth_df.empty:
                                             # Format for display
                                             display_df = growth_df.copy()
-                                            display_df["Growth"] = display_df["growth"].map(lambda x: f"{x:+.0f}")
-                                            display_df["Growth %"] = display_df["growth_pct"].map(lambda x: f"{x:+.1f}%")
+                                            display_df["Growth"] = display_df["growth"].map(lambda x: fmt_int(x))
+                                            display_df["Growth %"] = display_df["growth_pct"].map(lambda x: fmt_pct(x))
                                             display_df = display_df.rename(columns={
                                                 "group": sel_break,
                                                 "first_count": "Initial Value",
                                                 "last_count": "Latest Value"
                                             })
+                                            
+                                            # Format count columns
+                                            display_df["Initial Value"] = display_df["Initial Value"].map(fmt_int)
+                                            display_df["Latest Value"] = display_df["Latest Value"].map(fmt_int)
                                             
                                             # Show table
                                             st.dataframe(

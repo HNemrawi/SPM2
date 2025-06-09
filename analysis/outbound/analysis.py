@@ -378,7 +378,7 @@ def breakdown_by_columns(final_df: pd.DataFrame, columns: List[str]) -> pd.DataF
             "Number of Relevant Exits": m["Number of Relevant Exits"],
             "Exits to PH": m["Total Exits to PH"],
             "Return": f"{m['Return']} ({m['Return %']:.1f}%)",
-            "Return → Homeless": f"{m['Return to Homelessness']} ({m['% Return to Homelessness']:.1f}%)",
+            "Return → Homeless (from PH)": f"{m['Return to Homelessness']} ({m['% Return to Homelessness']:.1f}%)",  # CHANGED
             "Median Days": f"{m['Median Days']:.1f}",
             "Average Days": f"{m['Average Days']:.1f}",
             "Max Days": f"{m['Max Days']:.0f}",

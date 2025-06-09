@@ -40,6 +40,8 @@ def setup_reporting_period(df: pd.DataFrame) -> Tuple[pd.Timestamp, pd.Timestamp
             value=[datetime(2025, 1, 1), datetime(2025, 1, 31)],
             help="Clients must have an exit date inside this window.",
         )
+        st.caption("📌 **Note:** The selected end date will be included in the analysis period.")
+
         report_start, report_end = pd.to_datetime(start_d), pd.to_datetime(end_d)
         
         if df is not None and not df.empty:
@@ -333,6 +335,7 @@ def display_client_flow(out_df: pd.DataFrame) -> None:
 
     if exit_dims and ret_dims:
         # Dimension selectors
+        st.caption("📌 **Note:** Both the Exit and Entry Dimension filters apply to the entire flow section, including Client Flow Analysis, Top Client Pathways, and Client Flow Network.")
         flow_cols = st.columns(2)
         with flow_cols[0]:
             ex_choice = st.selectbox(
@@ -455,15 +458,23 @@ def display_ph_comparison(out_df: pd.DataFrame) -> None:
     if st.checkbox("Show comparison", value=False):
         ph_df = out_df[out_df["PH_Exit"]]
         nonph_df = out_df[~out_df["PH_Exit"]]
-        c1, c2 = st.columns(2)
+        
+        # Create columns with a gap in between for visual separation
+        c1, spacer, c2 = st.columns([5, 0.2, 5])
+        
         with c1:
-            st.subheader("PH Exits")
+            st.subheader("🏠 Permanent Housing Exits")
             if not ph_df.empty:
                 display_spm_metrics_ph(compute_summary_metrics(ph_df))
             else:
                 st.info("No PH exits found.")
+        
+        with spacer:
+            # This creates a narrow column that acts as a visual separator
+            st.empty()
+        
         with c2:
-            st.subheader("Non‑PH Exits")
+            st.subheader("🏕️ Non‑Permanent Housing Exits")
             if not nonph_df.empty:
                 display_spm_metrics_non_ph(compute_summary_metrics(nonph_df))
             else:

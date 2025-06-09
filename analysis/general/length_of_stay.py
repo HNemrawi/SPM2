@@ -1,5 +1,6 @@
 """
-Length of stay analysis section for HMIS dashboard.
+Length of stay analysis section for HMIS dashboard - Enhanced Version
+Provides enrollment-level analysis with proper project type context and HUD alignment
 """
 
 from typing import Any, Dict, List, Optional, Set, Tuple
@@ -17,11 +18,323 @@ from analysis.general.filter_utils import (
 )
 from analysis.general.theme import (
     CUSTOM_COLOR_SEQUENCE, MAIN_COLOR, NEUTRAL_COLOR, PLOT_TEMPLATE, SECONDARY_COLOR,
-    apply_chart_style, create_insight_container, fmt_int, fmt_pct
+    SUCCESS_COLOR, WARNING_COLOR, DANGER_COLOR, apply_chart_style, create_insight_container, 
+    fmt_int, fmt_pct, blue_divider
 )
 
 # Constants
 LOS_SECTION_KEY = "length_of_stay"
+
+# Project type benchmarks based on HUD standards
+PROJECT_TYPE_BENCHMARKS = {
+    "Emergency Shelter": {
+        "typical_range": (1, 60),
+        "target": 30,
+        "interpretation": "Crisis stabilization",
+        "long_stay_threshold": 90
+    },
+    "Emergency Shelter – Entry Exit": {
+        "typical_range": (1, 60),
+        "target": 30,
+        "interpretation": "Crisis stabilization",
+        "long_stay_threshold": 90
+    },
+    "Emergency Shelter – Night-by-Night": {
+        "typical_range": (1, 60),
+        "target": 30,
+        "interpretation": "Crisis stabilization",
+        "long_stay_threshold": 90
+    },
+    "Transitional Housing": {
+        "typical_range": (30, 730),
+        "target": 180,
+        "interpretation": "Transitional support",
+        "long_stay_threshold": 730
+    },
+    "PH – Rapid Re-Housing": {
+        "typical_range": (30, 365),
+        "target": 120,
+        "interpretation": "Housing placement & stabilization",
+        "long_stay_threshold": 365
+    },
+    "PH – Permanent Supportive Housing (disability required for entry)": {
+        "typical_range": (90, None),
+        "target": None,
+        "interpretation": "Permanent housing (no time limit)",
+        "long_stay_threshold": None
+    },
+    "PH – Housing Only": {
+        "typical_range": (90, None),
+        "target": None,
+        "interpretation": "Permanent housing (no time limit)",
+        "long_stay_threshold": None
+    },
+    "PH – Housing with Services (no disability required for entry)": {
+        "typical_range": (90, None),
+        "target": None,
+        "interpretation": "Permanent housing (no time limit)",
+        "long_stay_threshold": None
+    },
+    "Street Outreach": {
+        "typical_range": (1, 180),
+        "target": None,
+        "interpretation": "Engagement period varies",
+        "long_stay_threshold": 365
+    },
+    "Services Only": {
+        "typical_range": (1, 90),
+        "target": None,
+        "interpretation": "Service engagement",
+        "long_stay_threshold": 180
+    },
+    "Homelessness Prevention": {
+        "typical_range": (1, 365),
+        "target": 90,
+        "interpretation": "Prevention services",
+        "long_stay_threshold": 365
+    }
+}
+
+# Exit destination categories as they appear in the data
+EXIT_CATEGORIES = {
+    "Permanent Housing Situations": "positive",
+    "Temporary Housing Situations": "temporary",
+    "Institutional Situations": "institutional", 
+    "Homeless Situations": "negative",
+    "Other": "other"
+}
+
+# LOS category thresholds with context
+LOS_CATEGORIES = {
+    "0–7 days": {"color": DANGER_COLOR, "desc": "Very short stay"},
+    "8–30 days": {"color": WARNING_COLOR, "desc": "Short-term"},
+    "31–90 days": {"color": NEUTRAL_COLOR, "desc": "Medium-term"},
+    "91–180 days": {"color": MAIN_COLOR, "desc": "Extended"},
+    "181–365 days": {"color": SECONDARY_COLOR, "desc": "Long-term"},
+    "365+ days": {"color": SUCCESS_COLOR, "desc": "Very long-term"}
+}
+
+def _calculate_chart_height(num_groups: int, base_height: int = 400) -> int:
+    """Calculate optimal chart height based on number of groups."""
+    if num_groups <= 6:
+        return base_height
+    elif num_groups <= 12:
+        return base_height + 100
+    elif num_groups <= 20:
+        return base_height + 200
+    else:
+        return min(base_height + 300, 800)
+
+def _get_los_color(category: str) -> str:
+    """Get color for LOS category."""
+    return LOS_CATEGORIES.get(category, {}).get("color", MAIN_COLOR)
+
+def _get_project_type_from_code(project_type_code: str) -> str:
+    """Map project type code to readable name."""
+    if pd.isna(project_type_code):
+        return "Unknown"
+    
+    # Try to match the code directly
+    for key in PROJECT_TYPE_BENCHMARKS.keys():
+        if str(project_type_code) in key or key in str(project_type_code):
+            return key
+    
+    return str(project_type_code)
+
+def _get_los_interpretation(avg_los: float, median_los: float, project_type_mix: pd.Series) -> Tuple[str, str, str]:
+    """Get interpretation of LOS metrics based on project type context."""
+    
+    # Determine dominant project type
+    if not project_type_mix.empty:
+        # Map project types to readable names
+        project_type_mix = project_type_mix.apply(_get_project_type_from_code)
+        dominant_type = project_type_mix.value_counts().index[0]
+        benchmark = PROJECT_TYPE_BENCHMARKS.get(dominant_type, {})
+    else:
+        dominant_type = "Unknown"
+        benchmark = {}
+    
+    # Check if it's permanent housing
+    is_permanent_housing = any(ph in dominant_type for ph in ["Permanent Supportive Housing", "Housing Only", "Housing with Services"])
+    
+    # For permanent housing, long stays are positive
+    if is_permanent_housing:
+        if avg_los < 90:
+            severity = "Concerning"
+            color = WARNING_COLOR
+            desc = "Short stays in permanent housing may indicate housing instability"
+        elif avg_los < 365:
+            severity = "Developing Stability"
+            color = NEUTRAL_COLOR
+            desc = "Residents establishing housing stability"
+        else:
+            severity = "Stable Housing"
+            color = SUCCESS_COLOR
+            desc = "Long-term housing stability achieved"
+    else:
+        # For time-limited programs
+        if avg_los < 7:
+            severity = "Very Short Stays"
+            color = DANGER_COLOR
+            desc = "May indicate self-resolution or immediate exits"
+        elif avg_los < 30:
+            severity = "Short-term"
+            color = WARNING_COLOR
+            desc = f"Typical for crisis response"
+        elif avg_los < 90:
+            severity = "Medium-term"
+            color = NEUTRAL_COLOR
+            desc = f"Standard duration for transitional programs"
+        elif avg_los < 180:
+            severity = "Extended"
+            color = MAIN_COLOR
+            desc = f"Longer stays may indicate service needs or barriers"
+        else:
+            severity = "Very Long Stays"
+            color = SECONDARY_COLOR
+            desc = f"May indicate barriers to permanent housing placement"
+    
+    return severity, color, desc
+
+def _create_los_summary_html(
+    avg_los: float,
+    median_los: float,
+    q1: float,
+    q3: float,
+    total_enrollments: int,
+    unique_clients: int,
+    project_type_mix: pd.Series
+) -> str:
+    """Create HTML summary for LOS metrics with enrollment context."""
+    severity, color, desc = _get_los_interpretation(avg_los, median_los, project_type_mix)
+    
+    # Calculate skewness indicator
+    skewness = avg_los - median_los
+    if abs(skewness) < 5:
+        skew_text = "Balanced distribution"
+        skew_color = NEUTRAL_COLOR
+    elif skewness > 0:
+        skew_text = "Right-skewed (some very long stays)"
+        skew_color = WARNING_COLOR
+    else:
+        skew_text = "Left-skewed (mostly longer stays)"
+        skew_color = MAIN_COLOR
+    
+    # Get dominant project type for context
+    if not project_type_mix.empty:
+        project_type_mix = project_type_mix.apply(_get_project_type_from_code)
+        dominant_type = project_type_mix.value_counts().index[0]
+    else:
+        dominant_type = "Mixed"
+    
+    return f"""
+    <div style="background-color: rgba(0,0,0,0.2); border-radius: 10px; padding: 20px; margin: 20px 0;">
+        <h3 style="color: {color}; margin: 0 0 15px 0;">Length of Stay Profile: {severity}</h3>
+        <p style="margin: 0 0 10px 0; font-size: 16px;">{desc}</p>
+        <p style="margin: 0 0 15px 0; font-size: 14px; color: #ccc;">
+            <strong>Dominant Project Type:</strong> {dominant_type} | 
+            <strong>Analysis Level:</strong> Enrollment-based ({total_enrollments:,} enrollments from {unique_clients:,} unique clients)
+        </p>
+        
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px;">
+            <div style="background-color: rgba(255,255,255,0.05); padding: 15px; border-radius: 8px; text-align: center;">
+                <h4 style="margin: 0; color: {MAIN_COLOR};">Average Stay</h4>
+                <h2 style="margin: 10px 0; color: {color};">{avg_los:.0f} days</h2>
+                <p style="margin: 0; font-size: 14px;">Mean across all enrollments</p>
+            </div>
+            
+            <div style="background-color: rgba(255,255,255,0.05); padding: 15px; border-radius: 8px; text-align: center;">
+                <h4 style="margin: 0; color: {MAIN_COLOR};">Typical Stay</h4>
+                <h2 style="margin: 10px 0;">{median_los:.0f} days</h2>
+                <p style="margin: 0; font-size: 14px;">Middle value (median)</p>
+            </div>
+            
+            <div style="background-color: rgba(255,255,255,0.05); padding: 15px; border-radius: 8px; text-align: center;">
+                <h4 style="margin: 0; color: {MAIN_COLOR};">Common Range</h4>
+                <h2 style="margin: 10px 0;">{int(q1)}-{int(q3)} days</h2>
+                <p style="margin: 0; font-size: 14px;">Middle 50% of enrollments</p>
+            </div>
+            
+            <div style="background-color: rgba(255,255,255,0.05); padding: 15px; border-radius: 8px; text-align: center;">
+                <h4 style="margin: 0; color: {MAIN_COLOR};">Distribution</h4>
+                <h2 style="margin: 10px 0; color: {skew_color};">{skew_text}</h2>
+                <p style="margin: 0; font-size: 14px;">Based on {total_enrollments:,} enrollments</p>
+            </div>
+        </div>
+    </div>
+    """
+
+def _create_demographic_insights_html(
+    longest_stay: pd.Series,
+    shortest_stay: pd.Series,
+    disparity_ratio: float,
+    dim_col: str
+) -> str:
+    """Create HTML for demographic LOS insights."""
+    
+    # Determine disparity severity
+    if disparity_ratio < 1.5:
+        disparity_level = "Low"
+        disparity_color = SUCCESS_COLOR
+    elif disparity_ratio < 2.0:
+        disparity_level = "Moderate"
+        disparity_color = NEUTRAL_COLOR
+    elif disparity_ratio < 3.0:
+        disparity_level = "High"
+        disparity_color = WARNING_COLOR
+    else:
+        disparity_level = "Severe"
+        disparity_color = DANGER_COLOR
+    
+    return f"""
+    <div style="background-color: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.2); 
+                border-radius: 10px; padding: 20px;">
+        <h3 style="color: {MAIN_COLOR}; margin-bottom: 20px;">Key Length of Stay Patterns</h3>
+        
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 20px; margin-bottom: 20px;">
+            
+            <div style="background-color: rgba(255,99,71,0.15); border: 2px solid {SECONDARY_COLOR}; 
+                        border-radius: 10px; padding: 20px; text-align: center;">
+                <h4 style="color: {SECONDARY_COLOR}; margin: 0;">Longest Average Stays</h4>
+                <h2 style="margin: 10px 0;">{longest_stay[dim_col]}</h2>
+                <h3 style="color: {SECONDARY_COLOR}; margin: 0;">{longest_stay['mean']:.0f} days</h3>
+                <p style="margin: 5px 0 0 0; font-size: 14px;">
+                    {longest_stay['count']:,} enrollments
+                </p>
+            </div>
+            
+            <div style="background-color: rgba(75,181,67,0.15); border: 2px solid {SUCCESS_COLOR}; 
+                        border-radius: 10px; padding: 20px; text-align: center;">
+                <h4 style="color: {SUCCESS_COLOR}; margin: 0;">Shortest Average Stays</h4>
+                <h2 style="margin: 10px 0;">{shortest_stay[dim_col]}</h2>
+                <h3 style="color: {SUCCESS_COLOR}; margin: 0;">{shortest_stay['mean']:.0f} days</h3>
+                <p style="margin: 5px 0 0 0; font-size: 14px;">
+                    {shortest_stay['count']:,} enrollments
+                </p>
+            </div>
+            
+            <div style="background-color: rgba(128,128,128,0.15); border: 2px solid {disparity_color}; 
+                        border-radius: 10px; padding: 20px; text-align: center;">
+                <h4 style="color: {disparity_color}; margin: 0;">Disparity Level</h4>
+                <h2 style="margin: 10px 0; color: {disparity_color};">{disparity_level}</h2>
+                <h3 style="color: {disparity_color}; margin: 0;">{disparity_ratio:.1f}x difference</h3>
+                <p style="margin: 5px 0 0 0; font-size: 14px;">
+                    Between longest and shortest
+                </p>
+            </div>
+            
+        </div>
+        
+        <div style="margin-top: 15px; padding: 15px; background-color: rgba(33,102,172,0.1); 
+                    border-left: 4px solid {MAIN_COLOR}; border-radius: 5px;">
+            <p style="margin: 0; font-size: 14px;">
+                <strong>Gap Analysis:</strong> The difference of {(longest_stay['mean'] - shortest_stay['mean']):.0f} days 
+                between groups suggests {"significant" if disparity_ratio >= 2.0 else "moderate"} variations in service patterns 
+                or client needs across {dim_col.lower()} groups.
+            </p>
+        </div>
+    </div>
+    """
 
 def length_of_stay(df: DataFrame, start: Timestamp, end: Timestamp) -> Dict[str, Any]:
     """
@@ -43,6 +356,10 @@ def length_of_stay(df: DataFrame, start: Timestamp, end: Timestamp) -> Dict[str,
         - avg_los: Average length of stay
         - median_los: Median length of stay
         - distribution: DataFrame with counts by LOS category
+        - data_quality_issues: Count of problematic records
+        - quality_details: Detailed breakdown of issues
+        - unique_clients: Number of unique clients
+        - project_types: Series of project types in the data
     """
     # Validate required columns
     required_cols = ["EnrollmentID", "ProjectStart", "ProjectExit", "ClientID"]
@@ -65,19 +382,61 @@ def length_of_stay(df: DataFrame, start: Timestamp, end: Timestamp) -> Dict[str,
             "median_los": 0.0,
             "distribution": empty_dist,
             "los_by_enrollment": empty_los,
+            "data_quality_issues": 0,
+            "quality_details": {},
+            "unique_clients": 0,
+            "project_types": pd.Series(dtype='object')
         }
     
-    # Calculate LOS
-    active["LOS"] = (
-        (active["ProjectExit"].fillna(end) - active["ProjectStart"]).dt.days + 1
-    )
+    # Calculate LOS with proper data quality handling
+    active["ExitDateUsed"] = active["ProjectExit"].fillna(end)
+    active["LOS_Raw"] = (active["ExitDateUsed"] - active["ProjectStart"]).dt.days + 1
     
-    # Handle potential data errors - LOS should be at least 1 day
-    active.loc[active["LOS"] < 1, "LOS"] = 1
+    # Track data quality issues
+    data_quality_issues = {
+        "negative_los": (active["LOS_Raw"] < 0).sum(),
+        "zero_los": (active["LOS_Raw"] == 0).sum(),
+        "exit_before_start": (active["ProjectExit"].notna() & 
+                             (active["ProjectExit"] < active["ProjectStart"])).sum(),
+        "future_entry": (active["ProjectStart"] > end).sum(),
+        "extremely_long_stays": (active["LOS_Raw"] > 1825).sum()  # 5+ years
+    }
     
-    # Calculate average and median LOS
+    # Handle different cases appropriately
+    active["LOS"] = active["LOS_Raw"].copy()
+    
+    # Same-day services (0 days) -> 1 day (this is standard practice)
+    same_day_mask = active["LOS_Raw"] == 0
+    active.loc[same_day_mask, "LOS"] = 1
+    
+    # Negative LOS (data error) -> exclude from calculations
+    negative_mask = active["LOS_Raw"] < 0
+    if negative_mask.any():
+        # Exclude problematic records from analysis
+        active = active[~negative_mask].copy()
+    
+    # Recalculate stats after cleaning
+    if active.empty:
+        return {
+            "avg_los": 0.0,
+            "median_los": 0.0,
+            "distribution": pd.DataFrame(columns=["LOS_Category", "count"]),
+            "los_by_enrollment": pd.DataFrame(columns=["EnrollmentID", "ClientID", "LOS"]),
+            "data_quality_issues": sum(data_quality_issues.values()),
+            "quality_details": data_quality_issues,
+            "unique_clients": 0,
+            "project_types": pd.Series(dtype='object')
+        }
+    
+    # Calculate statistics on clean data
     avg_los = round(active["LOS"].mean(), 1)
     median_los = round(active["LOS"].median(), 1)
+    unique_clients = active["ClientID"].nunique()
+    
+    # Get project types if available
+    project_types = pd.Series(dtype='object')
+    if "ProjectTypeCode" in active.columns:
+        project_types = active["ProjectTypeCode"]
     
     # Create LOS distribution categories
     bins = [0, 7, 30, 90, 180, 365, float('inf')]
@@ -96,8 +455,43 @@ def length_of_stay(df: DataFrame, start: Timestamp, end: Timestamp) -> Dict[str,
         "los_by_enrollment": active[["EnrollmentID", "ClientID", "LOS"]],
         "avg_los": avg_los,
         "median_los": median_los,
-        "distribution": dist_df
+        "distribution": dist_df,
+        "data_quality_issues": sum(data_quality_issues.values()),
+        "quality_details": data_quality_issues,
+        "unique_clients": unique_clients,
+        "project_types": project_types
     }
+
+def analyze_los_with_destinations(df: DataFrame, los_data: Dict) -> DataFrame:
+    """Combine LOS analysis with exit destinations for better insights."""
+    if "los_by_enrollment" not in los_data or los_data["los_by_enrollment"].empty:
+        return pd.DataFrame()
+    
+    # Get enrollments with LOS
+    los_df = los_data["los_by_enrollment"].copy()
+    
+    # Merge with exit destination data
+    if "ExitDestinationCat" in df.columns:
+        exit_data = df[["EnrollmentID", "ExitDestinationCat", "ProjectExit"]].drop_duplicates()
+        los_with_dest = los_df.merge(exit_data, on="EnrollmentID", how="left")
+        
+        # Only include exits (not active enrollments)
+        exits_only = los_with_dest[los_with_dest["ProjectExit"].notna()]
+        
+        if not exits_only.empty:
+            # Group by destination type
+            dest_summary = exits_only.groupby("ExitDestinationCat")["LOS"].agg(
+                mean_los="mean",
+                median_los="median",
+                count="count"
+            ).round(1)
+            
+            # Sort by mean LOS
+            dest_summary = dest_summary.sort_values("mean_los", ascending=False)
+            
+            return dest_summary
+    
+    return pd.DataFrame()
 
 def los_by_demographic(
     df: DataFrame,
@@ -138,28 +532,19 @@ def los_by_demographic(
     los_df = los_data["los_by_enrollment"].copy()
     
     # Add demographic info
-    demo_map = df[["ClientID", dim_col]].copy()
+    demo_map = df[["EnrollmentID", dim_col]].copy()
     
     # Handle missing values
     demo_map[dim_col] = demo_map[dim_col].fillna("Not Reported")
     
-    # Get most common value for each client if there are duplicates
-    if demo_map.duplicated("ClientID").any():
-        # Get most common value for each client
-        demo_mode = demo_map.groupby("ClientID")[dim_col].agg(
-            lambda x: x.mode().iloc[0] if not x.mode().empty else "Not Reported"
-        ).reset_index()
-        demo_map = demo_mode
-    
-    # Merge with LOS data
-    los_with_demo = los_df.merge(demo_map, on="ClientID", how="left")
+    # Merge with LOS data using EnrollmentID
+    los_with_demo = los_df.merge(demo_map, on="EnrollmentID", how="left")
     
     # Fill any remaining NAs
     los_with_demo[dim_col] = los_with_demo[dim_col].fillna("Not Reported")
     
     # Calculate summary statistics by group
     los_by_demo = los_with_demo.groupby(dim_col)["LOS"].agg(
-        # Use safe aggregations that handle empty groups
         mean=lambda x: x.mean() if len(x) > 0 else 0,
         median=lambda x: x.median() if len(x) > 0 else 0,
         count="count",
@@ -170,7 +555,7 @@ def los_by_demographic(
     # Filter to groups that meet minimum size
     los_by_demo = los_by_demo[los_by_demo["count"] >= min_group_size]
     
-    # Calculate total bed days by group
+    # Calculate total enrollment days by group
     los_by_demo["total_days"] = los_by_demo["mean"] * los_by_demo["count"]
     
     # Calculate disparity index relative to overall average
@@ -186,6 +571,148 @@ def los_by_demographic(
     los_by_demo = los_by_demo.sort_values("mean", ascending=False)
     
     return los_by_demo
+
+def get_los_recommendations(los_data: Dict, project_types: pd.Series, df: DataFrame) -> List[Dict]:
+    """Generate recommendations based on LOS patterns and project types."""
+    recommendations = []
+    
+    # Get distribution data
+    dist_df = los_data.get("distribution", pd.DataFrame())
+    if dist_df.empty:
+        return recommendations
+    
+    # Calculate percentages
+    total = dist_df["count"].sum()
+    if total == 0:
+        return recommendations
+    
+    very_short = dist_df[dist_df["LOS_Category"] == "0–7 days"]["count"].sum() / total * 100
+    very_long = dist_df[dist_df["LOS_Category"] == "365+ days"]["count"].sum() / total * 100
+    
+    # Get dominant project type
+    if not project_types.empty:
+        project_types = project_types.apply(_get_project_type_from_code)
+        type_counts = project_types.value_counts()
+        if not type_counts.empty:
+            dominant_type = type_counts.index[0]
+            
+            # Emergency Shelter specific recommendations
+            if "Emergency Shelter" in dominant_type:
+                if los_data['avg_los'] > 60:
+                    recommendations.append({
+                        "icon": "⏰",
+                        "title": "Extended Emergency Shelter Stays",
+                        "color": WARNING_COLOR,
+                        "actions": [
+                            "Review housing placement barriers for long-stay clients",
+                            "Assess need for more transitional/permanent housing options",
+                            "Implement rapid exit strategies and housing-focused case management",
+                            "Consider whether some clients need higher level of care"
+                        ]
+                    })
+                
+                if very_short > 40:
+                    recommendations.append({
+                        "icon": "⚡",
+                        "title": "High Rate of Very Short Stays",
+                        "color": MAIN_COLOR,
+                        "actions": [
+                            "Analyze exit destinations for 0-7 day stays",
+                            "Determine if exits are to permanent housing (positive) or returns to street",
+                            "Consider implementing diversion programs at entry",
+                            "Review intake procedures for appropriateness"
+                        ]
+                    })
+            
+            # Permanent Housing specific recommendations
+            elif any(ph in dominant_type for ph in ["Permanent Supportive Housing", "Housing Only", "Housing with Services"]):
+                if los_data['avg_los'] < 180:
+                    recommendations.append({
+                        "icon": "⚠️",
+                        "title": "Short Stays in Permanent Housing",
+                        "color": DANGER_COLOR,
+                        "actions": [
+                            "Review reasons for exits from permanent housing",
+                            "Assess adequacy of supportive services",
+                            "Check for involuntary exits or lease violations",
+                            "Evaluate housing quality and client-housing match"
+                        ]
+                    })
+            
+            # Rapid Re-Housing specific recommendations
+            elif "Rapid Re-Housing" in dominant_type:
+                if los_data['avg_los'] > 365:
+                    recommendations.append({
+                        "icon": "📅",
+                        "title": "Extended RRH Assistance Periods",
+                        "color": WARNING_COLOR,
+                        "actions": [
+                            "Review if clients need permanent supportive housing instead",
+                            "Assess local housing market conditions affecting exits",
+                            "Evaluate progressive engagement and step-down strategies",
+                            "Consider time limits and extensions policy"
+                        ]
+                    })
+    
+    # General recommendations based on patterns
+    if very_short > 30:
+        recommendations.append({
+            "icon": "⚡",
+            "title": "High Short-Stay Rate",
+            "color": WARNING_COLOR,
+            "actions": [
+                "Review exit destinations for 0-7 day stays",
+                "Assess if rapid exits indicate self-resolution or premature exits",
+                "Consider diversion programs if appropriate",
+                "Analyze by project type to identify specific program issues"
+            ]
+        })
+    
+    if very_long > 20:
+        recommendations.append({
+            "icon": "⏰",
+            "title": "Significant Long-Stay Population",
+            "color": SECONDARY_COLOR,
+            "actions": [
+                "Review housing barriers for long-stay clients",
+                "Assess need for permanent supportive housing",
+                "Implement progressive engagement strategies",
+                "Consider move-on strategies for stable PSH residents"
+            ]
+        })
+    
+    if los_data['avg_los'] > los_data['median_los'] * 1.5:
+        recommendations.append({
+            "icon": "📊",
+            "title": "Highly Skewed Distribution",
+            "color": MAIN_COLOR,
+            "actions": [
+                "Identify outlier cases pulling up the average",
+                "Consider different interventions for different stay lengths",
+                "Review if program types match client needs",
+                "Implement targeted interventions for long-stayers"
+            ]
+        })
+    
+    # Add exit destination analysis if available
+    if "ExitDestinationCat" in df.columns:
+        dest_summary = analyze_los_with_destinations(df, los_data)
+        if not dest_summary.empty and "Homeless Situations" in dest_summary.index:
+            homeless_exits_los = dest_summary.loc["Homeless Situations", "mean_los"]
+            if homeless_exits_los > 90:
+                recommendations.append({
+                    "icon": "🚨",
+                    "title": "Long Stays Ending in Homelessness",
+                    "color": DANGER_COLOR,
+                    "actions": [
+                        "Review why long-term clients are exiting to homelessness",
+                        "Assess effectiveness of housing placement efforts",
+                        "Consider different interventions before program exit",
+                        "Implement exit planning protocols earlier in stay"
+                    ]
+                })
+    
+    return recommendations
 
 @st.fragment
 def render_length_of_stay(df_filt: DataFrame) -> None:
@@ -211,19 +738,56 @@ def render_length_of_stay(df_filt: DataFrame) -> None:
             if k not in ["last_updated"]:
                 state.pop(k, None)
     
-    # Header and description
-    st.subheader("⏱️ Length of Stay Analysis")
-    st.markdown("""
-    Analyze how long clients remain in programs before exiting. Use this analysis to identify:
+    # Header with info button
+    col_header, col_info = st.columns([6, 1])
+    with col_header:
+        st.subheader("⏱️ Length of Stay Analysis")
+    with col_info:
+        with st.popover("ℹ️ Help", use_container_width=True):
+            st.markdown("""
+            ### Understanding Length of Stay
+            
+            **What this measures:**
+            - How long clients remain enrolled in programs
+            - Time from entry to exit (or current date if still enrolled)
+            - Patterns across different groups and project types
+            
+            **Analysis Level:**
+            - This analysis is at the ENROLLMENT level
+            - A client with multiple enrollments is counted separately for each
+            - All enrollment days use entry/exit dates (not bed nights)
+            
+            **Why it matters:**
+            - **Short stays** may indicate:
+              - Rapid housing success (positive if exiting to PH)
+              - Self-resolution
+              - Program exits without housing (negative if returning to homelessness)
+            - **Long stays** may indicate:
+              - Housing stability (positive in permanent housing)
+              - Housing barriers (concerning in emergency programs)
+              - Need for different intervention level
+            
+            **Project Type Context:**
+            Length of stay has different meanings by project type
+            
+            **Key Metrics:**
+            - **Average (Mean)**: Total days ÷ number of enrollments
+            - **Median**: Middle value when sorted
+            - **Quartiles**: 25th and 75th percentile ranges
+            - **Distribution**: Breakdown by stay categories
+            """)
     
-    - Patterns in service utilization across different demographic groups
-    - Distribution patterns that may indicate system bottlenecks
-    - Opportunities to improve flow through the homeless system
-    
-    **How LOS is calculated:**  
-    LOS = (ProjectExit − ProjectStart).days + 1.  
-    If ProjectExit is missing (i.e. client is still enrolled), we use the **current reporting end date** in place of ProjectExit.
-    """)
+    # Introduction box
+    intro_html = f"""
+    <div style="background-color: rgba(33,102,172,0.1); border: 1px solid {MAIN_COLOR}; 
+                border-radius: 10px; padding: 15px; margin-bottom: 20px;">
+        <p style="margin: 0;">
+            <strong>Purpose:</strong> Analyze how long clients stay in programs to understand service patterns, 
+            identify potential bottlenecks, and ensure appropriate service matching based on project type.
+        </p>
+    </div>
+    """
+    st.html(intro_html)
     
     # Get time boundaries
     t0 = st.session_state.get("t0")
@@ -239,12 +803,12 @@ def render_length_of_stay(df_filt: DataFrame) -> None:
             try:
                 los_data = length_of_stay(df_filt, t0, t1)
                 
-                # Validate los_data structure and handle potential issues
+                # Validate los_data structure
                 if not isinstance(los_data, dict):
                     st.error("LOS calculation produced invalid data structure.")
                     return
                 
-                required_keys = ["los_by_enrollment", "avg_los", "median_los", "distribution"]
+                required_keys = ["los_by_enrollment", "avg_los", "median_los", "distribution", "unique_clients", "project_types"]
                 if not all(key in los_data for key in required_keys):
                     st.error("LOS calculation missing required data components.")
                     return
@@ -261,267 +825,215 @@ def render_length_of_stay(df_filt: DataFrame) -> None:
     else:
         los_data = state["los_data"]
     
+    # Check for data quality issues
+    if "data_quality_issues" in los_data and los_data["data_quality_issues"] > 0:
+        quality_details = los_data.get("quality_details", {})
+        
+        warning_html = f"""
+        <div style="background-color: rgba(255,165,0,0.1); border: 2px solid {WARNING_COLOR}; 
+                    border-radius: 10px; padding: 15px; margin: 15px 0;">
+            <h4 style="color: {WARNING_COLOR}; margin: 0 0 10px 0;">
+                ⚠️ Data Quality Warning
+            </h4>
+            <p style="margin: 0 0 10px 0;">
+                Found {los_data['data_quality_issues']} enrollment(s) with data quality issues:
+            </p>
+            <ul style="margin: 0; padding-left: 20px;">
+        """
+        
+        if quality_details.get("negative_los", 0) > 0:
+            warning_html += f"<li>{quality_details['negative_los']} record(s) with exit date before entry date (excluded)</li>"
+        if quality_details.get("extremely_long_stays", 0) > 0:
+            warning_html += f"<li>{quality_details['extremely_long_stays']} record(s) with stays over 5 years</li>"
+        if quality_details.get("future_entry", 0) > 0:
+            warning_html += f"<li>{quality_details['future_entry']} record(s) with entry dates after report end</li>"
+        
+        warning_html += """
+            </ul>
+            <p style="margin: 10px 0 0 0; font-style: italic; font-size: 14px;">
+                Please review and correct these data entry errors in the source system.
+            </p>
+        </div>
+        """
+        
+        st.html(warning_html)
+    
     # Create tabs for different views
-    tab_overview, tab_demo = st.tabs(["Overview", "Demographics Breakdown"])
+    tab_overview, tab_demo, tab_project, tab_insights = st.tabs([
+        "📊 Overview", "👥 Demographics", "🏠 Project Types", "💡 Insights"
+    ])
     
     with tab_overview:
-        # Display summary metrics with more context
-        col_a, col_b, col_c = st.columns(3)
-        
-        # Calculate additional benchmark metrics with robust handling
+        # Calculate additional metrics
         all_los = los_data["los_by_enrollment"]["LOS"]
-        
-        # Safe calculation of percentiles with empty check
         q1 = all_los.quantile(0.25) if not all_los.empty else 0
         q3 = all_los.quantile(0.75) if not all_los.empty else 0
-        iqr = q3 - q1
+        total_enrollments = len(all_los)
+        unique_clients = los_data.get("unique_clients", 0)
+        project_types = los_data.get("project_types", pd.Series())
         
-        col_a.metric(
-            "Average LOS", 
-            f"{los_data['avg_los']:.1f} days",
-            help="Mean number of days clients stayed in programs"
+        # Display enhanced summary
+        summary_html = _create_los_summary_html(
+            los_data['avg_los'], 
+            los_data['median_los'], 
+            q1, q3, 
+            total_enrollments,
+            unique_clients,
+            project_types
         )
-        col_b.metric(
-            "Median LOS", 
-            f"{los_data['median_los']:.1f} days",
-            help="Middle value of all stay durations (less affected by outliers)"
-        )
-        col_c.metric(
-            "Interquartile Range",
-            f"{int(q1)}-{int(q3)} days",
-            help="Middle 50% of stays fall within this range"
-        )
+        st.html(summary_html)
+        
+        blue_divider()
+        
+        # Distribution chart
+        st.markdown("### Length of Stay Distribution")
         
         if los_data["distribution"].empty:
             st.info("No length of stay data available for the selected period.")
             return
         
-        # Display LOS distribution with improved visualization
-        st.subheader("LOS Distribution")
-        
-        # Create a better chart with color gradient based on stay length
+        # Prepare distribution data
         dist_df = los_data["distribution"].copy()
+        dist_df["color"] = dist_df["LOS_Category"].apply(_get_los_color)
         
-        # Add a numeric order column for coloring
-        category_order = {
-            "0–7 days": 1,
-            "8–30 days": 2,
-            "31–90 days": 3,
-            "91–180 days": 4,
-            "181–365 days": 5,
-            "365+ days": 6
-        }
-        dist_df["category_order"] = dist_df["LOS_Category"].map(category_order)
-        
-        # Calculate percentage for better context
+        # Calculate percentage
         total_count = dist_df["count"].sum()
-        if total_count > 0:  # Avoid division by zero
+        if total_count > 0:
             dist_df["percentage"] = (dist_df["count"] / total_count * 100).round(1)
         else:
             dist_df["percentage"] = 0
         
-        # Create enhanced distribution chart
-        dist_fig = px.bar(
-            dist_df.sort_values("category_order"),
-            x="LOS_Category",
-            y="count",
-            color_discrete_sequence=[MAIN_COLOR],
-            text=dist_df["percentage"].apply(lambda x: f"{x:.1f}%" if total_count > 0 else "0%"),
-            title="Length of Stay Distribution",
-            labels={
-                "LOS_Category": "Length of Stay", 
-                "count": "Number of Enrollments"
-            }
-        )
+        # Create distribution chart
+        fig = go.Figure()
         
-        # Apply consistent styling
-        dist_fig = apply_chart_style(
-            dist_fig,
-            xaxis_title="Length of Stay Category",
-            yaxis_title="Enrollments",
-            height=400
-        )
-        
-        # Make the text more readable
-        dist_fig.update_traces(
-            textposition="outside",
-            textfont=dict(size=14),
-            hovertemplate="<b>%{x}</b><br>Enrollments: %{y}<br>Percentage: %{text}"
-        )
-        
-        # Display the chart
-        st.plotly_chart(dist_fig, use_container_width=True)
-        
-        # Add enhanced insights based on distribution
-        with st.expander("Distribution Insights", expanded=True):
-            # Find most common category
-            if not dist_df.empty:
-                largest_bucket = dist_df.loc[dist_df["count"].idxmax()]
-                
-                # Find stay percentages by category
-                short_stay_pct = (
-                    dist_df[dist_df["LOS_Category"].isin(["0–7 days", "8–30 days"])]
-                    ["percentage"].sum()
-                )
-                
-                medium_stay_pct = (
-                    dist_df[dist_df["LOS_Category"].isin(["31–90 days", "91–180 days"])]
-                    ["percentage"].sum()
-                )
-                
-                long_stay_pct = (
-                    dist_df[dist_df["LOS_Category"].isin(["181–365 days", "365+ days"])]
-                    ["percentage"].sum()
-                )
-                
-                # Create a pie chart for stay length distribution
-                stay_categories = ["Short (<30 days)", "Medium (31-180 days)", "Long (>180 days)"]
-                stay_values = [short_stay_pct, medium_stay_pct, long_stay_pct]
-                
-                # Use defined color palette
-                colors = [MAIN_COLOR, NEUTRAL_COLOR, SECONDARY_COLOR]
-                
-                fig_pie = px.pie(
-                    values=stay_values,
-                    names=stay_categories,
-                    color_discrete_sequence=colors,
-                    title="Stay Length Categories"
-                )
-                
-                # Format the pie chart
-                fig_pie.update_traces(
-                    textinfo="percent+label",
-                    textfont_size=14,
-                    hole=0.4,  # Create a donut chart
-                    pull=[0.03, 0, 0]  # Slightly pull out the first slice
-                )
-                
-                # Apply consistent styling
-                fig_pie = apply_chart_style(fig_pie, height=300)
-                
-                # Create a visualized insight section
-                col_insight, col_pie = st.columns([3, 2])
-                
-                with col_insight:
-                    st.markdown(f"""
-                    ### Key Observations
-                    * **{largest_bucket['LOS_Category']}** is the most common length of stay (**{fmt_int(largest_bucket['count'])}** enrollments or **{largest_bucket['percentage']:.1f}%**)
-                    * **{fmt_pct(short_stay_pct)}** of enrollments are short-term (<30 days)
-                    * **{fmt_pct(medium_stay_pct)}** are medium-term (31-180 days)
-                    * **{fmt_pct(long_stay_pct)}** are long-term (>180 days)
-                    
-                    ### Stay Length Distribution
-                    * The median stay (**{los_data['median_los']:.1f} days**) is {'longer' if los_data['median_los'] > los_data['avg_los'] else 'shorter'} than the average (**{los_data['avg_los']:.1f} days**)
-                    """)
-                    
-                    if los_data['median_los'] < los_data['avg_los']:
-                        st.markdown("""
-                        * **Statistical note:** The average being higher than the median indicates a right-skewed distribution with some extremely long stays influencing the average.
-                        """)
-                    elif los_data['median_los'] > los_data['avg_los']:
-                        st.markdown("""
-                        * **Statistical note:** The median being higher than the average indicates a left-skewed distribution with a high number of very short stays.
-                        """)
-                
-                with col_pie:
-                    st.plotly_chart(fig_pie)
-            else:
-                st.info("No distribution data available for insights.")
-        
-        # Display histogram of actual LOS values
-        st.subheader("Detailed LOS Histogram")
-        
-        # Create bins for the histogram
-        if not all_los.empty:
-            max_los = all_los.max()
-            
-            # Create a copy with capped values for visualization
-            viz_data = los_data["los_by_enrollment"].copy()
-            los_cap = 730  # Cap at 2 years for visualization
-            
-            # Determine bin size dynamically based on data range
-            if max_los <= 90:
-                bin_size = 7  # Weekly bins for shorter stays
-                bin_text = "week"
-            elif max_los <= 365:
-                bin_size = 30  # Monthly bins for medium stays
-                bin_text = "month"
-            else:
-                bin_size = 90  # Quarterly bins for longer stays
-                bin_text = "quarter"
-            
-            num_bins = min(15, max(6, int(min(max_los, los_cap) / bin_size) + 1))
-            
-            # Add message about capped values if needed
-            if max_los > los_cap:
-                above_cap_count = (viz_data["LOS"] > los_cap).sum()
-                above_cap_pct = (above_cap_count / len(viz_data) * 100).round(1)
-                cap_message = f" (Note: {above_cap_count} enrollments ({above_cap_pct}%) with stays > {los_cap} days are grouped at {los_cap})" if above_cap_count > 0 else ""
-                # Cap values for visualization
-                viz_data.loc[viz_data["LOS"] > los_cap, "LOS"] = los_cap
-            else:
-                cap_message = ""
-            
-            # Create histogram
-            hist_fig = px.histogram(
-                viz_data,
-                x="LOS",
-                nbins=num_bins,
-                title=f"Length of Stay Distribution by {bin_text}{cap_message}",
-                labels={"LOS": "Length of Stay (days)"},
-                opacity=0.8,
-                color_discrete_sequence=[MAIN_COLOR]
-            )
-            
-            # Apply consistent styling
-            hist_fig = apply_chart_style(
-                hist_fig,
-                xaxis_title="Length of Stay (days)",
-                yaxis_title="Number of Enrollments",
-                height=400
-            )
-            
-            # Add mean and median lines
-            hist_fig.add_vline(
-                x=los_data['median_los'],
-                line=dict(dash="dash", color=SECONDARY_COLOR, width=2),
-                annotation=dict(
-                    text=f"Median: {los_data['median_los']:.1f} days",
-                    font=dict(size=14, color=SECONDARY_COLOR),
-                    bgcolor="rgba(0,0,0,0.7)",
-                    bordercolor=SECONDARY_COLOR,
-                    borderwidth=1
+        for idx, row in dist_df.iterrows():
+            fig.add_trace(go.Bar(
+                x=[row["LOS_Category"]],
+                y=[row["count"]],
+                name=row["LOS_Category"],
+                marker_color=row["color"],
+                text=f"{row['count']:,}<br>({row['percentage']:.0f}%)",
+                textposition="outside",
+                textfont=dict(color="white", size=14),
+                hovertemplate=(
+                    f"<b>{row['LOS_Category']}</b><br>"
+                    f"Count: {row['count']:,}<br>"
+                    f"Percentage: {row['percentage']:.1f}%<br>"
+                    f"<extra></extra>"
                 ),
-                annotation_position="top right"
-            )
-            
-            hist_fig.add_vline(
-                x=los_data['avg_los'],
-                line=dict(dash="dash", color="white", width=2),
-                annotation=dict(
-                    text=f"Average: {los_data['avg_los']:.1f} days",
-                    font=dict(size=14, color="white"),
-                    bgcolor="rgba(0,0,0,0.7)",
-                    bordercolor="white",
-                    borderwidth=1
-                ),
-                annotation_position="top left"
-            )
-            
-            # Format x-axis
-            hist_fig.update_xaxes(
-                dtick=bin_size,
-                tickmode="linear"
-            )
-            
-            # Display the chart
-            st.plotly_chart(hist_fig, use_container_width=True)
-        else:
-            st.info("No detailed LOS data available for histogram.")
+                showlegend=False
+            ))
+        
+        fig.update_layout(
+            template=PLOT_TEMPLATE,
+            height=500,
+            margin=dict(l=80, r=80, t=100, b=100),
+            xaxis=dict(
+                title="Length of Stay Category",
+                tickangle=0,
+                automargin=True
+            ),
+            yaxis=dict(
+                title="Number of Enrollments",
+                automargin=True,
+                rangemode="tozero",
+                range=[0, dist_df["count"].max() * 1.25]
+            ),
+            showlegend=False,
+            bargap=0.2
+        )
+        
+        st.plotly_chart(fig, use_container_width=True)
+        
+        # Category explanation
+        category_html = f"""
+        <div style="background-color: rgba(0,0,0,0.2); border-radius: 8px; padding: 15px; margin: 20px 0;">
+            <p style="margin: 0 0 10px 0; font-weight: bold;">Understanding Stay Categories:</p>
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px;">
+        """
+        
+        for category, info in LOS_CATEGORIES.items():
+            category_html += f"""
+                <div style="display: flex; align-items: center; gap: 10px;">
+                    <div style="width: 20px; height: 20px; background-color: {info['color']}; 
+                                border-radius: 3px; border: 1px solid white;"></div>
+                    <span><strong>{category}</strong>: {info['desc']}</span>
+                </div>
+            """
+        
+        category_html += """
+            </div>
+        </div>
+        """
+        st.html(category_html)
+        
+        # Exit destination analysis if available
+        if "ExitDestinationCat" in df_filt.columns:
+            with st.expander("📤 Length of Stay by Exit Destination", expanded=False):
+                dest_summary = analyze_los_with_destinations(df_filt, los_data)
+                if not dest_summary.empty:
+                    st.markdown("### Average Stay by Exit Destination")
+                    
+                    # Create bar chart
+                    fig_dest = px.bar(
+                        dest_summary.reset_index(),
+                        x="ExitDestinationCat",
+                        y="mean_los",
+                        text="mean_los",
+                        color="ExitDestinationCat",
+                        color_discrete_map={
+                            "Permanent Housing Situations": SUCCESS_COLOR,
+                            "Temporary Housing Situations": WARNING_COLOR,
+                            "Homeless Situations": DANGER_COLOR,
+                            "Institutional Situations": NEUTRAL_COLOR,
+                            "Other": SECONDARY_COLOR
+                        },
+                        title="Average Length of Stay by Exit Destination"
+                    )
+                    
+                    fig_dest.update_traces(
+                        texttemplate='%{text:.0f} days',
+                        textposition='outside'
+                    )
+                    
+                    fig_dest.update_layout(
+                        template=PLOT_TEMPLATE,
+                        height=400,
+                        showlegend=False,
+                        xaxis_title="Exit Destination Category",
+                        yaxis_title="Average Length of Stay (days)"
+                    )
+                    
+                    st.plotly_chart(fig_dest, use_container_width=True)
+                    
+                    # Show summary table
+                    st.dataframe(
+                        dest_summary.style.format({
+                            "mean_los": "{:.0f} days",
+                            "median_los": "{:.0f} days",
+                            "count": "{:,}"
+                        }),
+                        use_container_width=True
+                    )
+                else:
+                    st.info("No exit destination data available.")
     
     with tab_demo:
-        # Demographic breakdown of LOS
-        st.subheader("Length of Stay by Demographic Group")
+        st.markdown("### Length of Stay by Demographics")
+        
+        # Add explanation
+        demo_explanation_html = f"""
+        <div style="background-color: rgba(33,102,172,0.1); border: 1px solid {MAIN_COLOR}; 
+                    border-radius: 8px; padding: 12px; margin-bottom: 20px;">
+            <p style="margin: 0;">
+                <strong>Why this matters:</strong> Identifying disparities in length of stay can reveal:
+                • Groups facing additional housing barriers
+                • Potential service gaps or mismatches
+                • Opportunities for targeted interventions
+            </p>
+        </div>
+        """
+        st.html(demo_explanation_html)
         
         # Create unique key for widgets
         key_suffix = hash_data(filter_timestamp)
@@ -538,10 +1050,10 @@ def render_length_of_stay(df_filt: DataFrame) -> None:
         
         # Dimension selection
         demo_label = st.selectbox(
-            "Break down by…", 
+            "Compare by", 
             [lbl for lbl, _ in available_dimensions],
             key=f"los_dim_{key_suffix}",
-            help="Analyze how LOS varies across demographic groups"
+            help="Choose which characteristic to analyze"
         )
         
         # Get the actual column name
@@ -559,25 +1071,25 @@ def render_length_of_stay(df_filt: DataFrame) -> None:
                 options=demo_values,
                 default=demo_values,
                 key=f"los_val_filter_{key_suffix}",
-                help=f"Filter which {demo_label} groups to show in this breakdown"
+                help=f"Choose which {demo_label} groups to show"
             )
         except Exception as e:
             st.error(f"Error loading demographic values: {e}")
             return
 
         if not selected_values:
-            st.warning(f"No {demo_label} values selected. Please select at least one.")
+            st.warning(f"Please select at least one {demo_label} group.")
             return
         
         # Minimum group size
         min_group = st.slider(
-            "Minimum group size",
+            "Minimum group size to display",
             min_value=5,
             max_value=50,
             value=10,
             step=5,
             key=f"los_min_group_{key_suffix}",
-            help="Minimum number of clients required for a group to be included"
+            help="Hide groups with fewer enrollments for statistical reliability"
         )
 
         # Track dimension and selected values for recompute trigger
@@ -598,7 +1110,7 @@ def render_length_of_stay(df_filt: DataFrame) -> None:
         
         # Calculate LOS by demographic if needed
         if "los_by_demo" not in state:
-            with st.spinner(f"Calculating LOS by {demo_label}..."):
+            with st.spinner(f"Calculating length of stay by {demo_label}..."):
                 try:
                     # Filter to selected demographic values
                     df_subset = df_filt[df_filt[demo_col].isin(selected_values)]
@@ -611,7 +1123,7 @@ def render_length_of_stay(df_filt: DataFrame) -> None:
                     los_by_demo = los_by_demographic(df_subset, demo_col, t0, t1, min_group)
                     
                     if los_by_demo.empty:
-                        st.info(f"No groups meet the minimum size threshold of {min_group} clients.")
+                        st.info(f"No groups meet the minimum size threshold of {min_group} enrollments.")
                         return
                     
                     state["los_by_demo"] = los_by_demo
@@ -622,31 +1134,41 @@ def render_length_of_stay(df_filt: DataFrame) -> None:
         else:
             los_by_demo = state["los_by_demo"]
         
+        blue_divider()
+        
         # Sort data for visualization
         sorted_los_by_demo = los_by_demo.sort_values("mean", ascending=False)
         
         # Limit number of groups to display
-        MAX_GROUPS = 12
+        MAX_GROUPS = 15
         if len(sorted_los_by_demo) > MAX_GROUPS:
-            st.info(f"Displaying top {MAX_GROUPS} groups by average LOS. {len(sorted_los_by_demo) - MAX_GROUPS} smaller groups are not shown.")
+            st.info(f"📊 Showing top {MAX_GROUPS} groups by average stay length")
             sorted_los_by_demo = sorted_los_by_demo.head(MAX_GROUPS)
+        
+        # Calculate chart height
+        chart_height = _calculate_chart_height(len(sorted_los_by_demo), 450)
         
         # Create combined chart comparing median, mean, and quartiles
         fig_combined = go.Figure()
         
-        # Add IQR range as a horizontal bar
+        # Add IQR range as horizontal bars
         for idx, row in sorted_los_by_demo.iterrows():
+            # Main IQR bar
             fig_combined.add_trace(
                 go.Bar(
                     y=[row[demo_col]],
                     x=[row["q3"] - row["q1"]],  # Width of bar = IQR
                     base=row["q1"],  # Start position = Q1
                     orientation='h',
-                    name='IQR Range',
-                    marker=dict(color=f'rgba({MAIN_COLOR.split("(")[1].split(")")[0]},0.6)'),
+                    name='Typical Range',
+                    marker=dict(
+                        color=MAIN_COLOR,
+                        opacity=0.3,
+                        line=dict(color=MAIN_COLOR, width=2)
+                    ),
                     showlegend=idx==0,  # Only show in legend once
                     hoverinfo='text',
-                    hovertext=f"25th-75th percentile: {row['q1']:.0f}-{row['q3']:.0f} days"
+                    hovertext=f"Most enrollments ({row[demo_col]}) stay between {row['q1']:.0f}-{row['q3']:.0f} days"
                 )
             )
         
@@ -656,15 +1178,15 @@ def render_length_of_stay(df_filt: DataFrame) -> None:
                 y=sorted_los_by_demo[demo_col],
                 x=sorted_los_by_demo["median"],
                 mode='markers',
-                name='Median LOS',
+                name='Median (Middle Value)',
                 marker=dict(
                     symbol='line-ns',
                     color=MAIN_COLOR,
-                    size=12,
-                    line=dict(width=2, color=MAIN_COLOR)
+                    size=25,
+                    line=dict(width=4, color=MAIN_COLOR)
                 ),
                 text=sorted_los_by_demo["median"].apply(lambda x: f"{x:.0f} days"),
-                hovertemplate='<b>Median:</b> %{text}<extra></extra>'
+                hovertemplate='<b>%{y}</b><br>Median stay: %{text}<extra></extra>'
             )
         )
         
@@ -674,68 +1196,90 @@ def render_length_of_stay(df_filt: DataFrame) -> None:
                 y=sorted_los_by_demo[demo_col],
                 x=sorted_los_by_demo["mean"],
                 mode='markers',
-                name='Mean LOS',
+                name='Average',
                 marker=dict(
                     symbol='diamond',
                     color=SECONDARY_COLOR,
-                    size=8,
-                    line=dict(width=1.5, color=SECONDARY_COLOR)
+                    size=14,
+                    line=dict(width=2, color='white')
                 ),
-                text=sorted_los_by_demo["mean"].apply(lambda x: f"{x:.1f} days"),
-                hovertemplate='<b>Mean:</b> %{text}<extra></extra>'
+                text=sorted_los_by_demo["mean"].apply(lambda x: f"{x:.0f} days"),
+                hovertemplate='<b>%{y}</b><br>Average stay: %{text}<extra></extra>'
             )
         )
         
-        # Add annotation to explain the chart
-        fig_combined.add_annotation(
-            text="Bar shows 25th-75th percentile range, blue line is median, red diamond is mean",
-            xref="paper", yref="paper",
-            x=1, y=-0.12,
-            showarrow=False,
-            font=dict(size=12),
-            align="right"
-        )
-        
         # Add reference line for overall system median
-        los_data = state.get("los_data", {})
         if "median_los" in los_data:
             fig_combined.add_vline(
                 x=los_data['median_los'],
-                line=dict(dash="dash", color=MAIN_COLOR, width=1),
+                line=dict(dash="dash", color=NEUTRAL_COLOR, width=2),
                 annotation=dict(
-                    text=f"Overall Median: {los_data['median_los']:.1f}",
-                    font=dict(size=12, color=MAIN_COLOR),
-                    bordercolor=MAIN_COLOR,
-                    borderwidth=1,
-                    bgcolor="rgba(0,0,0,0.7)"
+                    text=f"System Median: {los_data['median_los']:.0f} days",
+                    font=dict(size=13, color=NEUTRAL_COLOR, weight="bold"),
+                    bordercolor=NEUTRAL_COLOR,
+                    borderwidth=2,
+                    bgcolor="rgba(0,0,0,0.8)",
+                    borderpad=4
                 ),
                 annotation_position="top right"
             )
         
-        # Apply consistent styling
-        height = min(650, max(400, len(sorted_los_by_demo) * 35))
-        fig_combined = apply_chart_style(
-            fig_combined,
-            title=f"Length of Stay Distribution by {demo_label}",
-            xaxis_title="Length of Stay (days)",
-            yaxis_title=demo_label,
-            height=height
+        # Update layout
+        fig_combined.update_layout(
+            title=dict(
+                text=f"Length of Stay by {demo_label}",
+                font=dict(size=20)
+            ),
+            template=PLOT_TEMPLATE,
+            height=chart_height,
+            margin=dict(l=150, r=100, t=120, b=80),
+            legend=dict(
+                orientation="h",
+                yanchor="bottom",
+                y=1.02,
+                xanchor="center",
+                x=0.5,
+                bgcolor="rgba(0,0,0,0.5)",
+                bordercolor="rgba(255,255,255,0.3)",
+                borderwidth=1
+            ),
+            yaxis=dict(
+                automargin=True,
+                tickfont=dict(size=12),
+                title=""
+            ),
+            xaxis=dict(
+                rangemode="tozero",
+                title=dict(
+                    text="Length of Stay (days)",
+                    standoff=25
+                ),
+                gridcolor='rgba(255,255,255,0.1)'
+            ),
+            bargap=0.3
         )
         
         # Display the chart
         st.plotly_chart(fig_combined, use_container_width=True)
         
-        # Resource utilization chart
-        st.subheader("System Resource Usage Analysis")
+        # Chart guide
+        chart_guide_html = f"""
+        <div style="background-color: rgba(0,0,0,0.2); border-radius: 8px; padding: 10px; margin: 10px 0;">
+            <p style="margin: 0; font-size: 14px;">
+                📊 <strong>Chart Guide:</strong> 
+                Bar shows typical range (25th-75th percentile) | 
+                <span style="color: {MAIN_COLOR};">Blue line</span> = median | 
+                <span style="color: {SECONDARY_COLOR};">Red diamond</span> = average
+            </p>
+        </div>
+        """
+        st.html(chart_guide_html)
+        
+        # Resource utilization analysis
+        blue_divider()
+        st.markdown("### Resource Utilization Analysis")
         
         # Calculate proportional metrics
-        sorted_los_by_demo["days_per_enrollment"] = sorted_los_by_demo["total_days"] / sorted_los_by_demo["count"]
-        if "avg_los" in los_data and los_data["avg_los"] > 0:
-            sorted_los_by_demo["efficiency_ratio"] = sorted_los_by_demo["days_per_enrollment"] / los_data["avg_los"]
-        else:
-            sorted_los_by_demo["efficiency_ratio"] = 1.0
-        
-        # Calculate totals for percentages
         total_days = sorted_los_by_demo["total_days"].sum()
         total_enrollments = sorted_los_by_demo["count"].sum()
         
@@ -743,41 +1287,8 @@ def render_length_of_stay(df_filt: DataFrame) -> None:
         sorted_los_by_demo["days_pct"] = (sorted_los_by_demo["total_days"] / total_days * 100).round(1)
         sorted_los_by_demo["enrollment_pct"] = (sorted_los_by_demo["count"] / total_enrollments * 100).round(1)
         
-        # Create resource usage chart
-        fig_resource = go.Figure()
-        
-        # Add bars for total days
-        fig_resource.add_trace(
-            go.Bar(
-                y=sorted_los_by_demo[demo_col],
-                x=sorted_los_by_demo["total_days"],
-                orientation='h',
-                name='Total Days',
-                text=sorted_los_by_demo.apply(
-                    lambda row: f"{int(row['total_days']):,} days ({row['days_pct']:.1f}%)", 
-                    axis=1
-                ),
-                hovertemplate='<b>%{y}</b><br>%{text}<extra></extra>',
-                marker_color=MAIN_COLOR,
-                textposition='auto'
-            )
-        )
-        
-        # Apply consistent styling
-        height = min(650, max(400, len(sorted_los_by_demo) * 35))
-        fig_resource = apply_chart_style(
-            fig_resource,
-            title=f"System Resource Usage by {demo_label}",
-            xaxis_title="Total System Days",
-            yaxis_title=demo_label,
-            height=height
-        )
-        
-        # Display the chart
-        st.plotly_chart(fig_resource, use_container_width=True)
-        
-        # Create proportional usage comparison for top groups
-        compare_df = sorted_los_by_demo.head(6).copy()
+        # Create proportional usage comparison
+        compare_df = sorted_los_by_demo.head(8).copy()
         
         # Create grouped bar chart for comparison
         fig_compare = go.Figure()
@@ -790,8 +1301,9 @@ def render_length_of_stay(df_filt: DataFrame) -> None:
                 orientation='h',
                 name='% of Enrollments',
                 marker_color=NEUTRAL_COLOR,
-                text=compare_df["enrollment_pct"].apply(lambda x: f"{x:.1f}%"),
-                textposition='auto'
+                text=compare_df["enrollment_pct"].apply(lambda x: f"{x:.0f}%"),
+                textposition='outside',
+                textfont=dict(color="white", size=12)
             )
         )
         
@@ -801,121 +1313,303 @@ def render_length_of_stay(df_filt: DataFrame) -> None:
                 y=compare_df[demo_col],
                 x=compare_df["days_pct"],
                 orientation='h',
-                name='% of System Days',
+                name='% of Total Enrollment Days',
                 marker_color=MAIN_COLOR,
-                text=compare_df["days_pct"].apply(lambda x: f"{x:.1f}%"),
-                textposition='auto'
+                text=compare_df["days_pct"].apply(lambda x: f"{x:.0f}%"),
+                textposition='outside',
+                textfont=dict(color="white", size=12)
             )
         )
         
-        # Apply consistent styling
-        fig_compare = apply_chart_style(
-            fig_compare,
-            title="Resource Usage Proportion (Top 6 Groups)",
-            xaxis_title="Percentage (%)",
-            yaxis_title=demo_label,
-            height=400
-        )
-        
-        # Update layout for grouped bars
-        fig_compare.update_layout(barmode='group', bargap=0.15, bargroupgap=0.1)
-        
-        # Set x-axis range
-        fig_compare.update_xaxes(
-            range=[0, max(compare_df["days_pct"].max(), compare_df["enrollment_pct"].max()) * 1.1]
+        # Update layout
+        fig_compare.update_layout(
+            title="Resource Usage: Enrollment Count vs. Total Days",
+            template=PLOT_TEMPLATE,
+            barmode='group',
+            bargap=0.15,
+            bargroupgap=0.1,
+            height=450,
+            margin=dict(l=150, r=150, t=120, b=100),
+            legend=dict(
+                orientation="h",
+                yanchor="bottom",
+                y=1.02,
+                xanchor="center",
+                x=0.5
+            ),
+            yaxis=dict(
+                automargin=True,
+                tickfont=dict(size=12)
+            ),
+            xaxis=dict(
+                title=dict(
+                    text="Percentage (%)",
+                    standoff=25
+                ),
+                range=[0, max(compare_df["days_pct"].max(), compare_df["enrollment_pct"].max()) * 1.3]
+            )
         )
         
         # Display the chart
         st.plotly_chart(fig_compare, use_container_width=True)
         
         # Insights section
-        with st.expander("Analysis & Data Observations", expanded=True):
-            # Find groups with longest/shortest stays
+        with st.expander("💡 Key Findings", expanded=True):
             if len(sorted_los_by_demo) > 1:
                 longest_stay = sorted_los_by_demo.iloc[0]
                 shortest_stay = sorted_los_by_demo.iloc[-1]
+                disparity_ratio = longest_stay["mean"] / shortest_stay["mean"] if shortest_stay["mean"] > 0 else 0
                 
-                # Calculate resource usage by top group
-                top_group_pct = (longest_stay["total_days"] / total_days * 100).round(1) if total_days > 0 else 0
-                top_group_count_pct = (longest_stay["count"] / total_enrollments * 100).round(1) if total_enrollments > 0 else 0
-                
-                # Create insight sections with improved styling
-                st.markdown(f"""
-                <div style="padding:15px; border-radius:5px; margin-bottom:15px; border:1px solid {MAIN_COLOR}">
-                    <h3 style="color:{MAIN_COLOR}">Key Length of Stay Findings</h3>
-                    <ul>
-                        <li>The <b>{longest_stay[demo_col]}</b> group has the longest average stay at <b>{longest_stay['mean']:.1f} days</b>, which is <b>{longest_stay['disparity']:.2f}x</b> the overall average.</li>
-                        <li>The <b>{shortest_stay[demo_col]}</b> group has the shortest average stay at <b>{shortest_stay['mean']:.1f} days</b>.</li>
-                        <li>The gap between longest and shortest average stays is <b>{(longest_stay['mean'] - shortest_stay['mean']):.1f} days</b>.</li>
-                    </ul>
-                </div>
-
-                <div style="padding:15px; border-radius:5px; border:1px solid {SECONDARY_COLOR}">
-                    <h3 style="color:{SECONDARY_COLOR}">System Resource Utilization</h3>
-                    <ul>
-                        <li>The <b>{longest_stay[demo_col]}</b> group accounts for <b>{fmt_pct(top_group_pct)}</b> of total system days while representing only <b>{fmt_pct(top_group_count_pct)}</b> of enrollments.</li>
-                        <li>This represents a <b>{(top_group_pct/top_group_count_pct).round(1)}x</b> disproportionate use of system resources.</li>
-                    </ul>
-                </div>
-                """, unsafe_allow_html=True)
+                # Create insights HTML
+                insights_html = _create_demographic_insights_html(
+                    longest_stay, shortest_stay, disparity_ratio, demo_col
+                )
+                st.html(insights_html)
                 
                 # Check for high disparity groups
                 high_disparity = sorted_los_by_demo[sorted_los_by_demo["disparity"] > 1.5]
                 if not high_disparity.empty:
-                    groups = ", ".join(f"<b>{row[demo_col]}</b>" for _, row in high_disparity.iterrows())
-                    st.markdown(f"""
-                    <div style="padding:15px; border-radius:5px; margin-top:15px;">
-                        <h3 style="color:#2166ac">Notable Statistical Patterns</h3>
-                        <ul>
-                            <li>Groups with significantly longer than average stays: {groups}</li>
-                            <li>These groups show average stays at least 50% longer than the system average.</li>
-                            <li>These differences may warrant further investigation to understand the factors contributing to these patterns.</li>
-                        </ul>
+                    groups_list = [f"<strong>{row[demo_col]}</strong>" for _, row in high_disparity.iterrows()]
+                    groups_text = ", ".join(groups_list)
+                    
+                    notable_html = f"""
+                    <div style="padding: 15px; background-color: rgba(255,165,0,0.1); 
+                                border-radius: 10px; border: 1px solid {WARNING_COLOR}; margin-top: 15px;">
+                        <h4 style="color: {WARNING_COLOR}; margin-bottom: 10px;">Groups with Extended Stays</h4>
+                        <p style="margin-bottom: 5px;">These groups have stays at least 50% longer than average:</p>
+                        <p style="padding-left: 20px;">{groups_text}</p>
                     </div>
-                    """, unsafe_allow_html=True)
-            else:
-                st.info("Not enough demographic groups to provide comparative analysis.")
+                    """
+                    st.html(notable_html)
+    
+    with tab_project:
+        st.markdown("### Length of Stay by Project Type")
+        
+        if "ProjectTypeCode" not in df_filt.columns:
+            st.warning("Project type information not available in the dataset.")
+            return
+        
+        # Calculate LOS by project type
+        with st.spinner("Analyzing length of stay by project type..."):
+            try:
+                los_by_project = los_by_demographic(
+                    df_filt,
+                    "ProjectTypeCode",
+                    t0,
+                    t1,
+                    min_group_size=5
+                )
                 
-        # Show detailed stats table
-        with st.expander("Detailed Statistics Table"):
-            # Create a display version with better column names
-            display_df = sorted_los_by_demo.copy()
-            display_df.columns = [
-                demo_label, "Average LOS", "Median LOS", "Enrollment Count",
-                "25th Percentile", "75th Percentile", "Total System Days",
-                "LOS Ratio", "IQR", "Days per Enrollment", "Efficiency Ratio",
-                "% of Total Days", "% of Enrollments"
-            ]
+                if los_by_project.empty:
+                    st.info("No project type data available.")
+                    return
+                
+                # Map project types to readable names
+                los_by_project["Project Type"] = (
+                    los_by_project["ProjectTypeCode"]
+                    .apply(_get_project_type_from_code)
+                )
+                
+                # Sort by mean LOS
+                los_by_project = los_by_project.sort_values("mean", ascending=True)
+                
+            except Exception as e:
+                st.error(f"Error calculating LOS by project type: {e}")
+                return
+        
+        # Create horizontal bar chart
+        fig_project = go.Figure()
+        
+        # Add bars with median indicators
+        for idx, row in los_by_project.iterrows():
+            project_type = row["Project Type"]
+            mean_val = row["mean"]
+            median_val = row["median"]
             
-            # Format the dataframe for better readability
-            st.dataframe(
-                display_df.style.format(
-                    {
-                        "Average LOS": "{:.1f}",
-                        "Median LOS": "{:.1f}",
-                        "Enrollment Count": "{:,}",
-                        "25th Percentile": "{:.1f}",
-                        "75th Percentile": "{:.1f}",
-                        "Total System Days": "{:,.0f}",
-                        "LOS Ratio": "{:.2f}",
-                        "IQR": "{:.1f}",
-                        "Days per Enrollment": "{:.1f}",
-                        "Efficiency Ratio": "{:.2f}",
-                        "% of Total Days": "{:.1f}%",
-                        "% of Enrollments": "{:.1f}%"
-                    }
-                ).background_gradient(
-                    subset=["Average LOS", "Total System Days", "LOS Ratio", "Efficiency Ratio"],
-                    cmap="Blues"
+            # Determine bar color based on project type and LOS
+            if "Permanent" in project_type:
+                # For permanent housing, longer is better
+                bar_color = SUCCESS_COLOR if mean_val >= 180 else WARNING_COLOR
+            else:
+                # For time-limited programs, use main system color
+                bar_color = MAIN_COLOR
+            
+            fig_project.add_trace(
+                go.Bar(
+                    x=[mean_val],
+                    y=[project_type],
+                    orientation='h',
+                    marker_color=bar_color,
+                    text=f"{mean_val:.0f} days",
+                    textposition='outside',
+                    textfont=dict(color="white", size=12),
+                    hovertemplate=(
+                        f"<b>{project_type}</b><br>"
+                        f"Average: {mean_val:.0f} days<br>"
+                        f"Median: {median_val:.0f} days<br>"
+                        f"Enrollments: {row['count']:,}<br>"
+                        f"<extra></extra>"
+                    ),
+                    showlegend=False
                 )
             )
             
-            # Add explanatory notes
-            st.markdown("""
-            **Metrics Explanation:**
-            - **Average LOS**: Mean length of stay in days  
-            - **Median LOS**: Middle value (50th percentile) of lengths of stay  
-            - **LOS Ratio**: Group's average LOS compared to the overall average (1.0 = same as average)  
-            - **Efficiency Ratio**: Average days per enrollment compared to system average  
-            - **IQR**: Interquartile range (difference between 75th and 25th percentiles)  
-            """)
+            # Add median line
+            fig_project.add_shape(
+                type="line",
+                x0=median_val,
+                x1=median_val,
+                y0=idx - 0.4,
+                y1=idx + 0.4,
+                line=dict(color="white", width=2, dash="dash"),
+            )
+        
+        # Calculate height based on number of project types
+        chart_height = _calculate_chart_height(len(los_by_project), 400)
+        
+        # Update layout
+        fig_project.update_layout(
+            title="Average Length of Stay by Project Type",
+            template=PLOT_TEMPLATE,
+            height=chart_height,
+            margin=dict(l=200, r=100, t=100, b=80),
+            xaxis=dict(
+                title="Average Length of Stay (days)",
+                gridcolor='rgba(255,255,255,0.1)',
+                rangemode="tozero"
+            ),
+            yaxis=dict(
+                automargin=True,
+                tickfont=dict(size=12)
+            )
+        )
+        
+        st.plotly_chart(fig_project, use_container_width=True)
+
+        
+        
+        # Show detailed table
+        with st.expander("📊 Detailed Statistics by Project Type", expanded=False):
+            display_df = los_by_project[["Project Type", "mean", "median", "count", "q1", "q3"]].copy()
+            display_df.columns = ["Project Type", "Average", "Median", "Enrollments", "25th %ile", "75th %ile"]
+            
+            st.dataframe(
+                display_df.style.format({
+                    "Average": "{:.0f} days",
+                    "Median": "{:.0f} days",
+                    "Enrollments": "{:,}",
+                    "25th %ile": "{:.0f} days",
+                    "75th %ile": "{:.0f} days"
+                }),
+                use_container_width=True,
+                hide_index=True
+            )
+    
+    with tab_insights:
+        st.markdown("### Insights & Recommendations")
+        
+        # Overall system assessment
+        project_types = los_data.get("project_types", pd.Series())
+        severity, color, desc = _get_los_interpretation(los_data['avg_los'], los_data['median_los'], project_types)
+        
+        assessment_html = f"""
+        <div style="background-color: rgba(0,0,0,0.3); border: 2px solid {color}; 
+                    border-radius: 10px; padding: 20px; margin-bottom: 20px;">
+            <h3 style="color: {color}; margin: 0 0 15px 0;">System Assessment: {severity}</h3>
+            <p style="margin: 0; font-size: 16px;">{desc}</p>
+        </div>
+        """
+        st.html(assessment_html)
+        
+        # Recommendations based on patterns
+        st.markdown("### Recommended Actions")
+        
+        # Get recommendations
+        recommendations = get_los_recommendations(los_data, project_types, df_filt)
+        
+        if recommendations:
+            for rec in recommendations:
+                rec_html = f"""
+                <div style="background-color: rgba(0,0,0,0.2); border-left: 4px solid {rec['color']}; 
+                            border-radius: 5px; padding: 15px; margin-bottom: 15px;">
+                    <h4 style="color: {rec['color']}; margin: 0 0 10px 0;">
+                        {rec['icon']} {rec['title']}
+                    </h4>
+                    <ul style="margin: 0; padding-left: 20px;">
+                """
+                for action in rec['actions']:
+                    rec_html += f"<li>{action}</li>"
+                rec_html += """
+                    </ul>
+                </div>
+                """
+                st.html(rec_html)
+        else:
+            st.info("No specific recommendations based on current patterns.")
+        
+        # Data quality note
+        quality_html = f"""
+        <div style="background-color: rgba(128,128,128,0.1); border: 1px solid {NEUTRAL_COLOR}; 
+                    border-radius: 10px; padding: 15px; margin-top: 20px;">
+            <h4 style="color: {NEUTRAL_COLOR}; margin: 0 0 10px 0;">📋 Data Quality Considerations</h4>
+            <ul style="margin: 0; padding-left: 20px;">
+                <li>Analysis includes only enrollments active during the reporting period</li>
+                <li>Open enrollments use the report end date for LOS calculation</li>
+                <li>Each enrollment is counted separately (clients with multiple enrollments appear multiple times)</li>
+                <li>Exit dates are based on project exit, not system exit</li>
+                <li>Consider project type when interpreting stay lengths</li>
+            </ul>
+        </div>
+        """
+        st.html(quality_html)
+        
+        # Export options
+        with st.expander("📊 Export Detailed Data", expanded=False):
+            if "los_by_demo" in state and not state["los_by_demo"].empty:
+                # Prepare export dataframe
+                export_df = state["los_by_demo"].copy()
+                
+                # Rename columns for clarity
+                export_df = export_df.rename(columns={
+                    demo_col: demo_label,
+                    "mean": "Average Stay (days)",
+                    "median": "Median Stay (days)",
+                    "count": "Number of Enrollments",
+                    "total_days": "Total Enrollment Days",
+                    "disparity": "Compared to Average"
+                })
+                
+                # Select columns to export
+                export_cols = [
+                    demo_label,
+                    "Average Stay (days)",
+                    "Median Stay (days)",
+                    "Number of Enrollments",
+                    "Total Enrollment Days",
+                    "Compared to Average"
+                ]
+                export_df = export_df[export_cols]
+                
+                # Format for display
+                st.dataframe(
+                    export_df.style.format({
+                        "Average Stay (days)": "{:.0f}",
+                        "Median Stay (days)": "{:.0f}",
+                        "Number of Enrollments": "{:,.0f}",
+                        "Total Enrollment Days": "{:,.0f}",
+                        "Compared to Average": "{:.1f}x"
+                    }).background_gradient(
+                        subset=["Average Stay (days)", "Total Enrollment Days"],
+                        cmap="Blues"
+                    ),
+                    use_container_width=True
+                )
+                
+                # Download button
+                csv = export_df.to_csv(index=False)
+                st.download_button(
+                    label="📥 Download as CSV",
+                    data=csv,
+                    file_name=f"los_by_{demo_label}_{t0.strftime('%Y%m%d')}_{t1.strftime('%Y%m%d')}.csv",
+                    mime="text/csv"
+                )

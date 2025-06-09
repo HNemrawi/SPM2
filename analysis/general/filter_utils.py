@@ -102,60 +102,77 @@ def render_filter_form(df: DataFrame) -> bool:
     win_start_default: date = state.get("win_start", DEFAULT_CURRENT_START)
     win_end_default: date = state.get("win_end", DEFAULT_CURRENT_END)
     
-    # Ensure custom_prev is False by default
-    custom_prev_default: bool = state.get("custom_prev", False)
-
-    # Compute default previous window (same length, immediately before)
-    total_days: int = (
-        pd.Timestamp(win_end_default) - pd.Timestamp(win_start_default)
-    ).days + 1
-    default_prev_start: date = win_start_default - pd.Timedelta(days=total_days)
-    default_prev_end: date = win_start_default - pd.Timedelta(days=1)
-    prev_start_default: date = state.get("prev_start", default_prev_start)
-    prev_end_default: date = state.get("prev_end", default_prev_end)
-
-    # Render the form in the sidebar
+    # Header outside form
+    st.sidebar.header("🗓️ Reporting Window & Filters")
+    st.sidebar.markdown("Set the analysis window and apply optional filters.")
+    
+    # Custom previous checkbox OUTSIDE the form for immediate interactivity
+    custom_prev: bool = st.sidebar.checkbox(
+        "✏️ Custom previous window",
+        value=state.get("custom_prev", False),
+        key="custom_prev_checkbox",
+        help="Enable custom comparison window",
+    )
+    
+    # Store checkbox state immediately
+    state["custom_prev"] = custom_prev
+    
+    # Render the form
     with st.sidebar.form("filters_form", clear_on_submit=False):
-        st.header("🗓️ Reporting Window & Filters")
-        st.markdown("Set the analysis window and apply optional filters.")
-
         # Main window inputs
         win_start, win_end = st.date_input(
             "Current Reporting Period",
             value=(win_start_default, win_end_default),
             help="Primary analysis reporting period",
         )
+        st.caption("📌 **Note:** The selected end date will be included in the analysis period.")
+
         if win_start >= win_end:
             st.error("Start date must be before end date.")
         
-        # Calculate the new auto-generated previous window based on current selection
+        # Calculate the auto-generated previous window based on current selection
         current_period_days = (pd.Timestamp(win_end) - pd.Timestamp(win_start)).days + 1
         auto_prev_start = win_start - pd.Timedelta(days=current_period_days)
         auto_prev_end = win_start - pd.Timedelta(days=1)
         
-        # Always display the auto-generated previous period
-        st.markdown(f"**Previous period (auto-generated):**  \n"
-                   f"{auto_prev_start.strftime('%b %d, %Y')} to {auto_prev_end.strftime('%b %d, %Y')}  \n"
-                   f"({current_period_days} days, matching current period length)")
-
-        # Previous window customization
-        custom_prev: bool = st.checkbox(
-            "✏️ Custom previous window",
-            value=custom_prev_default,
-            help="Enable custom comparison window",
-        )
+        # Show auto-generated period info
+        if not custom_prev:
+            st.markdown(f"**Previous period (auto-generated):**  \n"
+                       f"{auto_prev_start.strftime('%b %d, %Y')} to {auto_prev_end.strftime('%b %d, %Y')}  \n"
+                       f"({current_period_days} days, matching current period length)")
         
+        # Custom previous window inputs (only shown when checkbox is checked)
         if custom_prev:
+            st.markdown("**Custom previous period:**")
+            
+            # Determine default values for custom period
+            if "custom_prev_start" in state and "custom_prev_end" in state:
+                # Use previously saved custom dates
+                prev_start_default = state["custom_prev_start"]
+                prev_end_default = state["custom_prev_end"]
+            else:
+                # First time enabling custom, use auto-generated as starting point
+                prev_start_default = auto_prev_start
+                prev_end_default = auto_prev_end
+                
             prev_start, prev_end = st.date_input(
                 "Previous window (Start / End)",
                 value=(prev_start_default, prev_end_default),
                 help="Comparison period for changes",
             )
+            
             if prev_start >= prev_end:
                 st.error("Previous start date must be before end date.")
+                
+            # Show comparison info
+            custom_days = (pd.Timestamp(prev_end) - pd.Timestamp(prev_start)).days + 1
+            if custom_days != current_period_days:
+                st.caption(f"⚠️ Custom period is {custom_days} days vs {current_period_days} days for current period")
         else:
-            # Use the auto-generated values when not customizing
+            # Use auto-generated values
             prev_start, prev_end = auto_prev_start, auto_prev_end
+
+        st.divider()
 
         # Demographic / program filters
         filter_map: Dict[str, str] = {
@@ -187,11 +204,12 @@ def render_filter_form(df: DataFrame) -> bool:
             )
             selections[col] = [] if "ALL" in pick else pick
 
-        # The submit button returns True when clicked
+        # The submit button
         submitted: bool = st.form_submit_button(
             "Apply Filters",
             type="primary",
             help="Save selections and refresh analyses",
+            use_container_width=True
         )
 
     # If not submitted, do nothing
@@ -203,24 +221,36 @@ def render_filter_form(df: DataFrame) -> bool:
         # Persist form values into our section state
         state["win_start"] = win_start
         state["win_end"] = win_end
-        state["custom_prev"] = custom_prev
         
-        # Persist the appropriate previous period dates
+        # Save the actual previous period dates being used
+        state["prev_start"] = prev_start
+        state["prev_end"] = prev_end
+        
+        # If custom previous is enabled, also save these as the custom dates
         if custom_prev:
-            state["prev_start"] = prev_start
-            state["prev_end"] = prev_end
+            state["custom_prev_start"] = prev_start
+            state["custom_prev_end"] = prev_end
         else:
-            # If not using custom, save the auto-generated values
-            state["prev_start"] = auto_prev_start
-            state["prev_end"] = auto_prev_end
+            # Clear custom dates when not using custom
+            state.pop("custom_prev_start", None)
+            state.pop("custom_prev_end", None)
 
-        # Persist filter selections into session_state
+        # Persist filter selections
+        for col in filter_map.values():
+            if col in selections:
+                state[f"filter_{col}"] = selections[col] if selections[col] else ["ALL"]
+
+        # Persist to session_state
         st.session_state["filters"] = selections
         st.session_state["t0"] = pd.Timestamp(win_start)
         st.session_state["t1"] = pd.Timestamp(win_end)
         st.session_state["prev_start"] = pd.Timestamp(prev_start)
         st.session_state["prev_end"] = pd.Timestamp(prev_end)
         st.session_state["last_filter_change"] = datetime.now().isoformat()
+        
+        # Success message
+        st.sidebar.success("✅ Filters applied!", icon="✅")
+        
     except Exception as err:
         st.error(f"Failed to apply filters: {err}")
 

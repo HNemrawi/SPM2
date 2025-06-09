@@ -116,7 +116,8 @@ def run_return_analysis(
     allowed_localcocs_exit: Optional[List[str]],
     allowed_programs_exit: Optional[List[str]],
     allowed_agencies_exit: Optional[List[str]],
-    exit_project_types: Optional[List[str]]
+    exit_project_types: Optional[List[str]],
+    allowed_exit_dest_cats: Optional[List[str]] = None
 ) -> pd.DataFrame:
     """
     Perform inbound recidivism analysis with entry & exit filtering and lookback.
@@ -159,6 +160,8 @@ def run_return_analysis(
         Agency filter for exits
     exit_project_types : Optional[List[str]]
         Project types for exits
+    allowed_exit_dest_cats : Optional[List[str]]
+        Exit destination category filter for exits
 
     Returns
     -------
@@ -199,6 +202,11 @@ def run_return_analysis(
             exits = exits[exits["AgencyName"].isin(allowed_agencies_exit)]
         if exit_project_types and "ProjectTypeCode" in exits:
             exits = exits[exits["ProjectTypeCode"].isin(exit_project_types)]
+        
+        # Filter by exit destination category
+        if allowed_exit_dest_cats and "ExitDestinationCat" in exits:
+            exits = exits[exits["ExitDestinationCat"].isin(allowed_exit_dest_cats)]
+        
         exits = exits.dropna(subset=["ProjectExit"])
 
         # Apply helper
