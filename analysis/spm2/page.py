@@ -40,7 +40,7 @@ def setup_date_config(df: pd.DataFrame) -> Tuple[pd.Timestamp, pd.Timestamp, int
         )
         st.caption("📌 **Note:** Primary analysis window for SPM2 metrics. The selected end date will be included in the analysis period.")
         report_start, report_end = pd.to_datetime(date_range[0]), pd.to_datetime(date_range[1])
-        
+        st.divider()
         unit_choice = st.radio(
             "Select Lookback Unit",
             options=["Days", "Months"],
@@ -66,15 +66,14 @@ def setup_date_config(df: pd.DataFrame) -> Tuple[pd.Timestamp, pd.Timestamp, int
             )
             exit_window_start = report_start - pd.DateOffset(months=lookback_value)
             exit_window_end = report_end - pd.DateOffset(months=lookback_value)
-        
+        st.caption(f"Exit Window: {exit_window_start:%Y-%m-%d} to {exit_window_end:%Y-%m-%d}")
+        st.divider()
         return_period = st.number_input(
             "Return Period (Days)",
             min_value=1,
             value=730,
             help="Max days post-exit to count as return"
         )
-
-        st.caption(f"Exit Window: {exit_window_start:%Y-%m-%d} to {exit_window_end:%Y-%m-%d}")
         
         # Check if analysis range is within available data range
         if df is not None and not df.empty:
@@ -397,27 +396,8 @@ def display_client_flow(final_df: pd.DataFrame) -> None:
                         help="Characteristic at return point"
                     )
 
-                # Build pivot table
+                # Build pivot table (unfiltered for matrix and top pathways)
                 pivot_c = create_flow_pivot(final_df, ex_choice, ret_choice)
-
-                # Focus controls
-                colL, colR = st.columns(2)
-                focus_exit = colL.selectbox(
-                    "🔍 Focus Exit Dimension",
-                    ["All"] + pivot_c.index.tolist(),
-                    help="Show only this exit in the flow"
-                )
-                focus_return = colR.selectbox(
-                    "🔍 Focus Return Dimension",
-                    ["All"] + pivot_c.columns.tolist(),
-                    help="Show only this return in the flow"
-                )
-
-                # Apply focus filters
-                if focus_exit != "All":
-                    pivot_c = pivot_c.loc[[focus_exit]]
-                if focus_return != "All":
-                    pivot_c = pivot_c[[focus_return]]
 
                 # Reorder columns to keep "No Return" last
                 if "No Return" in pivot_c.columns:
@@ -432,7 +412,7 @@ def display_client_flow(final_df: pd.DataFrame) -> None:
                         axis=1
                     )
 
-                # Top pathways
+                # Top pathways (using unfiltered data)
                 st.markdown("#### 🔝 Top Client Pathways")
                 top_n = st.slider(
                     "Number of Pathways",
@@ -451,9 +431,34 @@ def display_client_flow(final_df: pd.DataFrame) -> None:
                 else:
                     st.info("No significant pathways detected")
 
-                # Sankey diagram
+                # Sankey diagram section with focus controls
                 st.markdown("#### 🌐 Client Flow Network")
-                sankey_fig = plot_flow_sankey(pivot_c, f"{ex_choice} → {ret_choice}")
+                
+                # Focus controls (only for network graph)
+                st.caption("🎯 **Focus filters below apply only to the network visualization**")
+                colL, colR = st.columns(2)
+                focus_exit = colL.selectbox(
+                    "🔍 Focus Exit Dimension",
+                    ["All"] + pivot_c.index.tolist(),
+                    help="Show only this exit in the network"
+                )
+                focus_return = colR.selectbox(
+                    "🔍 Focus Return Dimension",
+                    ["All"] + pivot_c.columns.tolist(),
+                    help="Show only this return in the network"
+                )
+
+                # Create filtered pivot for Sankey only
+                pivot_sankey = pivot_c.copy()
+                
+                # Apply focus filters only to the Sankey data
+                if focus_exit != "All":
+                    pivot_sankey = pivot_sankey.loc[[focus_exit]]
+                if focus_return != "All":
+                    pivot_sankey = pivot_sankey[[focus_return]]
+
+                # Generate Sankey with filtered data
+                sankey_fig = plot_flow_sankey(pivot_sankey, f"{ex_choice} → {ret_choice}")
                 st.plotly_chart(sankey_fig, use_container_width=True)
             else:
                 st.info("📭 Insufficient data for flow analysis")

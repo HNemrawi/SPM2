@@ -360,6 +360,7 @@ def length_of_stay(df: DataFrame, start: Timestamp, end: Timestamp) -> Dict[str,
         - quality_details: Detailed breakdown of issues
         - unique_clients: Number of unique clients
         - project_types: Series of project types in the data
+        - quality_issues_df: DataFrame with the actual problematic records
     """
     # Validate required columns
     required_cols = ["EnrollmentID", "ProjectStart", "ProjectExit", "ClientID"]
@@ -385,35 +386,89 @@ def length_of_stay(df: DataFrame, start: Timestamp, end: Timestamp) -> Dict[str,
             "data_quality_issues": 0,
             "quality_details": {},
             "unique_clients": 0,
-            "project_types": pd.Series(dtype='object')
+            "project_types": pd.Series(dtype='object'),
+            "quality_issues_df": pd.DataFrame()
         }
     
-    # Calculate LOS with proper data quality handling
+    # Calculate LOS according to the specified rules
+    # For exited enrollments: Exit Date - Entry Date + 1
+    # For active enrollments: Report End Date - Entry Date + 1
     active["ExitDateUsed"] = active["ProjectExit"].fillna(end)
-    active["LOS_Raw"] = (active["ExitDateUsed"] - active["ProjectStart"]).dt.days + 1
+    active["LOS"] = (active["ExitDateUsed"] - active["ProjectStart"]).dt.days + 1
     
-    # Track data quality issues
+    # Track data quality issues and create a dataframe for download
+    quality_issues_list = []
+    
+    # Exit before start
+    exit_before_start_mask = (active["ProjectExit"].notna() & 
+                             (active["ProjectExit"] < active["ProjectStart"]))
+    if exit_before_start_mask.any():
+        issues_df = active[exit_before_start_mask].copy()
+        issues_df["Issue_Type"] = "Exit Date Before Entry Date"
+        issues_df["Issue_Description"] = "ProjectExit (" + issues_df["ProjectExit"].astype(str) + ") < ProjectStart (" + issues_df["ProjectStart"].astype(str) + ")"
+        quality_issues_list.append(issues_df)
+    
+    # Future entry dates
+    future_entry_mask = active["ProjectStart"] > end
+    if future_entry_mask.any():
+        issues_df = active[future_entry_mask].copy()
+        issues_df["Issue_Type"] = "Future Entry Date"
+        issues_df["Issue_Description"] = "ProjectStart (" + issues_df["ProjectStart"].astype(str) + ") > Report End Date (" + str(end) + ")"
+        quality_issues_list.append(issues_df)
+    
+    # Extremely long stays (5+ years) - but NOT for permanent housing
+    # Get project type info if available
+    if "ProjectTypeCode" in active.columns:
+        # Map project types to readable names
+        active["Project_Type_Name"] = active["ProjectTypeCode"].apply(_get_project_type_from_code)
+        
+        # Only flag as issue if NOT permanent housing
+        is_not_permanent_housing = ~active["Project_Type_Name"].str.contains("Permanent|Housing Only|Housing with Services", case=False, na=True)
+        extremely_long_mask = (active["LOS"] > 1825) & is_not_permanent_housing
+    else:
+        # If no project type info, flag all 5+ year stays
+        extremely_long_mask = active["LOS"] > 1825
+        
+    if extremely_long_mask.any():
+        issues_df = active[extremely_long_mask].copy()
+        issues_df["Issue_Type"] = "Extremely Long Stay (5+ years) in Non-Permanent Housing"
+        issues_df["Issue_Description"] = "Length of Stay = " + issues_df["LOS"].astype(str) + " days"
+        if "Project_Type_Name" in issues_df.columns:
+            issues_df["Issue_Description"] += " in " + issues_df["Project_Type_Name"]
+        quality_issues_list.append(issues_df)
+    
+    # Combine all quality issues
+    if quality_issues_list:
+        quality_issues_df = pd.concat(quality_issues_list, ignore_index=True)
+        # Select relevant columns for export
+        export_cols = ["EnrollmentID", "ClientID", "ProjectStart", "ProjectExit", "LOS", "Issue_Type", "Issue_Description"]
+        if "ProjectName" in quality_issues_df.columns:
+            export_cols.insert(2, "ProjectName")
+        if "ProjectTypeCode" in quality_issues_df.columns:
+            export_cols.insert(3, "ProjectTypeCode")
+        quality_issues_df = quality_issues_df[export_cols]
+    else:
+        quality_issues_df = pd.DataFrame()
+    
+    # Count data quality issues
     data_quality_issues = {
-        "negative_los": (active["LOS_Raw"] < 0).sum(),
-        "zero_los": (active["LOS_Raw"] == 0).sum(),
-        "exit_before_start": (active["ProjectExit"].notna() & 
-                             (active["ProjectExit"] < active["ProjectStart"])).sum(),
-        "future_entry": (active["ProjectStart"] > end).sum(),
-        "extremely_long_stays": (active["LOS_Raw"] > 1825).sum()  # 5+ years
+        "negative_los": (active["LOS"] < 0).sum(),
+        "zero_los": (active["LOS"] == 0).sum(),
+        "exit_before_start": exit_before_start_mask.sum(),
+        "future_entry": future_entry_mask.sum(),
+        "extremely_long_stays": extremely_long_mask.sum() if 'extremely_long_mask' in locals() else 0
     }
     
-    # Handle different cases appropriately
-    active["LOS"] = active["LOS_Raw"].copy()
+    # Handle same-day services (0 days -> 1 day)
+    # This should not happen with our calculation method (always adding 1)
+    # but we'll check anyway
+    same_day_mask = active["LOS"] == 0
+    if same_day_mask.any():
+        active.loc[same_day_mask, "LOS"] = 1
     
-    # Same-day services (0 days) -> 1 day (this is standard practice)
-    same_day_mask = active["LOS_Raw"] == 0
-    active.loc[same_day_mask, "LOS"] = 1
-    
-    # Negative LOS (data error) -> exclude from calculations
-    negative_mask = active["LOS_Raw"] < 0
-    if negative_mask.any():
-        # Exclude problematic records from analysis
-        active = active[~negative_mask].copy()
+    # Exclude problematic records (exit before start) from analysis
+    if exit_before_start_mask.any():
+        active = active[~exit_before_start_mask].copy()
     
     # Recalculate stats after cleaning
     if active.empty:
@@ -425,7 +480,8 @@ def length_of_stay(df: DataFrame, start: Timestamp, end: Timestamp) -> Dict[str,
             "data_quality_issues": sum(data_quality_issues.values()),
             "quality_details": data_quality_issues,
             "unique_clients": 0,
-            "project_types": pd.Series(dtype='object')
+            "project_types": pd.Series(dtype='object'),
+            "quality_issues_df": quality_issues_df
         }
     
     # Calculate statistics on clean data
@@ -459,7 +515,8 @@ def length_of_stay(df: DataFrame, start: Timestamp, end: Timestamp) -> Dict[str,
         "data_quality_issues": sum(data_quality_issues.values()),
         "quality_details": data_quality_issues,
         "unique_clients": unique_clients,
-        "project_types": project_types
+        "project_types": project_types,
+        "quality_issues_df": quality_issues_df
     }
 
 def analyze_los_with_destinations(df: DataFrame, los_data: Dict) -> DataFrame:
@@ -749,13 +806,22 @@ def render_length_of_stay(df_filt: DataFrame) -> None:
             
             **What this measures:**
             - How long clients remain enrolled in programs
-            - Time from entry to exit (or current date if still enrolled)
+            - Time from entry to exit (or report end date if still enrolled)
             - Patterns across different groups and project types
             
             **Analysis Level:**
             - This analysis is at the ENROLLMENT level
             - A client with multiple enrollments is counted separately for each
             - All enrollment days use entry/exit dates (not bed nights)
+            
+            **Calculation Method:**
+            - **For Exited Enrollments:** Exit Date - Entry Date + 1
+            - **For Active Enrollments:** Report End Date - Entry Date + 1
+            - **Same-Day Services:** Count as 1 day (0 days → 1 day)
+            - **Data Quality Checks:**
+               - Exclude records where exit date < entry date
+               - Flag stays over 5 years as potential data issues
+               - Identify future entry dates
             
             **Why it matters:**
             - **Short stays** may indicate:
@@ -828,6 +894,7 @@ def render_length_of_stay(df_filt: DataFrame) -> None:
     # Check for data quality issues
     if "data_quality_issues" in los_data and los_data["data_quality_issues"] > 0:
         quality_details = los_data.get("quality_details", {})
+        quality_issues_df = los_data.get("quality_issues_df", pd.DataFrame())
         
         warning_html = f"""
         <div style="background-color: rgba(255,165,0,0.1); border: 2px solid {WARNING_COLOR}; 
@@ -841,10 +908,10 @@ def render_length_of_stay(df_filt: DataFrame) -> None:
             <ul style="margin: 0; padding-left: 20px;">
         """
         
-        if quality_details.get("negative_los", 0) > 0:
-            warning_html += f"<li>{quality_details['negative_los']} record(s) with exit date before entry date (excluded)</li>"
+        if quality_details.get("exit_before_start", 0) > 0:
+            warning_html += f"<li>{quality_details['exit_before_start']} record(s) with exit date before entry date (excluded)</li>"
         if quality_details.get("extremely_long_stays", 0) > 0:
-            warning_html += f"<li>{quality_details['extremely_long_stays']} record(s) with stays over 5 years</li>"
+            warning_html += f"<li>{quality_details['extremely_long_stays']} record(s) with stays over 5 years in non-permanent housing</li>"
         if quality_details.get("future_entry", 0) > 0:
             warning_html += f"<li>{quality_details['future_entry']} record(s) with entry dates after report end</li>"
         
@@ -857,10 +924,21 @@ def render_length_of_stay(df_filt: DataFrame) -> None:
         """
         
         st.html(warning_html)
+        
+        # Add download button for quality issues
+        if not quality_issues_df.empty:
+            csv = quality_issues_df.to_csv(index=False)
+            st.download_button(
+                label="📥 Download Data Quality Issues Report",
+                data=csv,
+                file_name=f"los_data_quality_issues_{t0.strftime('%Y%m%d')}_{t1.strftime('%Y%m%d')}.csv",
+                mime="text/csv",
+                help="Download the list of enrollments with data quality issues for review"
+            )
     
     # Create tabs for different views
-    tab_overview, tab_demo, tab_project, tab_insights = st.tabs([
-        "📊 Overview", "👥 Demographics", "🏠 Project Types", "💡 Insights"
+    tab_overview, tab_demo = st.tabs([
+        "📊 Overview", "👥 Demographics"
     ])
     
     with tab_overview:
@@ -1372,244 +1450,37 @@ def render_length_of_stay(df_filt: DataFrame) -> None:
                     groups_list = [f"<strong>{row[demo_col]}</strong>" for _, row in high_disparity.iterrows()]
                     groups_text = ", ".join(groups_list)
                     
-                    notable_html = f"""
-                    <div style="padding: 15px; background-color: rgba(255,165,0,0.1); 
-                                border-radius: 10px; border: 1px solid {WARNING_COLOR}; margin-top: 15px;">
-                        <h4 style="color: {WARNING_COLOR}; margin-bottom: 10px;">Groups with Extended Stays</h4>
-                        <p style="margin-bottom: 5px;">These groups have stays at least 50% longer than average:</p>
-                        <p style="padding-left: 20px;">{groups_text}</p>
-                    </div>
-                    """
+                    # Context-aware message based on project type
+                    if demo_col == "ProjectTypeCode":
+                        # Check if any high disparity groups are permanent housing
+                        ph_groups = [row for _, row in high_disparity.iterrows() 
+                                   if any(ph in str(row[demo_col]) for ph in ["Permanent", "Housing Only", "Housing with Services"])]
+                        if ph_groups:
+                            notable_html = f"""
+                            <div style="padding: 15px; background-color: rgba(75,181,67,0.1); 
+                                        border-radius: 10px; border: 1px solid {SUCCESS_COLOR}; margin-top: 15px;">
+                                <h4 style="color: {SUCCESS_COLOR}; margin-bottom: 10px;">Housing Stability Success</h4>
+                                <p style="margin-bottom: 5px;">These permanent housing programs show excellent housing stability with extended stays:</p>
+                                <p style="padding-left: 20px;">{groups_text}</p>
+                                <p style="margin-top: 10px; font-style: italic;">Long stays in permanent housing indicate successful housing retention.</p>
+                            </div>
+                            """
+                        else:
+                            notable_html = f"""
+                            <div style="padding: 15px; background-color: rgba(255,165,0,0.1); 
+                                        border-radius: 10px; border: 1px solid {WARNING_COLOR}; margin-top: 15px;">
+                                <h4 style="color: {WARNING_COLOR}; margin-bottom: 10px;">Groups with Extended Stays</h4>
+                                <p style="margin-bottom: 5px;">These groups have stays at least 50% longer than average:</p>
+                                <p style="padding-left: 20px;">{groups_text}</p>
+                            </div>
+                            """
+                    else:
+                        notable_html = f"""
+                        <div style="padding: 15px; background-color: rgba(255,165,0,0.1); 
+                                    border-radius: 10px; border: 1px solid {WARNING_COLOR}; margin-top: 15px;">
+                            <h4 style="color: {WARNING_COLOR}; margin-bottom: 10px;">Groups with Extended Stays</h4>
+                            <p style="margin-bottom: 5px;">These groups have stays at least 50% longer than average:</p>
+                            <p style="padding-left: 20px;">{groups_text}</p>
+                        </div>
+                        """
                     st.html(notable_html)
-    
-    with tab_project:
-        st.markdown("### Length of Stay by Project Type")
-        
-        if "ProjectTypeCode" not in df_filt.columns:
-            st.warning("Project type information not available in the dataset.")
-            return
-        
-        # Calculate LOS by project type
-        with st.spinner("Analyzing length of stay by project type..."):
-            try:
-                los_by_project = los_by_demographic(
-                    df_filt,
-                    "ProjectTypeCode",
-                    t0,
-                    t1,
-                    min_group_size=5
-                )
-                
-                if los_by_project.empty:
-                    st.info("No project type data available.")
-                    return
-                
-                # Map project types to readable names
-                los_by_project["Project Type"] = (
-                    los_by_project["ProjectTypeCode"]
-                    .apply(_get_project_type_from_code)
-                )
-                
-                # Sort by mean LOS
-                los_by_project = los_by_project.sort_values("mean", ascending=True)
-                
-            except Exception as e:
-                st.error(f"Error calculating LOS by project type: {e}")
-                return
-        
-        # Create horizontal bar chart
-        fig_project = go.Figure()
-        
-        # Add bars with median indicators
-        for idx, row in los_by_project.iterrows():
-            project_type = row["Project Type"]
-            mean_val = row["mean"]
-            median_val = row["median"]
-            
-            # Determine bar color based on project type and LOS
-            if "Permanent" in project_type:
-                # For permanent housing, longer is better
-                bar_color = SUCCESS_COLOR if mean_val >= 180 else WARNING_COLOR
-            else:
-                # For time-limited programs, use main system color
-                bar_color = MAIN_COLOR
-            
-            fig_project.add_trace(
-                go.Bar(
-                    x=[mean_val],
-                    y=[project_type],
-                    orientation='h',
-                    marker_color=bar_color,
-                    text=f"{mean_val:.0f} days",
-                    textposition='outside',
-                    textfont=dict(color="white", size=12),
-                    hovertemplate=(
-                        f"<b>{project_type}</b><br>"
-                        f"Average: {mean_val:.0f} days<br>"
-                        f"Median: {median_val:.0f} days<br>"
-                        f"Enrollments: {row['count']:,}<br>"
-                        f"<extra></extra>"
-                    ),
-                    showlegend=False
-                )
-            )
-            
-            # Add median line
-            fig_project.add_shape(
-                type="line",
-                x0=median_val,
-                x1=median_val,
-                y0=idx - 0.4,
-                y1=idx + 0.4,
-                line=dict(color="white", width=2, dash="dash"),
-            )
-        
-        # Calculate height based on number of project types
-        chart_height = _calculate_chart_height(len(los_by_project), 400)
-        
-        # Update layout
-        fig_project.update_layout(
-            title="Average Length of Stay by Project Type",
-            template=PLOT_TEMPLATE,
-            height=chart_height,
-            margin=dict(l=200, r=100, t=100, b=80),
-            xaxis=dict(
-                title="Average Length of Stay (days)",
-                gridcolor='rgba(255,255,255,0.1)',
-                rangemode="tozero"
-            ),
-            yaxis=dict(
-                automargin=True,
-                tickfont=dict(size=12)
-            )
-        )
-        
-        st.plotly_chart(fig_project, use_container_width=True)
-
-        
-        
-        # Show detailed table
-        with st.expander("📊 Detailed Statistics by Project Type", expanded=False):
-            display_df = los_by_project[["Project Type", "mean", "median", "count", "q1", "q3"]].copy()
-            display_df.columns = ["Project Type", "Average", "Median", "Enrollments", "25th %ile", "75th %ile"]
-            
-            st.dataframe(
-                display_df.style.format({
-                    "Average": "{:.0f} days",
-                    "Median": "{:.0f} days",
-                    "Enrollments": "{:,}",
-                    "25th %ile": "{:.0f} days",
-                    "75th %ile": "{:.0f} days"
-                }),
-                use_container_width=True,
-                hide_index=True
-            )
-    
-    with tab_insights:
-        st.markdown("### Insights & Recommendations")
-        
-        # Overall system assessment
-        project_types = los_data.get("project_types", pd.Series())
-        severity, color, desc = _get_los_interpretation(los_data['avg_los'], los_data['median_los'], project_types)
-        
-        assessment_html = f"""
-        <div style="background-color: rgba(0,0,0,0.3); border: 2px solid {color}; 
-                    border-radius: 10px; padding: 20px; margin-bottom: 20px;">
-            <h3 style="color: {color}; margin: 0 0 15px 0;">System Assessment: {severity}</h3>
-            <p style="margin: 0; font-size: 16px;">{desc}</p>
-        </div>
-        """
-        st.html(assessment_html)
-        
-        # Recommendations based on patterns
-        st.markdown("### Recommended Actions")
-        
-        # Get recommendations
-        recommendations = get_los_recommendations(los_data, project_types, df_filt)
-        
-        if recommendations:
-            for rec in recommendations:
-                rec_html = f"""
-                <div style="background-color: rgba(0,0,0,0.2); border-left: 4px solid {rec['color']}; 
-                            border-radius: 5px; padding: 15px; margin-bottom: 15px;">
-                    <h4 style="color: {rec['color']}; margin: 0 0 10px 0;">
-                        {rec['icon']} {rec['title']}
-                    </h4>
-                    <ul style="margin: 0; padding-left: 20px;">
-                """
-                for action in rec['actions']:
-                    rec_html += f"<li>{action}</li>"
-                rec_html += """
-                    </ul>
-                </div>
-                """
-                st.html(rec_html)
-        else:
-            st.info("No specific recommendations based on current patterns.")
-        
-        # Data quality note
-        quality_html = f"""
-        <div style="background-color: rgba(128,128,128,0.1); border: 1px solid {NEUTRAL_COLOR}; 
-                    border-radius: 10px; padding: 15px; margin-top: 20px;">
-            <h4 style="color: {NEUTRAL_COLOR}; margin: 0 0 10px 0;">📋 Data Quality Considerations</h4>
-            <ul style="margin: 0; padding-left: 20px;">
-                <li>Analysis includes only enrollments active during the reporting period</li>
-                <li>Open enrollments use the report end date for LOS calculation</li>
-                <li>Each enrollment is counted separately (clients with multiple enrollments appear multiple times)</li>
-                <li>Exit dates are based on project exit, not system exit</li>
-                <li>Consider project type when interpreting stay lengths</li>
-            </ul>
-        </div>
-        """
-        st.html(quality_html)
-        
-        # Export options
-        with st.expander("📊 Export Detailed Data", expanded=False):
-            if "los_by_demo" in state and not state["los_by_demo"].empty:
-                # Prepare export dataframe
-                export_df = state["los_by_demo"].copy()
-                
-                # Rename columns for clarity
-                export_df = export_df.rename(columns={
-                    demo_col: demo_label,
-                    "mean": "Average Stay (days)",
-                    "median": "Median Stay (days)",
-                    "count": "Number of Enrollments",
-                    "total_days": "Total Enrollment Days",
-                    "disparity": "Compared to Average"
-                })
-                
-                # Select columns to export
-                export_cols = [
-                    demo_label,
-                    "Average Stay (days)",
-                    "Median Stay (days)",
-                    "Number of Enrollments",
-                    "Total Enrollment Days",
-                    "Compared to Average"
-                ]
-                export_df = export_df[export_cols]
-                
-                # Format for display
-                st.dataframe(
-                    export_df.style.format({
-                        "Average Stay (days)": "{:.0f}",
-                        "Median Stay (days)": "{:.0f}",
-                        "Number of Enrollments": "{:,.0f}",
-                        "Total Enrollment Days": "{:,.0f}",
-                        "Compared to Average": "{:.1f}x"
-                    }).background_gradient(
-                        subset=["Average Stay (days)", "Total Enrollment Days"],
-                        cmap="Blues"
-                    ),
-                    use_container_width=True
-                )
-                
-                # Download button
-                csv = export_df.to_csv(index=False)
-                st.download_button(
-                    label="📥 Download as CSV",
-                    data=csv,
-                    file_name=f"los_by_{demo_label}_{t0.strftime('%Y%m%d')}_{t1.strftime('%Y%m%d')}.csv",
-                    mime="text/csv"
-                )

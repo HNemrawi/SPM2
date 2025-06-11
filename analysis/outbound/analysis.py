@@ -375,13 +375,13 @@ def breakdown_by_columns(final_df: pd.DataFrame, columns: List[str]) -> pd.DataF
         row = dict(zip(columns, keys))
         m = compute_summary_metrics(grp)
         row.update({
-            "Number of Relevant Exits": m["Number of Relevant Exits"],
-            "Exits to PH": m["Total Exits to PH"],
+            "Relevant Exits": m["Number of Relevant Exits"],
+            "Exits to Permanent Housing": m["Total Exits to PH"],
             "Return": f"{m['Return']} ({m['Return %']:.1f}%)",
-            "Return → Homeless (from PH)": f"{m['Return to Homelessness']} ({m['% Return to Homelessness']:.1f}%)",  # CHANGED
-            "Median Days": f"{m['Median Days']:.1f}",
-            "Average Days": f"{m['Average Days']:.1f}",
-            "Max Days": f"{m['Max Days']:.0f}",
+            "Returns to Homelessness (From PH)": f"{m['Return to Homelessness']} ({m['% Return to Homelessness']:.1f}%)",  # CHANGED
+            "Median Days to Return": f"{m['Median Days']:.1f}",
+            "Average Days to Return": f"{m['Average Days']:.1f}",
+            "Max Days to Return": f"{m['Max Days']:.0f}",
         })
         records.append(row)
-    return pd.DataFrame(records).sort_values("Number of Relevant Exits", ascending=False)
+    return pd.DataFrame(records).sort_values("Relevant Exits", ascending=False)

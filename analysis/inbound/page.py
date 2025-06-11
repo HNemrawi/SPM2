@@ -392,43 +392,22 @@ def display_client_flow(final_df: pd.DataFrame) -> None:
                     index=entry_cols_for_flow.index("Enter_ProjectTypeCode") if "Enter_ProjectTypeCode" in entry_cols_for_flow else 0
                 )
 
-            # Build full pivot
+            # Build full pivot (unfiltered for matrix and top pathways)
             flow_pivot_ra = create_flow_pivot_ra(ra_flows_df, exit_flow_col, entry_flow_col)
-
-            # Drill-in controls
-            drill_cols = st.columns(2)
-            with drill_cols[0]:
-                focus_exit = st.selectbox(
-                    "🔍 Focus Exit Dimension",
-                    ["All"] + flow_pivot_ra.index.tolist(),
-                    help="Show only this exit in the flow"
-                )
-            with drill_cols[1]:
-                focus_return = st.selectbox(
-                    "🔍 Focus Return Dimension",
-                    ["All"] + flow_pivot_ra.columns.tolist(),
-                    help="Show only this return in the flow"
-                )
-
-            # Subset the pivot in place
-            if focus_exit != "All":
-                flow_pivot_ra = flow_pivot_ra.loc[[focus_exit]]
-            if focus_return != "All":
-                flow_pivot_ra = flow_pivot_ra[[focus_return]]
 
             # If there's a "No Data" or "No Return" column, push it to the end
             if "No Data" in flow_pivot_ra.columns:
                 cols = [c for c in flow_pivot_ra.columns if c != "No Data"] + ["No Data"]
                 flow_pivot_ra = flow_pivot_ra[cols]
 
-            # Show the matrix
+            # Show the matrix (using unfiltered data)
             with st.expander("🔍 Flow Matrix Details", expanded=True):
                 render_dataframe_with_style(
                     flow_pivot_ra,
                     highlight_cols=[c for c in flow_pivot_ra.columns if c != "No Data"]
                 )
 
-            # Top pathways
+            # Top pathways (using unfiltered data)
             st.markdown("#### 🔝 Top Client Pathways")
             top_n = st.slider("Number of Flows", 5, 25, 10)
             top_flows_df = get_top_flows_from_pivot(flow_pivot_ra, top_n=top_n)
@@ -440,9 +419,36 @@ def display_client_flow(final_df: pd.DataFrame) -> None:
             else:
                 st.info("No significant flows detected")
 
-            # Sankey diagram
+            # Sankey diagram with focus controls
             st.markdown("#### 🌐 Client Flow Network")
-            sankey_ra = plot_flow_sankey_ra(flow_pivot_ra, f"{exit_flow_col} → {entry_flow_col}")
+            
+            # Focus controls (only for network graph)
+            st.caption("🎯 **Focus filters below apply only to the network visualization**")
+            drill_cols = st.columns(2)
+            with drill_cols[0]:
+                focus_exit = st.selectbox(
+                    "🔍 Focus Exit Dimension",
+                    ["All"] + flow_pivot_ra.index.tolist(),
+                    help="Show only this exit in the network"
+                )
+            with drill_cols[1]:
+                focus_return = st.selectbox(
+                    "🔍 Focus Return Dimension",
+                    ["All"] + flow_pivot_ra.columns.tolist(),
+                    help="Show only this return in the network"
+                )
+
+            # Create filtered pivot for Sankey only
+            flow_pivot_sankey = flow_pivot_ra.copy()
+            
+            # Apply focus filters only to the Sankey data
+            if focus_exit != "All":
+                flow_pivot_sankey = flow_pivot_sankey.loc[[focus_exit]]
+            if focus_return != "All":
+                flow_pivot_sankey = flow_pivot_sankey[[focus_return]]
+
+            # Generate Sankey with filtered data
+            sankey_ra = plot_flow_sankey_ra(flow_pivot_sankey, f"{exit_flow_col} → {entry_flow_col}")
             st.plotly_chart(sankey_ra, use_container_width=True)
         else:
             st.info("📭 Insufficient data for flow analysis")

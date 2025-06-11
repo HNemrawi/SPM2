@@ -237,8 +237,81 @@ def display_summary_metrics(out_df: pd.DataFrame) -> None:
     """Display the core performance metrics summary."""
     st.divider()
     st.markdown("### 📊 Outbound Analysis Summary")
-    display_spm_metrics(compute_summary_metrics(out_df))
-
+    
+    # Compute metrics
+    metrics = compute_summary_metrics(out_df)
+    
+    # Row 1: Exit Overview
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        st.metric(
+            label="Total Relevant Exits",
+            value=f"{metrics['Number of Relevant Exits']:,}"
+        )
+    
+    with col2:
+        st.metric(
+            label="Exits to Permanent Housing",
+            value=f"{metrics['Total Exits to PH']:,}",
+            help="Number of exits to permanent housing destinations"
+        )
+    
+    with col3:
+        ph_exit_rate = (metrics['Total Exits to PH'] / metrics['Number of Relevant Exits'] * 100) if metrics['Number of Relevant Exits'] > 0 else 0
+        st.metric(
+            label="PH Exit Rate",
+            value=f"{ph_exit_rate:.1f}%",
+            help="Percentage of exits going to permanent housing"
+        )
+    
+    # Row 2: Return Analysis
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        st.metric(
+            label="Total Returns",
+            value=f"{metrics['Return']:,}",
+        )
+    
+    with col2:
+        st.metric(
+            label="Returns to Homelessness (From PH)",
+            value=f"{metrics['Return to Homelessness']:,}",
+            help="Returns to homelessness from permanent housing exits only"
+        )
+    
+    with col3:
+        st.metric(
+            label="Return to Homelessness Rate (From PH)",
+            value=f"{metrics['% Return to Homelessness']:.1f}%",
+            help="Percentage of PH exits that return to homelessness",
+        )
+    
+    # Row 3: Timing Analysis
+    if metrics['Return'] > 0:  # Only show timing if there are returns
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            st.metric(
+                label="Median Days to Return",
+                value=f"{metrics['Median Days']:.0f}",
+                help="Middle value of days between exit and return"
+            )
+        
+        with col2:
+            st.metric(
+                label="Average Days to Return",
+                value=f"{metrics['Average Days']:.0f}",
+                help="Mean number of days between exit and return"
+            )
+        
+        with col3:
+            st.metric(
+                label="Maximum Days to Return",
+                value=f"{metrics['Max Days']:.0f}",
+                help="Longest time between exit and return"
+            )
 
 def display_days_to_return(out_df: pd.DataFrame) -> None:
     """Display the days-to-return distribution visualization."""
@@ -293,7 +366,7 @@ def display_breakdown_analysis(out_df: pd.DataFrame) -> None:
         bdf = breakdown_by_columns(out_df, cols_to_group[:3])
         render_dataframe_with_style(
             bdf,
-            highlight_cols=["Number of Relevant Exits"]
+            highlight_cols=["Relevant Exits"]
         )
 
 @st.fragment
@@ -350,34 +423,13 @@ def display_client_flow(out_df: pd.DataFrame) -> None:
                 index=ret_dims.index("Return_ProjectTypeCode") if "Return_ProjectTypeCode" in ret_dims else 0,
             )
 
-        # Build the full pivot
+        # Build the full pivot (unfiltered for matrix and top pathways)
         pivot_c = create_flow_pivot(out_df, ex_choice, ret_choice)
         if "No Return" in pivot_c.columns:
             cols_order = [c for c in pivot_c.columns if c != "No Return"] + ["No Return"]
             pivot_c = pivot_c[cols_order]
 
-        # Drill-in controls
-        colL, colR = st.columns(2)
-        with colL:
-            focus_exit = st.selectbox(
-                "🔍 Focus Exit Dimension",
-                ["All"] + pivot_c.index.tolist(),
-                help="Show only this exit in the flow",
-            )
-        with colR:
-            focus_return = st.selectbox(
-                "🔍 Focus Return Dimension",
-                ["All"] + pivot_c.columns.tolist(),
-                help="Show only this return in the flow",
-            )
-
-        # Subset pivot_c in place
-        if focus_exit != "All":
-            pivot_c = pivot_c.loc[[focus_exit]]
-        if focus_return != "All":
-            pivot_c = pivot_c[[focus_return]]
-
-        # 1) Flow Matrix Details
+        # 1) Flow Matrix Details (using unfiltered data)
         with st.expander("🔍 Flow Matrix Details", expanded=True):
             if pivot_c.empty:
                 st.info("📭 No return enrollments to build flow.")
@@ -388,7 +440,7 @@ def display_client_flow(out_df: pd.DataFrame) -> None:
                     highlight_cols=cols_to_color
                 )
 
-        # 2) Top Client Pathways
+        # 2) Top Client Pathways (using unfiltered data)
         st.markdown("#### 🔝 Top Client Pathways")
         
         # Check if pivot table has enough data for top flows
@@ -443,9 +495,36 @@ def display_client_flow(out_df: pd.DataFrame) -> None:
                     st.error(f"Error generating top flows: {str(e)}")
                     st.info("Unable to display top client pathways due to insufficient data")
 
-        # 3) Client Flow Network
+        # 3) Client Flow Network with focus controls
         st.markdown("#### 🌐 Client Flow Network")
-        sankey_fig = plot_flow_sankey(pivot_c, f"{ex_choice} → {ret_choice}")
+        
+        # Focus controls (only for network graph)
+        st.caption("🎯 **Focus filters below apply only to the network visualization**")
+        colL, colR = st.columns(2)
+        with colL:
+            focus_exit = st.selectbox(
+                "🔍 Focus Exit Dimension",
+                ["All"] + pivot_c.index.tolist(),
+                help="Show only this exit in the network",
+            )
+        with colR:
+            focus_return = st.selectbox(
+                "🔍 Focus Return Dimension",
+                ["All"] + pivot_c.columns.tolist(),
+                help="Show only this return in the network",
+            )
+
+        # Create filtered pivot for Sankey only
+        pivot_sankey = pivot_c.copy()
+        
+        # Apply focus filters only to the Sankey data
+        if focus_exit != "All":
+            pivot_sankey = pivot_sankey.loc[[focus_exit]]
+        if focus_return != "All":
+            pivot_sankey = pivot_sankey[[focus_return]]
+
+        # Generate Sankey with filtered data
+        sankey_fig = plot_flow_sankey(pivot_sankey, f"{ex_choice} → {ret_choice}")
         st.plotly_chart(sankey_fig, use_container_width=True)
     else:
         st.info("📭 Insufficient data for flow analysis")
