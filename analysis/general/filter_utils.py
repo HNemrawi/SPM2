@@ -178,16 +178,16 @@ def render_filter_form(df: DataFrame) -> bool:
         filter_map: Dict[str, str] = {
             "Program CoC": "ProgramSetupCoC",
             "Local CoC": "LocalCoCCode",
+            "Project Type": "ProjectTypeCode",
             "Agency Name": "AgencyName",
             "Program Name": "ProgramName",
-            "Project Type": "ProjectTypeCode",
+            "Head of Household": "IsHeadOfHousehold",
+            "Household Type": "HouseholdType",
             "Race / Ethnicity": "RaceEthnicity",
             "Gender": "Gender",
-            "Household Type": "HouseholdType",
             "Veteran Status": "VeteranStatus",
             "Entry Age Tier": "AgeTieratEntry",
             "Currently Fleeing DV": "CurrentlyFleeingDV",
-            "Head of Household": "IsHeadOfHousehold",
             "Chronic Homelessness Household": "CHStartHousehold",
         }
         selections: Dict[str, List[str]] = {}

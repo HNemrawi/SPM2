@@ -288,6 +288,23 @@ def render_summary_metrics(df_filt: DataFrame, full_df: Optional[DataFrame] = No
                 - **PH Exit Rate**: Percentage of unique clients who exited that went to permanent housing (unique PH exit clients ÷ unique clients with any exit × 100)
                 - **Returns**: Clients who exited to PH and returned to homelessness within the specified tracking window
                 - **Return Rate**: Percentage of PH exits who returned (returns ÷ PH exits × 100)
+                            
+                **Housing Outcomes Classification:**
+                - **PH Exit Rate (Housing Placement):**
+                    - 🏆 **Excellent:** ≥ 50% exits to permanent housing
+                    - ✅ **Good:** 35%–<50% exits to permanent housing
+                    - ⚠️ **Needs Improvement:** 20%–<35% exits to permanent housing
+                    - ❌ **Critical:** <20% exits to permanent housing
+                - **Return Rate (Housing Stability):**
+                    - 🌟 **Outstanding:** ≤ 5% returns to homelessness
+                    - ✅ **Strong:** > 5%–≤ 10% returns to homelessness
+                    - ⚠️ **Moderate:** > 10%–≤ 20% returns to homelessness
+                    - 🚨 **High:** > 20% returns to homelessness
+
+                **Population Insights Classification:**
+                - **High Carryover (>70%):** Stable but potentially stuck population; consider enhanced interventions for chronic homelessness.
+                - **High New (>50%):** Growing need; focus on prevention and diversion strategies.
+                - **Balanced:** Mix of carryover and new indicates healthy flow with room for improvement.
                 
                 **Population Analysis:**
                 - **Households**: Count of heads of household only (not all family members)

@@ -48,7 +48,7 @@ ABOUT_SPM2_CONTENT = """
             <li>Emergency Shelter (ES)</li>
             <li>Transitional Housing (TH)</li>
             <li>Safe Haven (SH)</li>
-            <li>Permanent Housing (PH)</li>
+            <li>Permanent Housing (PH, PSH, RRH)</li>
         </ul>
         
         <p style="margin-bottom: 10px;"><strong>Date Window:</strong><br>

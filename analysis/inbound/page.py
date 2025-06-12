@@ -230,10 +230,14 @@ def run_analysis(df: pd.DataFrame, analysis_params: Dict[str, Any]) -> bool:
         return False
 
 
-def display_summary_metrics(final_df: pd.DataFrame) -> None:
+def display_summary_metrics(final_df: pd.DataFrame, allowed_exit_dest_cats: Optional[List[str]] = None) -> None:
     """Display core performance metrics."""
     st.divider()
     st.markdown("### 📊 Inbound Analysis Summary")
+
+    if allowed_exit_dest_cats == ["Permanent Housing Situations"]:
+        st.caption("📌 **Note:** only Permanent Housing Situations is selected in the Exit Destination Categories filter.")
+
     metrics = compute_return_metrics(final_df)
     display_return_metrics_cards(metrics)
 
@@ -518,7 +522,7 @@ def inbound_recidivism_page() -> None:
     final_df = get_analysis_result("inbound")
     if final_df is not None and not final_df.empty:
         # Display core metrics
-        display_summary_metrics(final_df)
+        display_summary_metrics(final_df, allowed_exit_dest_cats)
         
         # Display time to entry distribution
         display_time_to_entry(final_df)

@@ -11,6 +11,7 @@ import plotly.graph_objects as go
 import streamlit as st
 from pandas import DataFrame, Timestamp
 
+
 from analysis.general.data_utils import (
     DEMOGRAPHIC_DIMENSIONS, FREQUENCY_MAP, calculate_demographic_growth,
     inflow, outflow, ph_exit_clients, recalculated_metric_time_series,
@@ -20,9 +21,27 @@ from analysis.general.filter_utils import (
     get_filter_timestamp, hash_data, init_section_state, is_cache_valid, invalidate_cache
 )
 from analysis.general.theme import (
-    CUSTOM_COLOR_SEQUENCE, MAIN_COLOR, NEUTRAL_COLOR, PLOT_TEMPLATE, SECONDARY_COLOR,
+    MAIN_COLOR, NEUTRAL_COLOR, PLOT_TEMPLATE, SECONDARY_COLOR,
     SUCCESS_COLOR, WARNING_COLOR, apply_chart_style, fmt_int, fmt_pct, blue_divider
 )
+
+CUSTOM_COLOR_SEQUENCE = [
+    "#1f77b4",  # muted blue
+    "#ff7f0e",  # safety orange
+    "#2ca02c",  # cooked asparagus green
+    "#d62728",  # brick red
+    "#9467bd",  # muted purple
+    "#8c564b",  # chestnut brown
+    "#e377c2",  # raspberry yogurt pink
+    "#7f7f7f",  # middle gray
+    "#17becf",  # blue-teal
+    "#bcbd22",  # curry yellow-green
+    "#393b79",  # dark slate blue
+    "#637939",  # olive green
+    "#8c6d31",  # brownish yellow
+    "#843c39",  # dark sienna
+    "#7b4173",  # deep magenta
+]
 
 # Constants
 TREND_SECTION_KEY = "trend_explorer"
@@ -494,7 +513,12 @@ def render_trend_explorer(df_filt: DataFrame, full_df: Optional[DataFrame] = Non
             - Current trend direction and total change
             - Average change per period
             - Largest increases and decreases with dates
-            - Volatility assessment (stability indicator)
+            - Volatility: Measures how much the numbers swing up or down over time. We calculate the typical size of these swings and group them into:
+                - **Very Stable** — swings usually under 5%, indicating a steady trend.  
+                - **Moderately Stable** — swings between 5% and 10%, showing mild fluctuations.  
+                - **Somewhat Volatile** — swings between 10% and 20%, suggesting noticeable ups and downs.  
+                - **Highly Volatile** — swings over 20%, highlighting rapid or unpredictable changes.  
+
             
             **4. Growth Analysis (for breakdowns):**
             - Side-by-side growth comparisons
@@ -1239,12 +1263,15 @@ def render_trend_explorer(df_filt: DataFrame, full_df: Optional[DataFrame] = Non
                     if not filtered_df.empty:
                         # Calculate dynamic height
                         num_points = len(filtered_df["bucket"].unique())
-                        num_groups = len(filtered_df["group"].unique())
+                        num_groups = filtered_df["group"].nunique()
                         chart_height = _calculate_dynamic_height(num_points, base_height=400)
                         
                         # Add extra height for multiple groups
                         if num_groups > 5:
                             chart_height += 50
+                        
+                        # Build a palette of exactly num_groups colors
+                        palette = CUSTOM_COLOR_SEQUENCE[:num_groups]
                         
                         # Create line chart by group
                         fig = px.line(
@@ -1260,7 +1287,7 @@ def render_trend_explorer(df_filt: DataFrame, full_df: Optional[DataFrame] = Non
                                 "count": "Number of Clients", 
                                 "group": sel_break
                             },
-                            color_discrete_sequence=CUSTOM_COLOR_SEQUENCE
+                            color_discrete_sequence=palette
                         )
                         
                         # Apply consistent styling with dynamic height
@@ -1282,13 +1309,18 @@ def render_trend_explorer(df_filt: DataFrame, full_df: Optional[DataFrame] = Non
                             tickangle=_get_x_axis_angle(sel_freq, num_points)
                         )
                         
-                        # Improve hover template
+                        # Improved hover: Group name on top, then date, then count
                         fig.update_traces(
-                            hovertemplate="<b>%{x|%b %Y}</b><br>Clients: %{y:,.0f}<extra>%{fullData.name}</extra>"
+                            hovertemplate=(
+                                "<b>%{fullData.name}</b><br>"
+                                "<b>%{x|%b %Y}</b><br>"
+                                "Clients: %{y:,.0f}<extra></extra>"
+                            )
                         )
                         
                         # Display the chart
                         st.plotly_chart(fig, use_container_width=True)
+    
                         
                         # Add growth analysis if we have enough data
                         if len(filtered_df["bucket"].unique()) >= 2:

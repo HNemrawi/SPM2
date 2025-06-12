@@ -233,11 +233,14 @@ def run_analysis(df: pd.DataFrame, analysis_params: Dict[str, Any]) -> bool:
         return False
 
 
-def display_summary_metrics(out_df: pd.DataFrame) -> None:
+def display_summary_metrics(out_df: pd.DataFrame, allowed_exit_dest_cats: Optional[List[str]] = None) -> None:
     """Display the core performance metrics summary."""
     st.divider()
     st.markdown("### 📊 Outbound Analysis Summary")
-    
+
+    if allowed_exit_dest_cats == ["Permanent Housing Situations"]:
+        st.caption("📌 **Note:** only Permanent Housing Situations is selected in the Exit Destination Categories filter.")
+
     # Compute metrics
     metrics = compute_summary_metrics(out_df)
     
@@ -312,6 +315,7 @@ def display_summary_metrics(out_df: pd.DataFrame) -> None:
                 value=f"{metrics['Max Days']:.0f}",
                 help="Longest time between exit and return"
             )
+
 
 def display_days_to_return(out_df: pd.DataFrame) -> None:
     """Display the days-to-return distribution visualization."""
@@ -618,7 +622,7 @@ def outbound_recidivism_page() -> None:
     out_df = get_analysis_result("outbound")
     if out_df is not None and not out_df.empty:
         # Display core metrics and visualizations
-        display_summary_metrics(out_df)
+        display_summary_metrics(out_df, exit_filters["allowed_exit_dest_cats"])
         display_days_to_return(out_df)
         display_breakdown_analysis(out_df)
         display_client_flow(out_df)

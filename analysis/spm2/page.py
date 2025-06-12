@@ -98,7 +98,7 @@ def setup_global_filters(df: pd.DataFrame) -> Optional[List[str]]:
             unique_continuum = sorted(df["ProgramsContinuumProject"].dropna().unique().tolist())
             allowed_continuum = create_multiselect_filter(
                 "Continuum Projects",
-                ["ALL"] + unique_continuum,
+                unique_continuum,
                 default=["Yes"],
                 help_text="Filter by Continuum Project participation"
             )
@@ -280,10 +280,18 @@ def run_analysis(df: pd.DataFrame, analysis_params: Dict[str, Any]) -> bool:
                 return False
 
 
-def display_summary_metrics(final_df: pd.DataFrame, return_period: int) -> Dict[str, Any]:
-    """Display the core performance metrics."""
+def display_summary_metrics(
+    final_df: pd.DataFrame,
+    return_period: int,
+    allowed_exit_dest_cats: Optional[List[str]] = None
+) -> Dict[str, Any]:
     st.divider()
     st.markdown("### 📊 Returns to Homelessness Summary")
+
+    # If only Permanent Housing Situations is selected, add the note
+    if allowed_exit_dest_cats == ["Permanent Housing Situations"]:
+        st.caption("📌 **Note:** only Permanent Housing Situations is selected in the Exit Destination Categories filter.")
+
     metrics = compute_summary_metrics(final_df, return_period)
     display_spm_metrics(metrics, return_period, show_total_exits=True)
     return metrics
@@ -577,7 +585,8 @@ def spm2_page() -> None:
     final_df = get_analysis_result("spm2")
     if final_df is not None and not final_df.empty:
         # Display core metrics
-        display_summary_metrics(final_df, return_period)
+        
+        display_summary_metrics(final_df, return_period, allowed_exit_dest_cats)
         
         # Display days to return distribution
         display_days_to_return(final_df, return_period)

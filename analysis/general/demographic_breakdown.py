@@ -372,258 +372,241 @@ def _create_counts_chart(df: DataFrame, dim_col: str) -> go.Figure:
     
     return fig
 
-def _create_rates_charts(df: DataFrame, dim_col: str, return_window: int) -> Tuple[go.Figure, go.Figure]:
+def _create_rates_charts(
+    df: pd.DataFrame, dim_col: str, return_window: int
+) -> Tuple[go.Figure, go.Figure]:
     """
-    Create rate charts for PH exits and returns with improved layout.
-    
+    Create rate charts for PH exits and returns with improved layout,
+    excluding groups with 0% PH Exit Rate, and ensuring the returns
+    chart shows the same groups (even if their return rate is zero).
+
     Parameters:
     -----------
-    df : DataFrame
-        Breakdown data
+    df : pd.DataFrame
+        Breakdown data containing these columns:
+        - dim_col
+        - "PH Exit Rate", "PH Exits", "Total Exits"
+        - "Returns to Homelessness Rate", "Returns Count", "PH Exit Count"
     dim_col : str
-        Demographic dimension column name
+        Demographic dimension column name.
     return_window : int
-        Days to check for returns
-        
+        Days to check for returns.
+
     Returns:
     --------
-    Tuple[Figure, Figure]
-        Tuple of PH exit rate and returns rate figures
+    Tuple[go.Figure, go.Figure]
+        (PH exit rate figure, returns rate figure)
+
+    Raises:
+    -------
+    ValueError
+        If any required column is missing.
     """
-    # Helper function to handle long labels
-    def process_labels_for_display(labels_list):
-        """Process labels to prevent overlap and improve readability"""
-        processed = []
-        max_len = max(len(str(label)) for label in labels_list)
-        
-        for label in labels_list:
-            label_str = str(label)
-            # For very long labels, abbreviate intelligently
-            if max_len > 40 and len(label_str) > 40:
-                if 'American Indian, Alaska Native, or Indigenous' in label_str:
-                    processed.append('AI/AN/Indigenous')
-                elif 'Black, African American, or African' in label_str:
-                    processed.append('Black/African American')
-                elif 'Hispanic/Latina/e/o' in label_str:
-                    processed.append('Hispanic/Latino')
-                elif ',' in label_str:
-                    # Keep first part before comma and abbreviate
-                    parts = label_str.split(',')
-                    processed.append(parts[0] + '...')
-                else:
-                    processed.append(label_str[:35] + '...')
-            else:
-                processed.append(label_str)
-        return processed
-    
-    # Get all unique groups from both dataframes to ensure consistent ordering
-    all_groups = sorted(df[dim_col].unique())
-    
-    # Process labels once for consistency
-    display_labels_map = dict(zip(all_groups, process_labels_for_display(all_groups)))
-    
-    # Determine layout parameters based on all groups
-    num_groups = len(all_groups)
-    max_label_len = max(len(label) for label in display_labels_map.values())
-    use_horizontal = num_groups > 8 or max_label_len > 30
-    
-    # Calculate consistent dimensions for both charts
-    if use_horizontal:
-        chart_height = max(400, min(800, 300 + (num_groups * 35)))
-        left_margin = min(400, max(150, max_label_len * 7))
-        layout_params = {
-            'height': chart_height,
-            'margin': dict(l=left_margin, r=80, t=100, b=80),
-            'showlegend': False
-        }
-    else:
-        chart_height = max(450, min(700, 400 + (num_groups * 30)))
-        
-        # Calculate rotation angle
-        if num_groups <= 3 and max_label_len <= 15:
-            angle = 0
-            bottom_margin = 100
-        elif num_groups <= 5 and max_label_len <= 20:
-            angle = -30
-            bottom_margin = 150
-        else:
-            angle = -45
-            import math
-            vertical_space = max_label_len * 7 * abs(math.sin(math.radians(45)))
-            bottom_margin = max(200, int(vertical_space + 80))
-        
-        layout_params = {
-            'height': chart_height,
-            'margin': dict(l=60, r=60, t=100, b=bottom_margin),
-            'showlegend': False,
-            'xaxis': dict(
-                tickangle=angle,
-                automargin=False,
-                tickmode='linear',
-                dtick=1,
-                tickfont=dict(size=10 if max_label_len > 25 else 11)
-            )
-        }
-    
-    # PH Exit Rate chart
-    ph_df = df.dropna(subset=["PH Exit Rate"])
-    
-    if not ph_df.empty:
-        # Sort by group name
-        ph_df_plot = ph_df.sort_values(dim_col).copy()
-        ph_df_plot['display_label'] = ph_df_plot[dim_col].map(display_labels_map)
-        
-        if use_horizontal:
-            fig_ph = px.bar(
-                ph_df_plot,
-                y='display_label',
-                x="PH Exit Rate",
-                orientation='h',
-                template=PLOT_TEMPLATE,
-                title="Permanent Housing Exit Rate (%)",
-                color="PH Exit Rate",
-                color_continuous_scale="Blues",
-            )
-            
-            fig_ph.update_layout(
-                **layout_params,
-                xaxis=dict(range=[0, max(100, ph_df_plot["PH Exit Rate"].max() * 1.2)])
-            )
-            
-            fig_ph.update_traces(
-                texttemplate='%{x:.1f}%',
-                textposition='outside',
-                textfont=dict(size=11)
-            )
-            
-        else:
-            fig_ph = px.bar(
-                ph_df_plot,
-                x='display_label',
-                y="PH Exit Rate",
-                template=PLOT_TEMPLATE,
-                title="Permanent Housing Exit Rate (%)",
-                color="PH Exit Rate",
-                color_continuous_scale="Blues",
-            )
-            
-            fig_ph.update_layout(
-                **layout_params,
-                yaxis=dict(
-                    range=[0, max(100, ph_df_plot["PH Exit Rate"].max() * 1.3)],
-                    automargin=True
-                )
-            )
-            
-            fig_ph.update_traces(
-                texttemplate='%{y:.1f}%',
-                textposition='outside',
-                textfont=dict(size=11)
-            )
-            
-        # Add hover data with full labels
-        fig_ph.update_traces(
-            customdata=ph_df_plot[[dim_col, "PH Exits", "Total Exits"]].values,
-            hovertemplate='<b>%{customdata[0]}</b><br>' +
-                         'PH Exit Rate: %{y:.1f}%<br>' +
-                         'PH Exits: %{customdata[1]}<br>' +
-                         'Total Exits: %{customdata[2]}<extra></extra>'
-        )
-    else:
-        fig_ph = go.Figure()
-        fig_ph.update_layout(
-            **layout_params,
+    # 1) Validate required columns
+    required = {
+        dim_col,
+        "PH Exit Rate", "PH Exits", "Total Exits",
+        "Returns to Homelessness Rate", "Returns Count", "PH Exit Count",
+    }
+    missing = required - set(df.columns)
+    if missing:
+        raise ValueError(f"Missing columns for rate charts: {missing}")
+
+    # 2) Filter out groups with 0% PH Exit Rate
+    ph_df = df[df["PH Exit Rate"] > 0].copy()
+    if ph_df.empty:
+        # No groups to show
+        empty_ph = go.Figure()
+        empty_ph.update_layout(
             title="Permanent Housing Exit Rate (%)",
+            template=PLOT_TEMPLATE,
+            height=400,
             annotations=[{
                 "text": "No PH exit data available",
-                "xref": "paper",
-                "yref": "paper",
-                "x": 0.5,
-                "y": 0.5,
-                "showarrow": False
-            }]
+                "xref": "paper", "yref": "paper",
+                "x": 0.5, "y": 0.5, "showarrow": False
+            }],
         )
-    
-    # Returns Rate chart
-    ret_df = df.dropna(subset=["Returns to Homelessness Rate"])
-    
-    if not ret_df.empty:
-        # Sort by group name (same order as PH chart)
-        ret_df_plot = ret_df.sort_values(dim_col).copy()
-        ret_df_plot['display_label'] = ret_df_plot[dim_col].map(display_labels_map)
-        
-        if use_horizontal:
-            fig_ret = px.bar(
-                ret_df_plot,
-                y='display_label',
-                x="Returns to Homelessness Rate",
-                orientation='h',
-                template=PLOT_TEMPLATE,
-                title=f"Returns to Homelessness within {return_window} days (%)",
-                color="Returns to Homelessness Rate",
-                color_continuous_scale="Reds",
-            )
-            
-            fig_ret.update_layout(
-                **layout_params,
-                xaxis=dict(range=[0, max(50, ret_df_plot["Returns to Homelessness Rate"].max() * 1.3)])
-            )
-            
-            fig_ret.update_traces(
-                texttemplate='%{x:.1f}%',
-                textposition='outside',
-                textfont=dict(size=11)
-            )
-            
-        else:
-            fig_ret = px.bar(
-                ret_df_plot,
-                x='display_label',
-                y="Returns to Homelessness Rate",
-                template=PLOT_TEMPLATE,
-                title=f"Returns to Homelessness within {return_window} days (%)",
-                color="Returns to Homelessness Rate",
-                color_continuous_scale="Reds",
-            )
-            
-            fig_ret.update_layout(
-                **layout_params,
-                yaxis=dict(
-                    range=[0, max(50, ret_df_plot["Returns to Homelessness Rate"].max() * 1.3)],
-                    automargin=True
-                )
-            )
-            
-            fig_ret.update_traces(
-                texttemplate='%{y:.1f}%',
-                textposition='outside',
-                textfont=dict(size=11)
-            )
-        
-        # Add hover data with full labels
-        fig_ret.update_traces(
-            customdata=ret_df_plot[[dim_col, "Returns Count", "PH Exit Count"]].values,
-            hovertemplate='<b>%{customdata[0]}</b><br>' +
-                         'Return Rate: %{y:.1f}%<br>' +
-                         'Returns: %{customdata[1]}<br>' +
-                         'PH Exits: %{customdata[2]}<extra></extra>'
-        )
-    else:
-        # Create empty figure with same dimensions
-        fig_ret = go.Figure()
-        fig_ret.update_layout(
-            **layout_params,
+        # Also produce a matching empty returns chart
+        empty_ret = go.Figure()
+        empty_ret.update_layout(
             title=f"Returns to Homelessness within {return_window} days (%)",
+            template=PLOT_TEMPLATE,
+            height=400,
             annotations=[{
                 "text": "No returns data available",
-                "xref": "paper",
-                "yref": "paper",
-                "x": 0.5,
-                "y": 0.5,
-                "showarrow": False
-            }]
+                "xref": "paper", "yref": "paper",
+                "x": 0.5, "y": 0.5, "showarrow": False
+            }],
         )
-    
+        return empty_ph, empty_ret
+
+    # 3) Prepare labels and layout parameters
+    def process_labels_for_display(labels: List[str]) -> List[str]:
+        """Abbreviate very long labels intelligently."""
+        proc: List[str] = []
+        max_len = max(len(str(l)) for l in labels)
+        for lbl in labels:
+            s = str(lbl)
+            if max_len > 40 and len(s) > 40:
+                if "American Indian, Alaska Native, or Indigenous" in s:
+                    proc.append("AI/AN/Indigenous")
+                elif "Black, African American, or African" in s:
+                    proc.append("Black/African American")
+                elif "Hispanic/Latina/e/o" in s:
+                    proc.append("Hispanic/Latino")
+                elif "," in s:
+                    proc.append(s.split(",", 1)[0] + "...")
+                else:
+                    proc.append(s[:35] + "...")
+            else:
+                proc.append(s)
+        return proc
+
+    groups = sorted(ph_df[dim_col].dropna().unique())
+    display_labels = process_labels_for_display(groups)
+    display_map = dict(zip(groups, display_labels))
+    n = len(groups)
+    max_lbl = max((len(lbl) for lbl in display_labels), default=0)
+    horizontal = n > 8 or max_lbl > 30
+
+    if horizontal:
+        height = max(400, min(800, 300 + n * 35))
+        left_margin = min(400, max(150, max_lbl * 7))
+        layout = dict(
+            height=height,
+            margin=dict(l=left_margin, r=80, t=100, b=80),
+            showlegend=False
+        )
+    else:
+        height = max(450, min(700, 400 + n * 30))
+        if n <= 3 and max_lbl <= 15:
+            angle, bottom = 0, 100
+        elif n <= 5 and max_lbl <= 20:
+            angle, bottom = -30, 150
+        else:
+            angle = -45
+            vs = max_lbl * 7 * abs(math.sin(math.radians(45)))
+            bottom = max(200, int(vs + 80))
+        layout = {
+            "height": height,
+            "margin": dict(l=60, r=60, t=100, b=bottom),
+            "showlegend": False,
+            "xaxis": dict(
+                tickangle=angle,
+                automargin=False,
+                tickmode="linear",
+                dtick=1,
+                tickfont=dict(size=10 if max_lbl > 25 else 11),
+            ),
+        }
+
+    # 4) Build PH Exit Rate chart
+    ph_plot = ph_df.sort_values(dim_col).copy()
+    ph_plot["display_label"] = ph_plot[dim_col].map(display_map)
+
+    if horizontal:
+        fig_ph = px.bar(
+            ph_plot,
+            y="display_label",
+            x="PH Exit Rate",
+            orientation="h",
+            template=PLOT_TEMPLATE,
+            title="Permanent Housing Exit Rate (%)",
+            color="PH Exit Rate",
+            color_continuous_scale="Blues",
+        )
+        fig_ph.update_layout(
+            **layout,
+            xaxis=dict(range=[0, max(100, ph_plot["PH Exit Rate"].max() * 1.2)])
+        )
+        fig_ph.update_traces(texttemplate="%{x:.1f}%", textposition="outside")
+    else:
+        fig_ph = px.bar(
+            ph_plot,
+            x="display_label",
+            y="PH Exit Rate",
+            template=PLOT_TEMPLATE,
+            title="Permanent Housing Exit Rate (%)",
+            color="PH Exit Rate",
+            color_continuous_scale="Blues",
+        )
+        fig_ph.update_layout(
+            **layout,
+            yaxis=dict(
+                range=[0, max(100, ph_plot["PH Exit Rate"].max() * 1.3)],
+                automargin=True
+            )
+        )
+        fig_ph.update_traces(texttemplate="%{y:.1f}%", textposition="outside")
+
+    fig_ph.update_traces(
+        customdata=ph_plot[
+            [dim_col, "PH Exit Rate", "PH Exits", "Total Exits"]
+        ].values,
+        hovertemplate=(
+            "<b>%{customdata[0]}</b><br>"
+            "PH Exit Rate: %{customdata[1]:.1f}%<br>"
+            "PH Exits: %{customdata[2]}<br>"
+            "Total Exits: %{customdata[3]}<extra></extra>"
+        ),
+    )
+
+    # 5) Build Returns Rate chart with same groups, filling zeros
+    ret_df = df.copy()
+    ret_df["Returns to Homelessness Rate"] = ret_df[
+        "Returns to Homelessness Rate"
+    ].fillna(0)
+    ret_plot = ret_df[ret_df[dim_col].isin(groups)].sort_values(dim_col).copy()
+    ret_plot["display_label"] = ret_plot[dim_col].map(display_map)
+
+    if horizontal:
+        fig_ret = px.bar(
+            ret_plot,
+            y="display_label",
+            x="Returns to Homelessness Rate",
+            orientation="h",
+            template=PLOT_TEMPLATE,
+            title=f"Returns to Homelessness within {return_window} days (%)",
+            color="Returns to Homelessness Rate",
+            color_continuous_scale="Reds",
+        )
+        fig_ret.update_layout(
+            **layout,
+            xaxis=dict(range=[0, max(50, ret_plot["Returns to Homelessness Rate"].max() * 1.3)])
+        )
+        fig_ret.update_traces(texttemplate="%{x:.1f}%", textposition="outside")
+    else:
+        fig_ret = px.bar(
+            ret_plot,
+            x="display_label",
+            y="Returns to Homelessness Rate",
+            template=PLOT_TEMPLATE,
+            title=f"Returns to Homelessness within {return_window} days (%)",
+            color="Returns to Homelessness Rate",
+            color_continuous_scale="Reds",
+        )
+        fig_ret.update_layout(
+            **layout,
+            yaxis=dict(
+                range=[0, max(50, ret_plot["Returns to Homelessness Rate"].max() * 1.3)],
+                automargin=True
+            )
+        )
+        fig_ret.update_traces(texttemplate="%{y:.1f}%", textposition="outside")
+
+    fig_ret.update_traces(
+        customdata=ret_plot[
+            [dim_col, "Returns to Homelessness Rate", "Returns Count", "PH Exit Count"]
+        ].values,
+        hovertemplate=(
+            "<b>%{customdata[0]}</b><br>"
+            "Returns (" + str(return_window) + "d): %{customdata[1]:.1f}%<br>"
+            "Returns Count: %{customdata[2]}<br>"
+            "PH Exits: %{customdata[3]}<extra></extra>"
+        ),
+    )
+
     return fig_ph, fig_ret
 
 def _create_outcome_quadrant_chart(df: DataFrame, dim_col: str) -> go.Figure:
@@ -1063,17 +1046,14 @@ def render_breakdown_section(df_filt: DataFrame, full_df: Optional[DataFrame] = 
             st.warning(f"⚠️ No data available for {dim_label}.")
             return
         
-        # Show group selector if more than 10 groups
-        if len(unique_groups) > 10:
-            selected_groups = st.multiselect(
-                f"Filter {dim_label} groups (showing all by default)",
-                options=unique_groups,
-                default=unique_groups,
-                key=f"group_filter_{key_suffix}",
-                help="Select specific groups to analyze"
-            )
-        else:
-            selected_groups = unique_groups
+
+        selected_groups = st.multiselect(
+            f"Filter {dim_label} groups (showing all by default)",
+            options=unique_groups,
+            default=unique_groups,
+            key=f"group_filter_{key_suffix}",
+            help="Select specific groups to analyze"
+        )
             
     except Exception as e:
         st.error(f"❌ Error loading categories: {e}")
