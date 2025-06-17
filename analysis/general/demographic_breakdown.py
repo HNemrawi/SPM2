@@ -950,6 +950,13 @@ def render_breakdown_section(df_filt: DataFrame, full_df: Optional[DataFrame] = 
             - **Performance Metrics**: PH exit rates and return rates by category
             - **Outcome Comparison**: Quadrant chart plotting PH exits vs returns
             
+            **Important Note About Client Counting:**
+            - A client enrolled in multiple programs/projects is counted in each one
+            - Example: A client who starts in Emergency Shelter then transitions to Rapid Re-Housing appears in both project type counts
+            - This accurately reflects the number of unique clients served by each program/project/agency
+            - The sum across all groups may exceed the total unique clients, which is expected and correct
+            - This approach answers "How many clients did each program serve?" not "How many clients used only one program?"
+                        
             **Tips for Analysis:**
             - Compare PH exit rates across groups to find disparities
             - Look for groups with high return rates needing stability support

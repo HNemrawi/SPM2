@@ -1,5 +1,5 @@
 """
-Equity analysis section for HMIS dashboard - Improved Version
+Equity analysis section for HMIS dashboard - Corrected Version
 """
 
 from typing import Any, Dict, List, Optional, Set, Tuple
@@ -151,81 +151,79 @@ def _create_methodology_html(
     """Create methodology HTML section."""
     
     outcome_definitions = ""
-    if "Permanent housing exits" in outcome_name:
+    if "Return" not in outcome_name:
         outcome_definitions = f"""
         <div style="background-color: rgba(75,181,67,0.1); border: 1px solid {SUCCESS_COLOR}; 
-                    border-radius: 5px; padding: 15px; margin-bottom: 20px;">
-            <h4 style="margin-top: 0;">Permanent Housing Exits</h4>
-            <ul style="margin-bottom: 0;">
-                <li>Clients who exited to a permanent housing destination during the reporting period</li>
-                <li>Base population: All clients who exited programs during the reporting period</li>
-                <li><strong>Higher rates are better</strong> (more successful housing placements)</li>
-            </ul>
+                    border-radius: 8px; padding: 20px; margin-bottom: 20px;">
+            <h4 style="margin-top: 0;">📊 Permanent Housing Exits</h4>
+            <p><strong>Rate = </strong>Clients who exited to permanent housing ÷ All clients who exited × 100</p>
+            <p><strong>Goal: </strong>Higher rates are better ✅</p>
         </div>
         """
     else:  # Returns to homelessness
         outcome_definitions = f"""
         <div style="background-color: rgba(255,99,71,0.1); border: 1px solid {SECONDARY_COLOR}; 
-                    border-radius: 5px; padding: 15px; margin-bottom: 20px;">
-            <h4 style="margin-top: 0;">Returns to Homelessness</h4>
-            <ul style="margin-bottom: 0;">
-                <li>Clients who exited to PH and returned to homelessness within {return_window} days</li>
-                <li>Base population: All clients who exited to permanent housing during the period</li>
-                <li>Excludes: Prevention, coordinated entry, and services-only project enrollments</li>
-                <li>Direct PH placements (move-in date = project start) not counted as returns</li>
-                <li><strong>Lower rates are better</strong> (fewer people returning to homelessness)</li>
-            </ul>
+                    border-radius: 8px; padding: 20px; margin-bottom: 20px;">
+            <h4 style="margin-top: 0;">📊 Returns to Homelessness</h4>
+            <p><strong>Tracking: </strong>Clients who returned within {return_window if return_window else 730} days of housing exit</p>
+            <p><strong>Rate = </strong>Clients who returned ÷ Clients who exited to PH × 100</p>
+            <p><strong>Goal: </strong>Lower rates are better ✅</p>
+            <p style="margin-top: 10px; font-size: 14px;"><em>Note: We search the entire system for returns, not just current filtered programs.</em></p>
         </div>
         """
     
     return f"""
     <div style="background-color: rgba(0,0,0,0.2); border-radius: 10px; padding: 20px;">
         
-        <h3 style="color: {MAIN_COLOR}; margin-top: 0;">Analysis Parameters</h3>
-        <table style="width: 100%; border-collapse: collapse; margin-bottom: 20px;">
-            <tr style="border-bottom: 1px solid rgba(255,255,255,0.2);">
-                <td style="padding: 8px; width: 50%;"><strong>Demographic dimension:</strong></td>
+        <h3 style="color: {MAIN_COLOR}; margin-top: 0;">Analysis Details</h3>
+        
+        <table style="width: 100%; margin-bottom: 20px;">
+            <tr>
+                <td style="padding: 8px;"><strong>Comparing:</strong></td>
                 <td style="padding: 8px;">{equity_label}</td>
             </tr>
-            <tr style="border-bottom: 1px solid rgba(255,255,255,0.2);">
-                <td style="padding: 8px;"><strong>Outcome measure:</strong></td>
-                <td style="padding: 8px;">{outcome_name}</td>
-            </tr>
-            <tr style="border-bottom: 1px solid rgba(255,255,255,0.2);">
-                <td style="padding: 8px;"><strong>Date range:</strong></td>
+            <tr>
+                <td style="padding: 8px;"><strong>Time period:</strong></td>
                 <td style="padding: 8px;">{t0.date()} to {t1.date()}</td>
             </tr>
-            <tr style="border-bottom: 1px solid rgba(255,255,255,0.2);">
+            <tr>
                 <td style="padding: 8px;"><strong>Minimum group size:</strong></td>
                 <td style="padding: 8px;">{min_pop}</td>
             </tr>
         </table>
         
-        <h3 style="color: {MAIN_COLOR};">Statistical Methods</h3>
-        <ul style="margin-bottom: 20px;">
-            <li>Chi-square test with Yates' correction for groups with n ≥ 5 in all cells</li>
-            <li>Fisher's exact test for smaller samples</li>
-            <li>Statistical significance threshold: p < 0.05</li>
-            <li>Groups below minimum size threshold excluded from analysis</li>
-        </ul>
-        
-        <h3 style="color: {MAIN_COLOR};">Outcome Definitions</h3>
         {outcome_definitions}
         
-        <h3 style="color: {WARNING_COLOR};">Important Limitations</h3>
-        <ul style="margin-bottom: 0;">
-            <li>Disparities show correlation, not causation</li>
-            <li>Multiple unmeasured factors may influence outcomes</li>
-            <li>Single outcome measure - comprehensive assessment requires multiple metrics</li>
-            {"<li>Returns analysis depends on complete re-entry data capture</li>" if return_window else ""}
-        </ul>
+        <h3 style="color: {MAIN_COLOR};">How to Read Results</h3>
         
-        <h3 style="color: {MAIN_COLOR};">Disparity Index Calculation</h3>
-        <div style="background-color: rgba(255,255,255,0.05); border-radius: 5px; padding: 15px;">
-            <p style="margin: 0;">
-                {"For returns: DI = (Lowest Rate ÷ Group Rate)<br>Groups with lowest return rates get DI = 1.0 (best)" if "Returns" in outcome_name else "For exits: DI = (Group Rate ÷ Highest Rate)<br>Groups with highest exit rates get DI = 1.0 (best)"}
+        <div style="background-color: rgba(255,255,255,0.05); border-radius: 5px; padding: 15px; margin-bottom: 15px;">
+            <p><strong>Disparity Index (DI)</strong> - How far each group is from the best performer:</p>
+            <ul>
+                <li>1.0 = Performing as well as the best group</li>
+                <li>0.8 = 20% gap from best</li>
+                <li>0.5 = 50% gap from best</li>
+            </ul>
+            <p style="margin-top: 10px; font-size: 14px; font-style: italic;">
+                {"For returns: Groups with the lowest rates get DI = 1.0. If any group achieves 0% returns, only they get 1.0." if "Return" in outcome_name else "For exits: Groups with the highest rates get DI = 1.0. The index shows what fraction of the best rate each group achieves."}
             </p>
         </div>
+        
+        <div style="background-color: rgba(255,255,255,0.05); border-radius: 5px; padding: 15px;">
+            <p><strong>Statistical Significance (*)</strong> - Confidence that differences are real:</p>
+            <ul>
+                <li>*** = Very confident (p < 0.001)</li>
+                <li>** = Confident (p < 0.01)</li>
+                <li>* = Somewhat confident (p < 0.05)</li>
+                <li>No asterisk = Could be random chance</li>
+            </ul>
+        </div>
+        
+        <h3 style="color: {WARNING_COLOR}; margin-top: 20px;">Important Notes</h3>
+        <ul>
+            <li>Shows patterns, not causes</li>
+            <li>Focus on groups with low DI AND statistical significance</li>
+            <li>Many unmeasured factors may influence outcomes</li>
+        </ul>
     </div>
     """
 
@@ -475,9 +473,9 @@ def equity_analysis(
         min_group = result.loc[result["outcome_rate"].idxmin()]
         min_rate = min_group["outcome_rate"]
         
-        # If best rate is 0, only groups with non-zero rates have potential improvement
+        # Calculate potential improvement (make it positive for display)
         result["potential_improvement"] = result.apply(
-            lambda row: -int(np.floor((row["outcome_rate"]/100) * row["population"])) 
+            lambda row: int(np.floor((row["outcome_rate"] - min_rate) / 100 * row["population"])) 
             if row["outcome_rate"] > min_rate else 0,
             axis=1
         )
@@ -723,20 +721,20 @@ def render_equity_analysis(df_filt: DataFrame, full_df: Optional[DataFrame] = No
         
         all_types = sorted(df_filt["ProjectTypeCode"].dropna().unique())
         proj_selected = d2.multiselect(
-            "Project types to analyze",
+            "Analyze exits from these project types",
             options=all_types,
             default=all_types,
             key=f"equity_proj_types_return_{filter_timestamp}",
-            help="Which project types to include"
+            help="We'll track returns only for people who exited from these project types, but search ALL programs system-wide for their returns"
         )
     else:  # PH exits
         all_types = sorted(df_filt["ProjectTypeCode"].dropna().unique())
         proj_selected = st.multiselect(
-            "Project types to analyze",
+            "Project types to include in analysis",
             options=all_types,
             default=all_types,
             key=f"equity_proj_types_ph_{filter_timestamp}",
-            help="Which project types to include"
+            help="Only exits from these project types will be counted"
         )
         return_window = 730  # Not used for PH exits
 
@@ -783,9 +781,9 @@ def render_equity_analysis(df_filt: DataFrame, full_df: Optional[DataFrame] = No
         pop_filter_fn = returns_pop_filter
         outcome_name = f"Returns Within {return_window} Days"
 
-    # Create cache key
+    # Create cache key with outcome_label to ensure proper cache invalidation
     key = (
-        f"{equity_label}|{outcome_name}|min{min_pop}|"
+        f"{equity_label}|{outcome_label}|{outcome_name}|min{min_pop}|"
         f"{t0.date()}–{t1.date()}|"
         + (f"rw{return_window}|" if "Returns" in outcome_label else "")
         + f"subdim:{','.join(sorted(map(str, subdimension_selected)))}|"
@@ -906,7 +904,7 @@ def render_equity_analysis(df_filt: DataFrame, full_df: Optional[DataFrame] = No
             elif min_rate == 0:
                 # Groups with 0% get DI = 1.0, others scaled down
                 chart_df["disparity_index"] = chart_df["outcome_rate"].apply(
-                    lambda x: 1.0 - (x / max_rate) if max_rate > 0 else 1.0
+                    lambda x: 1.0 if x == 0 else 1.0 - (x / max_rate)
                 )
             else:
                 # Normal case
@@ -1276,15 +1274,27 @@ def render_equity_analysis(df_filt: DataFrame, full_df: Optional[DataFrame] = No
         )
         st.html(findings_html)
         
-        # Significant disparities section
-        sig_disparities = chart_df[(chart_df["p_value"] < 0.05) & (chart_df["disparity_index"] < 0.8)]
+        # CORRECTED: Significant disparities section - exclude best performers (DI = 1.0)
+        sig_disparities = chart_df[
+            (chart_df["p_value"] < 0.05) & 
+            (chart_df["disparity_index"] < 1.0)  # Exclude best performers
+        ]
+        large_disparities = chart_df[chart_df["disparity_index"] < 0.8]
+        sig_and_large = chart_df[
+            (chart_df["p_value"] < 0.05) & 
+            (chart_df["disparity_index"] < 0.8)
+        ]
+
         if not sig_disparities.empty:
             sig_html = f"""
             <div style="background-color: rgba(255,99,71,0.1); border: 1px solid {SECONDARY_COLOR}; 
                         border-radius: 10px; padding: 20px; margin: 20px 0;">
                 <h4 style="color: {SECONDARY_COLOR}; margin: 0 0 15px 0;">
-                    ⚠️ Groups with Significant Disparities
+                    ⚠️ Statistically Significant Disparities Found
                 </h4>
+                <p style="margin-bottom: 15px;">
+                    {len(sig_disparities)} group{"s" if len(sig_disparities) > 1 else ""} show{"" if len(sig_disparities) > 1 else "s"} statistically significant differences from the best performer.
+                </p>
             """
             
             for _, row in sig_disparities.iterrows():
@@ -1314,12 +1324,13 @@ def render_equity_analysis(df_filt: DataFrame, full_df: Optional[DataFrame] = No
             <div style="background-color: rgba(75,181,67,0.1); border: 1px solid {SUCCESS_COLOR}; 
                         border-radius: 10px; padding: 20px; margin: 20px 0;">
                 <h4 style="color: {SUCCESS_COLOR}; margin: 0;">
-                    ✅ No Severe Disparities Detected
+                    ✅ No Statistically Significant Disparities
                 </h4>
                 <p style="margin: 10px 0 0 0;">
-                    No groups show statistically significant disparities greater than 20% 
-                    from the best performing group.
+                    Statistical tests found no significant differences between groups. 
+                    Any observed differences could be due to random chance.
                 </p>
+                {f'<p style="margin: 10px 0 0 0; font-size: 14px;"><em>Note: {len(large_disparities)} group{"s" if len(large_disparities) > 1 else ""} show{"" if len(large_disparities) > 1 else "s"} gaps greater than 20% from the best performer, but these differences are not statistically significant.</em></p>' if not large_disparities.empty else ''}
             </div>
             """
             st.html(no_sig_html)

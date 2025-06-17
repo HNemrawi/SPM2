@@ -288,11 +288,18 @@ def ph_exit_clients(df: DataFrame, start: Timestamp, end: Timestamp) -> Set[int]
     set
         Set of ClientIDs
     """
-    _need(df, REQUIRED_BASE_COLS + ["ExitDestinationCat"])
-    mask = (df["ExitDestinationCat"] == "Permanent Housing Situations") & df[
-        "ProjectExit"
-    ].between(start, end)
-    return set(df.loc[mask, "ClientID"])
+    _need(df, ["ClientID", "ProjectExit", "ExitDestinationCat"])
+    
+    # Get PH exits during the period - using same mask construction as ph_exit_rate
+    ph_exits_mask = (
+        (df["ExitDestinationCat"] == "Permanent Housing Situations") & 
+        df["ProjectExit"].between(start, end)
+    )
+    
+    # Get unique client IDs, excluding any NaN values
+    client_ids = df.loc[ph_exits_mask, "ClientID"].dropna().unique()
+    
+    return set(client_ids)
 
 @st.cache_data(show_spinner=False)
 def ph_exit_rate(df: DataFrame, start: Timestamp, end: Timestamp) -> float:
@@ -546,6 +553,7 @@ def _check_return_to_homelessness(
             return True
     
     return False
+
 # ────────────────────────── Demographic Helpers ────────────────────────── #
 
 def category_counts(df: DataFrame, ids: Set[int], group_col: str, name: str) -> Series:

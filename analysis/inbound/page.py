@@ -6,7 +6,7 @@ Renders the inbound recidivism analysis interface and orchestrates the workflow.
 
 import streamlit as st
 import pandas as pd
-from datetime import datetime
+from datetime import datetime, date
 from typing import Dict, List, Optional, Tuple, Any
 
 from config.settings import DEFAULT_START_DATE, DEFAULT_END_DATE
@@ -30,21 +30,52 @@ from analysis.inbound.visualizations import (
 )
 
 
-def setup_date_config(df: pd.DataFrame) -> Tuple[pd.Timestamp, pd.Timestamp, int]:
+def setup_date_config(df: pd.DataFrame) -> Tuple[Optional[pd.Timestamp], Optional[pd.Timestamp], Optional[int]]:
     """Configure date parameters and lookback period."""
     with st.sidebar.expander("🗓️ Entry Date & Lookback", expanded=True):
+        # Set default values
+        default_start = datetime(2025, 1, 1)
+        default_end = datetime(2025, 1, 31)
+        
         try:
             date_range = st.date_input(
                 "Entry Date Range",
-                [datetime(2025, 1, 1), datetime(2025, 1, 31)],
+                [default_start, default_end],
                 help="Analysis period for new entries"
             )
             st.caption("📌 **Note:** The selected end date will be included in the analysis period.")
 
-            if len(date_range) != 2:
+            # Handle different return types from date_input
+            if date_range is None:
                 st.error("⚠️ Please select both dates")
                 return None, None, None
-            report_start, report_end = pd.to_datetime(date_range[0]), pd.to_datetime(date_range[1])
+            elif isinstance(date_range, (list, tuple)):
+                if len(date_range) == 2:
+                    # Both dates selected
+                    report_start = pd.to_datetime(date_range[0])
+                    report_end = pd.to_datetime(date_range[1])
+                elif len(date_range) == 1:
+                    # Only one date selected
+                    st.error("⚠️ Please select an end date")
+                    return None, None, None
+                else:
+                    # Empty list/tuple
+                    st.error("⚠️ Please select both dates")
+                    return None, None, None
+            elif isinstance(date_range, (datetime, date)):
+                # Single date object
+                st.error("⚠️ Please select an end date")
+                return None, None, None
+            else:
+                # Unexpected type
+                st.error("⚠️ Invalid date selection. Please select both dates")
+                return None, None, None
+            
+            # Ensure start is before end
+            if report_start > report_end:
+                st.error("⚠️ Start date must be before end date")
+                return None, None, None
+                
         except Exception as e:
             st.error(f"📅 Date Error: {str(e)}")
             return None, None, None

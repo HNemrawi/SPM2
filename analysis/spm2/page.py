@@ -6,7 +6,8 @@ Renders the SPM2 analysis interface and orchestrates the workflow.
 
 import streamlit as st
 import pandas as pd
-from datetime import datetime
+from datetime import datetime, date
+
 from typing import Dict, List, Optional, Tuple, Any
 
 from config.settings import DEFAULT_START_DATE, DEFAULT_END_DATE
@@ -33,13 +34,53 @@ from analysis.spm2.visualizations import (
 def setup_date_config(df: pd.DataFrame) -> Tuple[pd.Timestamp, pd.Timestamp, int, str, int]:
     """Configure date parameters for analysis."""
     with st.sidebar.expander("📅 Date Configuration", expanded=True):
+        # Set default values
+        default_start = datetime(2023, 10, 1)
+        default_end = datetime(2024, 9, 30)
+        
         date_range = st.date_input(
             "SPM Reporting Period",
-            [datetime(2023, 10, 1), datetime(2024, 9, 30)],
+            [default_start, default_end],
             help="Primary analysis window for SPM2 metrics"
         )
         st.caption("📌 **Note:** Primary analysis window for SPM2 metrics. The selected end date will be included in the analysis period.")
-        report_start, report_end = pd.to_datetime(date_range[0]), pd.to_datetime(date_range[1])
+        
+        # Handle different return types from date_input
+        if date_range is None:
+            # No dates selected
+            st.warning("Please select both start and end dates for the reporting period.")
+            report_start = pd.to_datetime(default_start)
+            report_end = pd.to_datetime(default_end)
+        elif isinstance(date_range, (list, tuple)):
+            if len(date_range) == 2:
+                # Both dates selected
+                report_start = pd.to_datetime(date_range[0])
+                report_end = pd.to_datetime(date_range[1])
+            elif len(date_range) == 1:
+                # Only one date selected
+                st.warning("Please select an end date for the reporting period.")
+                report_start = pd.to_datetime(date_range[0])
+                report_end = pd.to_datetime(date_range[0])
+            else:
+                # Empty list/tuple
+                st.warning("Please select both start and end dates for the reporting period.")
+                report_start = pd.to_datetime(default_start)
+                report_end = pd.to_datetime(default_end)
+        elif isinstance(date_range, (datetime, date)):
+            # Single date object (shouldn't happen with range input, but just in case)
+            st.warning("Please select an end date for the reporting period.")
+            report_start = report_end = pd.to_datetime(date_range)
+        else:
+            # Unexpected type
+            st.warning("Please select both start and end dates for the reporting period.")
+            report_start = pd.to_datetime(default_start)
+            report_end = pd.to_datetime(default_end)
+        
+        # Ensure start is before end
+        if report_start > report_end:
+            st.error("Start date must be before end date. Dates have been swapped.")
+            report_start, report_end = report_end, report_start
+        
         st.divider()
         unit_choice = st.radio(
             "Select Lookback Unit",

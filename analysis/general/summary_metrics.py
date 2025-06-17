@@ -300,11 +300,6 @@ def render_summary_metrics(df_filt: DataFrame, full_df: Optional[DataFrame] = No
                     - ✅ **Strong:** > 5%–≤ 10% returns to homelessness
                     - ⚠️ **Moderate:** > 10%–≤ 20% returns to homelessness
                     - 🚨 **High:** > 20% returns to homelessness
-
-                **Population Insights Classification:**
-                - **High Carryover (>70%):** Stable but potentially stuck population; consider enhanced interventions for chronic homelessness.
-                - **High New (>50%):** Growing need; focus on prevention and diversion strategies.
-                - **Balanced:** Mix of carryover and new indicates healthy flow with room for improvement.
                 
                 **Population Analysis:**
                 - **Households**: Count of heads of household only (not all family members)
@@ -315,6 +310,11 @@ def render_summary_metrics(df_filt: DataFrame, full_df: Optional[DataFrame] = No
                 **Time Comparisons:**
                 - Current vs previous period (can be same length or custom)
                 - Percentages show relative change from previous period
+                            
+                **Population Insights Classification:**
+                - **High Carryover (>70%):** Stable but potentially stuck population; consider enhanced interventions for chronic homelessness.
+                - **High New (>50%):** Growing need; focus on prevention and diversion strategies.
+                - **Balanced:** Mix of carryover and new indicates healthy flow with room for improvement.
                 
                 **Important Notes:**
                 - When filters are active, metrics reflect filtered programs only
@@ -336,10 +336,35 @@ def render_summary_metrics(df_filt: DataFrame, full_df: Optional[DataFrame] = No
         current_days = (t1 - t0).days + 1
         previous_days = (prev_end - prev_start).days + 1
 
-        # Compute metrics if cache is invalid
-        if not cache_valid:
+        # Add return window control before computing metrics
+        col1, col2 = st.columns([2, 2])
+
+        with col1:
+            # Return window input with persistent state
+            default_return_window = state.get("user_return_window", 180)
+            return_window = st.number_input(
+                "Return tracking window (days)",
+                min_value=30,
+                max_value=1095,  # 3 years max
+                value=default_return_window,
+                step=30,
+                help="Number of days after PH exit to track returns to homelessness"
+            )
+            
+            # Check if return window changed
+            if return_window != state.get("user_return_window", 180):
+                state["user_return_window"] = return_window
+                cache_valid = False  # Force recalculation if window changed
+
+        with col2:
+            # Info about return window
+            st.info(f"📅 Tracking returns for {return_window} days ({return_window/30:.1f} months) after PH exit")
+
+        # Compute metrics if cache is invalid or return window changed
+        if not cache_valid or state.get("last_return_window") != return_window:
             with st.spinner("Calculating key metrics..."):
-                return_window = 180  # Default return window in days
+                # Store the return window used for this calculation
+                state["last_return_window"] = return_window
                 
                 # Calculate all metrics using the cached function
                 metrics = _get_summary_metrics(
@@ -356,7 +381,8 @@ def render_summary_metrics(df_filt: DataFrame, full_df: Optional[DataFrame] = No
         ph_ids = state.get("ph_ids", set())
         ph_exits_in_period = state.get("ph_exits_in_period", set())
         return_ids = state.get("return_ids", set())
-        return_window = state.get("return_window", 180)
+        # Use the user-defined return window
+        return_window = state.get("user_return_window", 180)
 
         served_prev = state.get("served_prev", set())
         inflow_prev = state.get("inflow_prev", set())
@@ -438,9 +464,7 @@ def render_summary_metrics(df_filt: DataFrame, full_df: Optional[DataFrame] = No
         """
         st.html(period_context_html)
         
-        # Prepare display in rows of metrics
-        st.markdown("### 📈 Key Performance Indicators")
-        
+        # Prepare display in rows of metrics        
         row1_cols = st.columns(3)
         row2_cols = st.columns(3)
         row3_cols = st.columns(3)

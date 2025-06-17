@@ -48,9 +48,9 @@ TREND_SECTION_KEY = "trend_explorer"
 
 # Define metric colors with meaningful associations
 METRIC_COLORS = {
-    "Active Clients": MAIN_COLOR,  # Neutral blue
-    "Inflow": MAIN_COLOR,          # Neutral blue
-    "Outflow": MAIN_COLOR,         # Neutral blue
+    "Active Clients": "#F3F4F6",  # Near white (brightest)
+    "Inflow": "#9CA3AF",          # Medium-light gray
+    "Outflow": "#4B5563",         # Dark gray
     "PH Exits": SUCCESS_COLOR,     # Success green
 }
 
