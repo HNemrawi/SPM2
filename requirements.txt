@@ -17,3 +17,4 @@ joblib
 
 # Typing and development (optional but useful)
 typing-extensions
+chardet

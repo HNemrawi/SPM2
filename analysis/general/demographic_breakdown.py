@@ -1,5 +1,5 @@
 """
-Demographic breakdown section for HMIS dashboard - Improved Version
+Demographic breakdown section
 """
 
 import numpy as np
@@ -19,13 +19,19 @@ from analysis.general.filter_utils import (
     get_filter_timestamp, hash_data, init_section_state, is_cache_valid, invalidate_cache
 )
 from analysis.general.theme import (
-    CUSTOM_COLOR_SEQUENCE, MAIN_COLOR, PLOT_TEMPLATE, SECONDARY_COLOR, SUCCESS_COLOR,
-    WARNING_COLOR, NEUTRAL_COLOR, apply_chart_style, create_insight_container, 
-    fmt_int, fmt_pct, blue_divider
+    CUSTOM_COLOR_SEQUENCE, PLOT_TEMPLATE, WARNING_COLOR, fmt_int, blue_divider
 )
 
-# Constants
+from core.ph_destinations import apply_custom_ph_destinations
+
+# ==============================================================================
+# CONSTANTS
+# ==============================================================================
 BREAKDOWN_SECTION_KEY = "demographic_breakdown"
+
+# ==============================================================================
+# DATA CALCULATION FUNCTIONS
+# ==============================================================================
 
 def _calculate_breakdown_data(
     df_filt: DataFrame, 
@@ -58,6 +64,10 @@ def _calculate_breakdown_data(
     DataFrame
         DataFrame with breakdown metrics
     """
+    # Apply custom PH destinations to both dataframes
+    df_filt = apply_custom_ph_destinations(df_filt, force=True)
+    full_df = apply_custom_ph_destinations(full_df, force=True)
+    
     # Get client sets for different metrics
     served_ids = served_clients(df_filt, t0, t1)
     inflow_ids = inflow(df_filt, t0, t1)
@@ -82,7 +92,7 @@ def _calculate_breakdown_data(
     
     # Validate returns are subset of PH exits
     if not return_ids.issubset(ph_exits_ids):
-        print(f"WARNING: {len(return_ids - ph_exits_ids)} returns not in PH exits set")
+        # WARNING: Some returns may not be in PH exits set
         return_ids = return_ids.intersection(ph_exits_ids)
     
     # Calculate counts by demographic dimension - ensuring unique clients
@@ -130,12 +140,12 @@ def _calculate_breakdown_data(
     
     # Get counts by group
     ph_counts = (
-        ph_demo.groupby(dim_col)["ClientID"]
+        ph_demo.groupby(dim_col, observed=True)["ClientID"]
         .nunique()
         .reset_index(name="PH Exit Count")
     )
     ret_counts = (
-        ret_demo.groupby(dim_col)["ClientID"]
+        ret_demo.groupby(dim_col, observed=True)["ClientID"]
         .nunique()
         .reset_index(name="Returns Count")
     )
@@ -171,6 +181,10 @@ def _calculate_breakdown_data(
             bdf[col] = bdf[col].astype(int)
     
     return bdf
+
+# ==============================================================================
+# VISUALIZATION FUNCTIONS - Count and Flow Charts
+# ==============================================================================
 
 def _create_counts_chart(df: DataFrame, dim_col: str) -> go.Figure:
     """
@@ -225,9 +239,10 @@ def _create_counts_chart(df: DataFrame, dim_col: str) -> go.Figure:
                 y=1.02,
                 xanchor="center",
                 x=0.5,
-                bgcolor="rgba(0,0,0,0.5)",
-                bordercolor="white",
-                borderwidth=1
+                bgcolor="rgba(255, 255, 255, 0.1)",
+                bordercolor="rgba(128, 128, 128, 0.3)",
+                borderwidth=1,
+                font=dict(size=11)
             ),
             margin=dict(
                 l=left_margin,
@@ -237,19 +252,28 @@ def _create_counts_chart(df: DataFrame, dim_col: str) -> go.Figure:
             ),
             height=chart_height,
             bargap=0.2,
-            bargroupgap=0.1
+            bargroupgap=0.1,
+            paper_bgcolor="rgba(0, 0, 0, 0)",
+            plot_bgcolor="rgba(0, 0, 0, 0)",
+            title=dict(
+                font=dict(size=16)
+            )
         )
         
         fig.update_xaxes(
             title="Count",
-            automargin=True
+            automargin=True,
+            gridcolor="rgba(128, 128, 128, 0.2)",
+            title_font=dict(size=14),
+            tickfont=dict(size=12)
         )
         
         fig.update_yaxes(
             title="",
             automargin=True,
             tickmode='linear',
-            dtick=1
+            dtick=1,
+            tickfont=dict(size=11)
         )
         
     else:
@@ -343,9 +367,10 @@ def _create_counts_chart(df: DataFrame, dim_col: str) -> go.Figure:
                 y=1.02,
                 xanchor="center",
                 x=0.5,
-                bgcolor="rgba(0,0,0,0.5)",
-                bordercolor="white",
-                borderwidth=1
+                bgcolor="rgba(255, 255, 255, 0.1)",
+                bordercolor="rgba(128, 128, 128, 0.3)",
+                borderwidth=1,
+                font=dict(size=11)
             ),
             margin=dict(
                 l=80,
@@ -367,11 +392,128 @@ def _create_counts_chart(df: DataFrame, dim_col: str) -> go.Figure:
             yaxis=dict(
                 title_standoff=20,
                 automargin=True,
-                rangemode="tozero"
+                rangemode="tozero",
+                gridcolor="rgba(128, 128, 128, 0.2)",
+                title_font=dict(size=14),
+                tickfont=dict(size=12)
+            ),
+            paper_bgcolor="rgba(0, 0, 0, 0)",
+            plot_bgcolor="rgba(0, 0, 0, 0)",
+            title=dict(
+                font=dict(size=16)
             )
         )
     
     return fig
+
+def _create_flow_balance_chart(df: DataFrame, dim_col: str) -> go.Figure:
+    """
+    Create a chart showing net flow (inflow - outflow) by demographic.
+    """
+    # Sort by net flow for visual impact
+    flow_df = df.sort_values("Net Flow", ascending=True)
+    
+    # Color bars based on positive/negative with gradient
+    colors = []
+    max_abs_flow = flow_df["Net Flow"].abs().max() if flow_df["Net Flow"].abs().max() > 0 else 1
+    
+    for x in flow_df["Net Flow"]:
+        if x >= 0:
+            # Green gradient for positive
+            intensity = min(abs(x) / max_abs_flow, 1)
+            colors.append(f'rgba(34, 139, 34, {0.4 + intensity * 0.6})')
+        else:
+            # Red gradient for negative
+            intensity = min(abs(x) / max_abs_flow, 1)
+            colors.append(f'rgba(220, 38, 38, {0.4 + intensity * 0.6})')
+    
+    # Create horizontal bar chart for better label visibility
+    fig = go.Figure()
+    
+    fig.add_trace(go.Bar(
+        x=flow_df["Net Flow"],
+        y=flow_df[dim_col],
+        orientation='h',
+        marker=dict(
+            color=colors,
+            line=dict(color='rgba(255, 255, 255, 0.8)', width=1)
+        ),
+        text=flow_df["Net Flow"].apply(lambda x: f"{x:+,.0f}"),
+        textposition='outside',
+        textfont=dict(size=11),
+        hovertemplate='<b>%{y}</b><br>Net Flow: %{x:+,}<br>Inflow: %{customdata[0]:,}<br>Outflow: %{customdata[1]:,}<extra></extra>',
+        customdata=np.column_stack((flow_df["Inflow"], flow_df["Outflow"]))
+    ))
+    
+    # Calculate height
+    num_groups = len(flow_df)
+    chart_height = max(400, min(800, 350 + (num_groups * 30)))
+    
+    # Update layout with better styling
+    fig.update_layout(
+        title={
+            'text': "System Flow Balance by Group",
+            'x': 0.5,
+            'xanchor': 'center',
+            'font': dict(size=16)
+        },
+        template=PLOT_TEMPLATE,
+        height=chart_height,
+        showlegend=False,
+        xaxis=dict(
+            title="Net Flow (Inflow - Outflow)",
+            zeroline=True,
+            zerolinewidth=2,
+            zerolinecolor='rgba(128, 128, 128, 0.3)',
+            gridcolor='rgba(128, 128, 128, 0.1)',
+            automargin=True,
+            title_font=dict(size=14),
+            tickfont=dict(size=12)
+        ),
+        yaxis=dict(
+            automargin=True,
+            title="",
+            tickfont=dict(size=11)
+        ),
+        margin=dict(
+            l=max(150, 50 + (flow_df[dim_col].astype(str).str.len().max() * 8)),
+            r=80,
+            t=80,
+            b=80
+        ),
+        paper_bgcolor="rgba(0, 0, 0, 0)",
+        plot_bgcolor="rgba(0, 0, 0, 0.02)"
+    )
+    
+    # Add annotation for context with improved styling
+    total_net = flow_df["Net Flow"].sum()
+    annotation_color = 'rgba(34, 139, 34, 0.8)' if total_net >= 0 else 'rgba(220, 38, 38, 0.8)'
+    
+    fig.add_annotation(
+        text=f"<b>Total System Net Flow: {total_net:+,}</b>",
+        xref="paper", yref="paper",
+        x=0.5, y=1.05,
+        showarrow=False,
+        font=dict(size=14, color=annotation_color),
+        bgcolor="rgba(255, 255, 255, 0.9)",
+        bordercolor=annotation_color,
+        borderwidth=2,
+        borderpad=8
+    )
+    
+    # Add subtle reference line at zero
+    fig.add_vline(
+        x=0,
+        line_color="rgba(128, 128, 128, 0.5)",
+        line_width=1,
+        line_dash="dot"
+    )
+    
+    return fig
+
+# ==============================================================================
+# VISUALIZATION FUNCTIONS - Rate Charts
+# ==============================================================================
 
 def _create_rates_charts(
     df: pd.DataFrame, dim_col: str, return_window: int
@@ -610,6 +752,10 @@ def _create_rates_charts(
 
     return fig_ph, fig_ret
 
+# ==============================================================================
+# VISUALIZATION FUNCTIONS - Quadrant Charts
+# ==============================================================================
+
 def _create_outcome_quadrant_chart(df: DataFrame, dim_col: str) -> go.Figure:
     """
     Create outcome quadrant chart comparing PH exits and returns with improved layout.
@@ -634,15 +780,19 @@ def _create_outcome_quadrant_chart(df: DataFrame, dim_col: str) -> go.Figure:
         fig = go.Figure()
         fig.update_layout(
             title="PH Exit vs Return Rate: Not enough data",
+            template=PLOT_TEMPLATE,
             annotations=[{
                 "text": "Insufficient data for comparison",
                 "xref": "paper",
                 "yref": "paper",
                 "x": 0.5,
                 "y": 0.5,
-                "showarrow": False
+                "showarrow": False,
+                "font": dict(size=14, color="rgba(128, 128, 128, 0.8)")
             }],
-            height=600
+            height=600,
+            paper_bgcolor="rgba(0, 0, 0, 0)",
+            plot_bgcolor="rgba(0, 0, 0, 0)"
         )
         return fig
     
@@ -650,65 +800,221 @@ def _create_outcome_quadrant_chart(df: DataFrame, dim_col: str) -> go.Figure:
     avg_exit_rate = comparison_df["PH Exit Rate"].mean()
     avg_return_rate = comparison_df["Returns to Homelessness Rate"].mean()
     
-    # Create scatter plot
-    fig = px.scatter(
-        comparison_df,
-        x="PH Exit Rate",
-        y="Returns to Homelessness Rate",
-        size="Served",
-        color=dim_col,
-        hover_name=dim_col,
-        template=PLOT_TEMPLATE,
-        title="Success Quadrant: High PH Exits & Low Returns",
-        labels={
-            "PH Exit Rate": "Permanent Housing Exit Rate (%)",
-            "Returns to Homelessness Rate": "Returns to Homelessness Rate (%)",
-        },
-        hover_data=["Served", "PH Exits", "Returns Count"],
+    # Normalize bubble sizes for better visibility
+    min_served = comparison_df["Served"].min()
+    max_served = comparison_df["Served"].max()
+    size_range = max_served - min_served if max_served > min_served else 1
+    
+    # Create normalized sizes (15-70 range for better visibility)
+    comparison_df["normalized_size"] = 15 + ((comparison_df["Served"] - min_served) / size_range) * 55
+    
+    # Create more distinct color palette for groups
+    n_groups = len(comparison_df[dim_col].unique())
+    
+    # Define a more distinct color palette with good contrast in both themes
+    distinct_colors = [
+        '#FF6B6B',  # Bright red
+        '#4ECDC4',  # Turquoise
+        '#45B7D1',  # Sky blue
+        '#96CEB4',  # Mint green
+        '#DDA0DD',  # Plum
+        '#FFA07A',  # Light salmon
+        '#98D8C8',  # Seafoam
+        '#F7DC6F',  # Light yellow
+        '#BB8FCE',  # Light purple
+        '#85C1E2',  # Light blue
+        '#F8B739',  # Golden yellow
+        '#52BE80',  # Medium green
+        '#EC7063',  # Soft red
+        '#5DADE2',  # Bright blue
+        '#45B39D',  # Teal
+        '#F5B041',  # Orange
+        '#AF7AC5',  # Purple
+        '#48C9B0',  # Turquoise green
+        '#F1948A',  # Coral
+        '#85929E',  # Blue gray
+    ]
+    
+    # Use custom colors if available, otherwise generate from color scale
+    if n_groups <= len(distinct_colors):
+        colors = distinct_colors[:n_groups]
+    else:
+        # Generate additional colors using HSL color space for maximum distinction
+        import colorsys
+        colors = []
+        for i in range(n_groups):
+            hue = i / n_groups
+            # Use varying saturation and lightness for more distinction
+            saturation = 0.7 + (0.3 * (i % 3) / 2)
+            lightness = 0.5 + (0.2 * (i % 5) / 4)
+            rgb = colorsys.hls_to_rgb(hue, lightness, saturation)
+            hex_color = '#{:02x}{:02x}{:02x}'.format(
+                int(rgb[0] * 255),
+                int(rgb[1] * 255),
+                int(rgb[2] * 255)
+            )
+            colors.append(hex_color)
+    
+    # Create scatter plot with improved styling
+    fig = go.Figure()
+    
+    # Sort groups for consistent color assignment
+    sorted_groups = sorted(comparison_df[dim_col].unique())
+    color_map = dict(zip(sorted_groups, colors))
+    
+    # Add scatter points
+    for group_name in sorted_groups:
+        group_data = comparison_df[comparison_df[dim_col] == group_name]
+        
+        fig.add_trace(go.Scatter(
+            x=group_data["PH Exit Rate"],
+            y=group_data["Returns to Homelessness Rate"],
+            mode='markers',
+            name=str(group_name),
+            marker=dict(
+                size=group_data["normalized_size"],
+                color=color_map[group_name],
+                line=dict(width=2, color='rgba(255, 255, 255, 0.5)'),
+                opacity=0.9
+            ),
+            text=[f"<b>{group_name}</b><br>" +
+                  f"PH Exit Rate: {row['PH Exit Rate']:.1f}%<br>" +
+                  f"Return Rate: {row['Returns to Homelessness Rate']:.1f}%<br>" +
+                  f"Served: {row['Served']:,}<br>" +
+                  f"PH Exits: {row['PH Exits']:,}<br>" +
+                  f"Returns: {row['Returns Count']:,}"
+                  for _, row in group_data.iterrows()],
+            hovertemplate="%{text}<extra></extra>",
+            hoverlabel=dict(
+                bgcolor="white",
+                bordercolor=color_map[group_name],
+                font=dict(color="black", size=12)
+            )
+        ))
+    
+    # Add shaded quadrant backgrounds
+    x_min = max(0, comparison_df["PH Exit Rate"].min() - 5)
+    x_max = min(100, comparison_df["PH Exit Rate"].max() + 5)
+    y_min = max(0, comparison_df["Returns to Homelessness Rate"].min() - 2)
+    y_max = min(100, comparison_df["Returns to Homelessness Rate"].max() + 5)
+    
+    # Add subtle background shading for quadrants
+    # Bottom-right (ideal) - green tint
+    fig.add_shape(
+        type="rect",
+        x0=avg_exit_rate, x1=x_max,
+        y0=y_min, y1=avg_return_rate,
+        fillcolor="rgba(76, 175, 80, 0.08)",
+        line=dict(width=0),
+        layer="below"
     )
     
-    # Add quadrant lines
+    # Top-left (concern) - red tint
+    fig.add_shape(
+        type="rect",
+        x0=x_min, x1=avg_exit_rate,
+        y0=avg_return_rate, y1=y_max,
+        fillcolor="rgba(244, 67, 54, 0.08)",
+        line=dict(width=0),
+        layer="below"
+    )
+    
+    # Add quadrant divider lines with better styling
     fig.add_shape(
         type="line",
         x0=avg_exit_rate, x1=avg_exit_rate,
-        y0=comparison_df["Returns to Homelessness Rate"].min() - 5,
-        y1=comparison_df["Returns to Homelessness Rate"].max() + 5,
-        line=dict(color="white", dash="dash", width=2),
+        y0=y_min, y1=y_max,
+        line=dict(color="rgba(128, 128, 128, 0.4)", dash="dot", width=2),
+        layer="below"
     )
     fig.add_shape(
         type="line",
-        x0=comparison_df["PH Exit Rate"].min() - 5,
-        x1=comparison_df["PH Exit Rate"].max() + 5,
+        x0=x_min, x1=x_max,
         y0=avg_return_rate, y1=avg_return_rate,
-        line=dict(color="white", dash="dash", width=2),
+        line=dict(color="rgba(128, 128, 128, 0.4)", dash="dot", width=2),
+        layer="below"
     )
     
-    # Calculate positions for quadrant annotations to avoid overlap
-    x_range = comparison_df["PH Exit Rate"].max() - comparison_df["PH Exit Rate"].min()
-    y_range = comparison_df["Returns to Homelessness Rate"].max() - comparison_df["Returns to Homelessness Rate"].min()
+    # Add quadrant labels with improved styling
+    quadrant_font = dict(size=11, family="system-ui, -apple-system, sans-serif")
     
-    # Add quadrant annotations with better positioning
+    # Ideal quadrant (bottom-right)
     fig.add_annotation(
-        x=comparison_df["PH Exit Rate"].max() - (x_range * 0.15),
-        y=comparison_df["Returns to Homelessness Rate"].min() + (y_range * 0.1),
-        text="🏆 Ideal:<br>High Exits, Low Returns",
+        x=x_max - (x_max - avg_exit_rate) * 0.15,
+        y=y_min + (avg_return_rate - y_min) * 0.15,
+        text="<b>IDEAL ZONE</b><br>High PH Exits<br>Low Returns",
         showarrow=False,
-        font=dict(size=12, color="green"),
-        bgcolor="rgba(0,0,0,0.7)",
-        bordercolor="green",
-        borderwidth=1,
+        font=dict(**quadrant_font, color="#2E7D32"),
+        bgcolor="rgba(76, 175, 80, 0.15)",
+        bordercolor="#4CAF50",
+        borderwidth=2,
+        borderpad=10,
         align="center"
     )
+    
+    # Concern quadrant (top-left)
     fig.add_annotation(
-        x=comparison_df["PH Exit Rate"].min() + (x_range * 0.15),
-        y=comparison_df["Returns to Homelessness Rate"].max() - (y_range * 0.1),
-        text="⚠️ Concern:<br>Low Exits, High Returns",
+        x=x_min + (avg_exit_rate - x_min) * 0.15,
+        y=y_max - (y_max - avg_return_rate) * 0.15,
+        text="<b>CONCERN ZONE</b><br>Low PH Exits<br>High Returns",
         showarrow=False,
-        font=dict(size=12, color="red"),
-        bgcolor="rgba(0,0,0,0.7)",
-        bordercolor="red",
-        borderwidth=1,
+        font=dict(**quadrant_font, color="#C62828"),
+        bgcolor="rgba(244, 67, 54, 0.15)",
+        bordercolor="#F44336",
+        borderwidth=2,
+        borderpad=10,
         align="center"
+    )
+    
+    # Mixed quadrants labels (smaller, more subtle)
+    # Top-right
+    fig.add_annotation(
+        x=x_max - (x_max - avg_exit_rate) * 0.15,
+        y=y_max - (y_max - avg_return_rate) * 0.15,
+        text="High Exits<br>High Returns",
+        showarrow=False,
+        font=dict(size=10, color="rgba(128, 128, 128, 0.7)"),
+        bgcolor="rgba(158, 158, 158, 0.1)",
+        bordercolor="rgba(128, 128, 128, 0.5)",
+        borderwidth=1,
+        borderpad=6,
+        align="center",
+        opacity=0.8
+    )
+    
+    # Bottom-left
+    fig.add_annotation(
+        x=x_min + (avg_exit_rate - x_min) * 0.15,
+        y=y_min + (avg_return_rate - y_min) * 0.15,
+        text="Low Exits<br>Low Returns",
+        showarrow=False,
+        font=dict(size=10, color="rgba(128, 128, 128, 0.7)"),
+        bgcolor="rgba(158, 158, 158, 0.1)",
+        bordercolor="rgba(128, 128, 128, 0.5)",
+        borderwidth=1,
+        borderpad=6,
+        align="center",
+        opacity=0.8
+    )
+    
+    # Add average lines annotations
+    fig.add_annotation(
+        x=avg_exit_rate,
+        y=y_max,
+        text=f"Avg: {avg_exit_rate:.1f}%",
+        showarrow=False,
+        font=dict(size=10, color="rgba(128, 128, 128, 0.6)"),
+        yshift=10
+    )
+    
+    fig.add_annotation(
+        x=x_max,
+        y=avg_return_rate,
+        text=f"Avg: {avg_return_rate:.1f}%",
+        showarrow=False,
+        font=dict(size=10, color="rgba(128, 128, 128, 0.6)"),
+        xshift=10,
+        textangle=-90
     )
     
     # Highlight best-performing group
@@ -721,132 +1027,102 @@ def _create_outcome_quadrant_chart(df: DataFrame, dim_col: str) -> go.Figure:
         best_group = best_groups.iloc[0]
         best_label = best_group[dim_col]
         
-        # Position annotation to avoid overlap
-        fig.add_annotation(
-            x=best_group["PH Exit Rate"],
-            y=best_group["Returns to Homelessness Rate"],
-            text=f"🌟 Best:<br>{best_label}",
-            showarrow=True,
-            arrowhead=2,
-            ax=40,
-            ay=-40,
-            bgcolor="gold",
-            font=dict(color="black", size=11),
-            align="center"
-        )
+        # Add star marker for best performer
+        fig.add_trace(go.Scatter(
+            x=[best_group["PH Exit Rate"]],
+            y=[best_group["Returns to Homelessness Rate"]],
+            mode='markers',
+            marker=dict(
+                symbol='star',
+                size=25,
+                color='#FFD700',
+                line=dict(width=2, color='#FFA500')
+            ),
+            name='Best Performer',
+            showlegend=False,
+            hoverinfo='skip'
+        ))
     
-    # Update layout with better margins and dynamic height
-    num_groups = len(comparison_df)
-    chart_height = max(700, min(900, 650 + (num_groups * 5)))
-    
+    # Update layout with modern styling
     fig.update_layout(
+        title={
+            'text': "Performance Matrix: PH Exit Rate vs Returns to Homelessness",
+            'x': 0.5,
+            'xanchor': 'center',
+            'font': dict(size=16)
+        },
+        template=PLOT_TEMPLATE,
+        xaxis=dict(
+            title="Permanent Housing Exit Rate (%)",
+            range=[x_min, x_max],
+            gridcolor="rgba(128, 128, 128, 0.2)",
+            gridwidth=0.5,
+            griddash='dot',
+            zeroline=False,
+            title_font=dict(size=14),
+            tickfont=dict(size=12),
+            showgrid=True,
+            layer="below traces"
+        ),
+        yaxis=dict(
+            title="Returns to Homelessness Rate (%)",
+            range=[y_min, y_max],
+            gridcolor="rgba(128, 128, 128, 0.2)",
+            gridwidth=0.5,
+            griddash='dot',
+            zeroline=False,
+            title_font=dict(size=14),
+            tickfont=dict(size=12),
+            showgrid=True,
+            layer="below traces"
+        ),
         legend=dict(
             orientation="v",
             yanchor="middle",
             y=0.5,
             xanchor="left",
-            x=1.05,
-            bgcolor="rgba(0,0,0,0.5)",
-            bordercolor="white",
-            borderwidth=1
+            x=1.02,
+            bgcolor="rgba(255, 255, 255, 0.1)",
+            bordercolor="rgba(128, 128, 128, 0.3)",
+            borderwidth=1,
+            font=dict(size=11)
         ),
-        margin=dict(l=80, r=180, t=120, b=100),  # Generous margins
-        height=chart_height,
-        xaxis=dict(
-            title_standoff=25,
-            range=[
-                max(0, comparison_df["PH Exit Rate"].min() - 10),
-                min(100, comparison_df["PH Exit Rate"].max() + 10)
-            ],
-            automargin=True
-        ),
-        yaxis=dict(
-            title_standoff=25,
-            range=[
-                max(0, comparison_df["Returns to Homelessness Rate"].min() - 5),
-                min(100, comparison_df["Returns to Homelessness Rate"].max() + 5)
-            ],
-            automargin=True
+        margin=dict(l=80, r=200, t=100, b=80),
+        height=700,
+        paper_bgcolor="rgba(0, 0, 0, 0)",
+        plot_bgcolor="rgba(0, 0, 0, 0)",
+        hoverlabel=dict(
+            bgcolor="white",
+            bordercolor="black",
+            font=dict(color="black")
         )
+    )
+    
+    # Update grid opacity based on theme
+    fig.update_xaxes(gridcolor="rgba(128, 128, 128, 0.2)")
+    fig.update_yaxes(gridcolor="rgba(128, 128, 128, 0.2)")
+    
+    # Add a size legend
+    fig.add_annotation(
+        text="<b>Bubble Size</b><br>= Clients Served",
+        xref="paper", yref="paper",
+        x=1.02, y=-0.05,
+        showarrow=False,
+        font=dict(size=10, color="rgba(128, 128, 128, 0.6)"),
+        align="left"
     )
     
     return fig
 
-def _create_flow_balance_chart(df: DataFrame, dim_col: str) -> go.Figure:
-    """
-    Create a chart showing net flow (inflow - outflow) by demographic.
-    """
-    # Sort by net flow for visual impact
-    flow_df = df.sort_values("Net Flow", ascending=True)
-    
-    # Color bars based on positive/negative
-    colors = [SUCCESS_COLOR if x >= 0 else WARNING_COLOR for x in flow_df["Net Flow"]]
-    
-    # Create horizontal bar chart for better label visibility
-    fig = go.Figure()
-    
-    fig.add_trace(go.Bar(
-        x=flow_df["Net Flow"],
-        y=flow_df[dim_col],
-        orientation='h',
-        marker_color=colors,
-        text=flow_df["Net Flow"].apply(lambda x: f"{x:+,.0f}"),
-        textposition='outside',
-        textfont=dict(size=12, color="white"),
-        hovertemplate='<b>%{y}</b><br>Net Flow: %{x:+,}<br>Inflow: %{customdata[0]:,}<br>Outflow: %{customdata[1]:,}<extra></extra>',
-        customdata=np.column_stack((flow_df["Inflow"], flow_df["Outflow"]))
-    ))
-    
-    # Calculate height
-    num_groups = len(flow_df)
-    chart_height = max(400, min(800, 350 + (num_groups * 30)))
-    
-    # Update layout
-    fig.update_layout(
-        title="System Flow Balance by Group",
-        template=PLOT_TEMPLATE,
-        height=chart_height,
-        showlegend=False,
-        xaxis=dict(
-            title="Net Flow (Inflow - Outflow)",
-            zeroline=True,
-            zerolinewidth=2,
-            zerolinecolor='white',
-            automargin=True
-        ),
-        yaxis=dict(
-            automargin=True,
-            title=""
-        ),
-        margin=dict(
-            l=max(150, 50 + (flow_df[dim_col].astype(str).str.len().max() * 8)),
-            r=80,
-            t=80,
-            b=80
-        )
-    )
-    
-    # Add annotation for context
-    total_net = flow_df["Net Flow"].sum()
-    fig.add_annotation(
-        text=f"Total System Net Flow: {total_net:+,}",
-        xref="paper", yref="paper",
-        x=0.5, y=1.05,
-        showarrow=False,
-        font=dict(size=14, color="white", weight='bold'),
-        bgcolor="rgba(0,0,0,0.7)",
-        bordercolor="white",
-        borderwidth=1,
-        borderpad=4
-    )
-    
-    return fig
+# ==============================================================================
+# UTILITY FUNCTIONS
+# ==============================================================================
 
 def _create_empty_figure(message: str) -> go.Figure:
     """Create an empty figure with a message."""
     fig = go.Figure()
     fig.update_layout(
-        title=message,
+        title="",
         template=PLOT_TEMPLATE,
         height=400,
         annotations=[{
@@ -856,10 +1132,18 @@ def _create_empty_figure(message: str) -> go.Figure:
             "x": 0.5,
             "y": 0.5,
             "showarrow": False,
-            "font": {"size": 16, "color": "gray"}
-        }]
+            "font": {"size": 16, "color": "rgba(128, 128, 128, 0.8)"}
+        }],
+        paper_bgcolor="rgba(0, 0, 0, 0)",
+        plot_bgcolor="rgba(0, 0, 0, 0)",
+        xaxis=dict(visible=False),
+        yaxis=dict(visible=False)
     )
     return fig
+
+# ==============================================================================
+# MAIN RENDERING FUNCTION
+# ==============================================================================
 
 @st.fragment
 def render_breakdown_section(df_filt: DataFrame, full_df: Optional[DataFrame] = None) -> None:

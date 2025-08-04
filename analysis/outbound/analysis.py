@@ -158,12 +158,15 @@ def run_outbound_recidivism(
     exit_localcocs: Optional[List[str]] = None,
     exit_agencies: Optional[List[str]] = None,
     exit_programs: Optional[List[str]] = None,
+    exit_ssvf_rrh: Optional[List[str]] = None,
     return_cocs: Optional[List[str]] = None,
     return_localcocs: Optional[List[str]] = None,
     return_agencies: Optional[List[str]] = None,
     return_programs: Optional[List[str]] = None,
+    return_ssvf_rrh: Optional[List[str]] = None,
     allowed_continuum: Optional[List[str]] = None,
     allowed_exit_dest_cats: Optional[List[str]] = None,
+    allowed_exit_destinations: Optional[List[str]] = None,
     exiting_projects: Optional[List[str]] = None,
     return_projects: Optional[List[str]] = None,
 ) -> pd.DataFrame:
@@ -218,8 +221,10 @@ def run_outbound_recidivism(
         df_exit = _opt_filter(df_exit, "LocalCoCCode", exit_localcocs)
         df_exit = _opt_filter(df_exit, "AgencyName", exit_agencies)
         df_exit = _opt_filter(df_exit, "ProgramName", exit_programs)
+        df_exit = _opt_filter(df_exit, "SSVF_RRH", exit_ssvf_rrh)
         df_exit = _opt_filter(df_exit, "ProgramsContinuumProject", allowed_continuum)
         df_exit = _opt_filter(df_exit, "ExitDestinationCat", allowed_exit_dest_cats)
+        df_exit = _opt_filter(df_exit, "ExitDestination", allowed_exit_destinations)
 
         df_exit = (
             df_exit.dropna(subset=["ProjectExit"])
@@ -241,6 +246,7 @@ def run_outbound_recidivism(
         df_return = _opt_filter(df_return, "LocalCoCCode", return_localcocs)
         df_return = _opt_filter(df_return, "AgencyName", return_agencies)
         df_return = _opt_filter(df_return, "ProgramName", return_programs)
+        df_return = _opt_filter(df_return, "SSVF_RRH", return_ssvf_rrh)
         df_return = _opt_filter(df_return, "ProgramsContinuumProject", allowed_continuum)
         df_return = df_return.loc[df_return["ProjectTypeCode"].isin(return_projects)]
 

@@ -7,7 +7,6 @@ Renders the SPM2 analysis interface and orchestrates the workflow.
 import streamlit as st
 import pandas as pd
 from datetime import datetime, date
-
 from typing import Dict, List, Optional, Tuple, Any
 
 from config.settings import DEFAULT_START_DATE, DEFAULT_END_DATE
@@ -16,6 +15,16 @@ from ui.templates import ABOUT_SPM2_CONTENT, render_about_section
 from ui.components import render_dataframe_with_style, render_download_button
 from core.session import check_data_available, set_analysis_result, get_analysis_result
 from core.utils import create_multiselect_filter, check_date_range_validity
+
+# Import styling utilities
+from ui.styling import (
+    apply_custom_css, 
+    style_metric_cards, 
+    create_info_box,
+    create_styled_divider,
+    apply_chart_theme,
+    NeutralColors
+)
 
 from analysis.spm2.analysis import (
     run_spm2,
@@ -31,9 +40,13 @@ from analysis.spm2.visualizations import (
 )
 
 
+# ============================================================================
+# CONFIGURATION FUNCTIONS
+# ============================================================================
+
 def setup_date_config(df: pd.DataFrame) -> Tuple[pd.Timestamp, pd.Timestamp, int, str, int]:
     """Configure date parameters for analysis."""
-    with st.sidebar.expander("📅 Date Configuration", expanded=True):
+    with st.sidebar.expander("📅 **Date Configuration**", expanded=True):
         # Set default values
         default_start = datetime(2023, 10, 1)
         default_end = datetime(2024, 9, 30)
@@ -43,45 +56,45 @@ def setup_date_config(df: pd.DataFrame) -> Tuple[pd.Timestamp, pd.Timestamp, int
             [default_start, default_end],
             help="Primary analysis window for SPM2 metrics"
         )
-        st.caption("📌 **Note:** Primary analysis window for SPM2 metrics. The selected end date will be included in the analysis period.")
+        
+        # Info box for date selection
+        st.html(create_info_box(
+            "Primary analysis window for SPM2 metrics. The selected end date will be included in the analysis period.",
+            type="info"
+        ))
         
         # Handle different return types from date_input
         if date_range is None:
-            # No dates selected
-            st.warning("Please select both start and end dates for the reporting period.")
+            st.warning("⚠️ Please select both start and end dates for the reporting period.")
             report_start = pd.to_datetime(default_start)
             report_end = pd.to_datetime(default_end)
         elif isinstance(date_range, (list, tuple)):
             if len(date_range) == 2:
-                # Both dates selected
                 report_start = pd.to_datetime(date_range[0])
                 report_end = pd.to_datetime(date_range[1])
             elif len(date_range) == 1:
-                # Only one date selected
-                st.warning("Please select an end date for the reporting period.")
+                st.warning("⚠️ Please select an end date for the reporting period.")
                 report_start = pd.to_datetime(date_range[0])
                 report_end = pd.to_datetime(date_range[0])
             else:
-                # Empty list/tuple
-                st.warning("Please select both start and end dates for the reporting period.")
+                st.warning("⚠️ Please select both start and end dates for the reporting period.")
                 report_start = pd.to_datetime(default_start)
                 report_end = pd.to_datetime(default_end)
         elif isinstance(date_range, (datetime, date)):
-            # Single date object (shouldn't happen with range input, but just in case)
-            st.warning("Please select an end date for the reporting period.")
+            st.warning("⚠️ Please select an end date for the reporting period.")
             report_start = report_end = pd.to_datetime(date_range)
         else:
-            # Unexpected type
-            st.warning("Please select both start and end dates for the reporting period.")
+            st.warning("⚠️ Please select both start and end dates for the reporting period.")
             report_start = pd.to_datetime(default_start)
             report_end = pd.to_datetime(default_end)
         
         # Ensure start is before end
         if report_start > report_end:
-            st.error("Start date must be before end date. Dates have been swapped.")
+            st.error("❌ Start date must be before end date. Dates have been swapped.")
             report_start, report_end = report_end, report_start
         
-        st.divider()
+        st.html(create_styled_divider())
+        
         unit_choice = st.radio(
             "Select Lookback Unit",
             options=["Days", "Months"],
@@ -107,8 +120,16 @@ def setup_date_config(df: pd.DataFrame) -> Tuple[pd.Timestamp, pd.Timestamp, int
             )
             exit_window_start = report_start - pd.DateOffset(months=lookback_value)
             exit_window_end = report_end - pd.DateOffset(months=lookback_value)
-        st.caption(f"Exit Window: {exit_window_start:%Y-%m-%d} to {exit_window_end:%Y-%m-%d}")
-        st.divider()
+        
+        # Display exit window with styled info box
+        st.html(create_info_box(
+            f"Exit Window: {exit_window_start:%Y-%m-%d} to {exit_window_end:%Y-%m-%d}",
+            type="info",
+            icon=""
+        ))
+        
+        st.html(create_styled_divider())
+        
         return_period = st.number_input(
             "Return Period (Days)",
             min_value=1,
@@ -133,7 +154,7 @@ def setup_date_config(df: pd.DataFrame) -> Tuple[pd.Timestamp, pd.Timestamp, int
 
 def setup_global_filters(df: pd.DataFrame) -> Optional[List[str]]:
     """Configure global filters for analysis."""
-    with st.sidebar.expander("⚡ Global Filters", expanded=True):
+    with st.sidebar.expander("⚡ **Global Filters**", expanded=True):
         allowed_continuum = None
         if "ProgramsContinuumProject" in df.columns:
             unique_continuum = sorted(df["ProgramsContinuumProject"].dropna().unique().tolist())
@@ -149,7 +170,7 @@ def setup_global_filters(df: pd.DataFrame) -> Optional[List[str]]:
 
 def setup_exit_filters(df: pd.DataFrame) -> Tuple[Optional[List[str]], ...]:
     """Configure exit-specific filters."""
-    with st.sidebar.expander("🚪 Exit Filters", expanded=True):
+    with st.sidebar.expander("🚪 **Exit Filters**", expanded=False):
         st.markdown("#### Exit Enrollment Criteria")
         
         exit_allowed_cocs = create_multiselect_filter(
@@ -180,6 +201,13 @@ def setup_exit_filters(df: pd.DataFrame) -> Tuple[Optional[List[str]], ...]:
             help_text="Programs for exit identification"
         )
         
+        exit_ssvf_rrh = create_multiselect_filter(
+            "SSVF RRH - Exit",
+            sorted(df["SSVF_RRH"].dropna().unique().tolist()) if "SSVF_RRH" in df.columns else [],
+            default=["ALL"],
+            help_text="SSVF RRH filter for exits"
+        )
+        
         all_project_types = sorted(df["ProjectTypeCode"].dropna().unique().tolist())
         default_projects = [p for p in DEFAULT_PROJECT_TYPES if p in all_project_types]
         exiting_projects = st.multiselect(
@@ -197,13 +225,22 @@ def setup_exit_filters(df: pd.DataFrame) -> Tuple[Optional[List[str]], ...]:
                 default=["Permanent Housing Situations"],
                 help="Limit exits to these destination categories",
             )
+        
+        allowed_exit_destinations = create_multiselect_filter(
+            "Exit Destinations",
+            sorted(df["ExitDestination"].dropna().unique().tolist()),
+            default=["ALL"],
+            help_text="Limit exits to these specific destinations"
+        )
     
-    return exit_allowed_cocs, exit_allowed_local_cocs, exit_allowed_agencies, exit_allowed_programs, exiting_projects, allowed_exit_dest_cats
+    return (exit_allowed_cocs, exit_allowed_local_cocs, exit_allowed_agencies, 
+            exit_allowed_programs, exiting_projects, allowed_exit_dest_cats,
+            exit_ssvf_rrh, allowed_exit_destinations)
 
 
 def setup_return_filters(df: pd.DataFrame) -> Tuple[Optional[List[str]], ...]:
     """Configure return-specific filters."""
-    with st.sidebar.expander("↩️ Return Filters", expanded=True):
+    with st.sidebar.expander("↩️ **Return Filters**", expanded=False):
         st.markdown("#### Return Enrollment Criteria")
         
         return_allowed_cocs = create_multiselect_filter(
@@ -234,6 +271,13 @@ def setup_return_filters(df: pd.DataFrame) -> Tuple[Optional[List[str]], ...]:
             help_text="Programs for return identification"
         )
         
+        return_ssvf_rrh = create_multiselect_filter(
+            "SSVF RRH - Return",
+            sorted(df["SSVF_RRH"].dropna().unique().tolist()) if "SSVF_RRH" in df.columns else [],
+            default=["ALL"],
+            help_text="SSVF RRH filter for returns"
+        )
+        
         all_project_types = sorted(df["ProjectTypeCode"].dropna().unique().tolist())
         default_projects = [p for p in DEFAULT_PROJECT_TYPES if p in all_project_types]
         return_projects = st.multiselect(
@@ -243,12 +287,12 @@ def setup_return_filters(df: pd.DataFrame) -> Tuple[Optional[List[str]], ...]:
             help="Project types treated as candidate returns",
         )
     
-    return return_allowed_cocs, return_allowed_local_cocs, return_allowed_agencies, return_allowed_programs, return_projects
-
+    return (return_allowed_cocs, return_allowed_local_cocs, return_allowed_agencies, 
+            return_allowed_programs, return_projects, return_ssvf_rrh)
 
 def setup_comparison_filters() -> bool:
     """Configure settings for PH vs. Non-PH comparisons."""
-    with st.sidebar.expander("PH vs. Non-PH", expanded=True):
+    with st.sidebar.expander("🏠 **PH vs. Non-PH**", expanded=True):
         compare_ph_others = st.checkbox(
             "Compare PH/Non-PH Exits",
             value=False,
@@ -258,80 +302,103 @@ def setup_comparison_filters() -> bool:
     return compare_ph_others
 
 
+# ============================================================================
+# ANALYSIS EXECUTION
+# ============================================================================
+
 def run_analysis(df: pd.DataFrame, analysis_params: Dict[str, Any]) -> bool:
     """Execute the SPM2 analysis with specified parameters."""
-    if st.button("▶️ Run SPM2 Analysis", type="primary", use_container_width=True):
-        with st.status("🔍 Processing...", expanded=True) as status:
-            try:
-                final_df = run_spm2(
-                    df,
-                    report_start=analysis_params["report_start"],
-                    report_end=analysis_params["report_end"],
-                    lookback_value=analysis_params["lookback_value"],
-                    lookback_unit=analysis_params["unit_choice"],
-                    exit_cocs=analysis_params["exit_allowed_cocs"],
-                    exit_localcocs=analysis_params["exit_allowed_local_cocs"],
-                    exit_agencies=analysis_params["exit_allowed_agencies"],
-                    exit_programs=analysis_params["exit_allowed_programs"],
-                    return_cocs=analysis_params["return_allowed_cocs"],
-                    return_localcocs=analysis_params["return_allowed_local_cocs"],
-                    return_agencies=analysis_params["return_allowed_agencies"],
-                    return_programs=analysis_params["return_allowed_programs"],
-                    allowed_continuum=analysis_params["allowed_continuum"],
-                    allowed_exit_dest_cats=analysis_params["allowed_exit_dest_cats"],
-                    exiting_projects=analysis_params["exiting_projects"],
-                    return_projects=analysis_params["return_projects"],
-                    return_period=analysis_params["return_period"]
-                )
-                # Clean up columns
-                cols_to_remove = [
-                    "Return_UniqueIdentifier",
-                    "Return_ClientID",
-                    "Return_RaceEthnicity",
-                    "Return_Gender",
-                    "Return_DOB",
-                    "Return_VeteranStatus",
-                    "Exit_ReportingPeriodStartDate",
-                    "Exit_ReportingPeriodEndDate",
-                    "Return_ReportingPeriodStartDate",
-                    "Return_ReportingPeriodEndDate"
-                ]
-                final_df.drop(columns=[c for c in cols_to_remove if c in final_df.columns], inplace=True)
+    col1, col2, col3 = st.columns([1, 2, 1])
+    with col2:
+        if st.button("▶️ Run SPM2 Analysis", type="primary", use_container_width=True):
+            with st.status("🔍 Processing SPM2 Analysis...", expanded=True) as status:
+                try:
+                    status.write("📊 Identifying exits from qualifying projects...")
+                    final_df = run_spm2(
+                        df,
+                        report_start=analysis_params["report_start"],
+                        report_end=analysis_params["report_end"],
+                        lookback_value=analysis_params["lookback_value"],
+                        lookback_unit=analysis_params["unit_choice"],
+                        exit_cocs=analysis_params["exit_allowed_cocs"],
+                        exit_localcocs=analysis_params["exit_allowed_local_cocs"],
+                        exit_agencies=analysis_params["exit_allowed_agencies"],
+                        exit_programs=analysis_params["exit_allowed_programs"],
+                        return_cocs=analysis_params["return_allowed_cocs"],
+                        return_localcocs=analysis_params["return_allowed_local_cocs"],
+                        return_agencies=analysis_params["return_allowed_agencies"],
+                        return_programs=analysis_params["return_allowed_programs"],
+                        allowed_continuum=analysis_params["allowed_continuum"],
+                        allowed_exit_dest_cats=analysis_params["allowed_exit_dest_cats"],
+                        exiting_projects=analysis_params["exiting_projects"],
+                        return_projects=analysis_params["return_projects"],
+                        return_period=analysis_params["return_period"],
+                        exit_ssvf_rrh=analysis_params["exit_ssvf_rrh"],
+                        return_ssvf_rrh=analysis_params["return_ssvf_rrh"],
+                        allowed_exit_destinations=analysis_params["allowed_exit_destinations"]
+                    )
+                    
+                    status.write("🔄 Matching returns to homelessness...")
+                    
+                    # Clean up columns
+                    cols_to_remove = [
+                        "Return_UniqueIdentifier", "Return_ClientID", "Return_RaceEthnicity",
+                        "Return_Gender", "Return_DOB", "Return_VeteranStatus",
+                        "Exit_ReportingPeriodStartDate", "Exit_ReportingPeriodEndDate",
+                        "Return_ReportingPeriodStartDate", "Return_ReportingPeriodEndDate"
+                    ]
+                    final_df.drop(columns=[c for c in cols_to_remove if c in final_df.columns], inplace=True)
 
-                # Rename flattened exit columns to simpler names
-                cols_to_rename = {
-                    "Exit_UniqueIdentifier": "UniqueIdentifier",
-                    "Exit_ClientID": "ClientID",
-                    "Exit_RaceEthnicity": "RaceEthnicity",
-                    "Exit_Gender": "Gender",
-                    "Exit_DOB": "DOB",
-                    "Exit_VeteranStatus": "VeteranStatus"
-                }
-                final_df.rename(columns={k: v for k, v in cols_to_rename.items() if k in final_df.columns}, inplace=True)
+                    # Rename flattened exit columns to simpler names
+                    cols_to_rename = {
+                        "Exit_UniqueIdentifier": "UniqueIdentifier",
+                        "Exit_ClientID": "ClientID",
+                        "Exit_RaceEthnicity": "RaceEthnicity",
+                        "Exit_Gender": "Gender",
+                        "Exit_DOB": "DOB",
+                        "Exit_VeteranStatus": "VeteranStatus"
+                    }
+                    final_df.rename(columns={k: v for k, v in cols_to_rename.items() if k in final_df.columns}, inplace=True)
+                    
+                    status.write("💾 Finalizing results...")
+                    
+                    # Store results in session state
+                    set_analysis_result("spm2", final_df)
+                    status.update(label="✅ SPM2 Analysis Complete!", state="complete", expanded=False)
+                    st.toast("🎉 SPM2 analysis successful!", icon="✅")
+                    
+                    return True
+                except Exception as e:
+                    st.error(f"🚨 Analysis Error: {str(e)}")
+                    return False
 
-                
-                # Store results in session state
-                set_analysis_result("spm2", final_df)
-                status.update(label="✅ Analysis Complete!", state="complete", expanded=False)
-                st.toast("SPM2 analysis successful!", icon="🎉")
-                
-                return True
-            except Exception as e:
-                st.error(f"🚨 Analysis Error: {str(e)}")
-                return False
 
+# ============================================================================
+# DISPLAY FUNCTIONS
+# ============================================================================
 
 def display_summary_metrics(
     final_df: pd.DataFrame,
     return_period: int,
     allowed_exit_dest_cats: Optional[List[str]] = None
 ) -> Dict[str, Any]:
-    st.divider()
+    """Display summary metrics with natural styling."""
+    st.html(create_styled_divider("gradient"))
     st.markdown("### 📊 Returns to Homelessness Summary")
 
-    # If only Permanent Housing Situations is selected, add the note
+    # Add context note if needed
     if allowed_exit_dest_cats == ["Permanent Housing Situations"]:
-        st.caption("📌 **Note:** only Permanent Housing Situations is selected in the Exit Destination Categories filter.")
+        st.html(create_info_box(
+            "Only Permanent Housing Situations is selected in the Exit Destination Categories filter.",
+            type="info",
+            icon="📌"
+        ))
+
+    # Apply metric card styling
+    style_metric_cards(
+        border_left_color=NeutralColors.PRIMARY,
+        box_shadow=True
+    )
 
     metrics = compute_summary_metrics(final_df, return_period)
     display_spm_metrics(metrics, return_period, show_total_exits=True)
@@ -340,58 +407,88 @@ def display_summary_metrics(
 
 def display_days_to_return(final_df: pd.DataFrame, return_period: int) -> None:
     """Display the days-to-return distribution visualization."""
-    st.divider()
+    st.html(create_styled_divider("gradient"))
     with st.container():
         st.markdown("### ⏳ Days to Return Distribution")
         try:
-            st.plotly_chart(plot_days_to_return_box(final_df, return_period), use_container_width=True)
+            fig = plot_days_to_return_box(final_df, return_period)
+            fig = apply_chart_theme(fig)
+            st.plotly_chart(fig, use_container_width=True)
         except Exception as e:
             st.error(f"📉 Visualization Error: {str(e)}")
+
 
 @st.fragment
 def display_breakdowns(final_df: pd.DataFrame, return_period: int) -> None:
     """Display cohort breakdown analysis."""
-    st.divider()
+    st.html(create_styled_divider("gradient"))
     with st.container():
-        st.markdown("### 📊 Breakdown")
+        st.markdown("### 📊 Breakdown Analysis")
+        
+        # Define available breakdown columns
         breakdown_columns = [
-            "RaceEthnicity",
-            "Gender",
+            # Client Demographics
+            "RaceEthnicity", 
+            "Gender", 
             "VeteranStatus",
-            "Exit_HasIncome",
-            "Exit_HasDisability",
+            "AgeAtExitRange",
+            
+            # Exit Characteristics
+            "Exit_HasIncome", 
+            "Exit_HasDisability", 
             "Exit_HouseholdType",
-            "Exit_CHStartHousehold",
-            "Exit_LocalCoCCode",
+            "Exit_IsHeadOfHousehold",
+            "Exit_CHStartHousehold", 
+            "Exit_CurrentlyFleeingDV",
             "Exit_PriorLivingCat",
-            "Exit_ProgramSetupCoC",
-            "Exit_ProjectTypeCode",
-            "Exit_AgencyName",
-            "Exit_ProgramName",
-            "Exit_ExitDestinationCat",
-            "Exit_ExitDestination",
-            "Exit_CustomProgramType",
             "Exit_AgeTieratEntry",
-            "Return_HasIncome",
-            "Return_HasDisability",
+            
+            # Exit Program Information
+            "Exit_LocalCoCCode", 
+            "Exit_ProgramSetupCoC", 
+            "Exit_ProjectTypeCode", 
+            "Exit_AgencyName",
+            "Exit_ProgramName", 
+            "Exit_SSVF_RRH",
+            "Exit_ProgramsContinuumProject",
+            "Exit_CustomProgramType",
+            
+            # Exit Destination
+            "Exit_ExitDestinationCat", 
+            "Exit_ExitDestination",
+            
+            # Return Characteristics
+            "Return_HasIncome", 
+            "Return_HasDisability", 
             "Return_HouseholdType",
-            "Return_CHStartHousehold",
-            "Return_LocalCoCCode",
+            "Return_IsHeadOfHousehold",
+            "Return_CHStartHousehold", 
+            "Return_CurrentlyFleeingDV",
             "Return_PriorLivingCat",
-            "Return_ProgramSetupCoC",
-            "Return_ProjectTypeCode",
+            
+            # Return Program Information
+            "Return_LocalCoCCode", 
+            "Return_ProgramSetupCoC", 
+            "Return_ProjectTypeCode", 
             "Return_AgencyName",
             "Return_ProgramName",
-            "Return_ExitDestinationCat",
+            "Return_SSVF_RRH",
+            "Return_ProgramsContinuumProject",
+            
+            # Return Destination (if they exit again)
+            "Return_ExitDestinationCat", 
             "Return_ExitDestination",
+            
+            # Analysis Categories
             "ReturnCategory",
-            "AgeAtExitRange",
+            "PH_Exit",  # Whether exit was to permanent housing
         ]
 
         # Build options from available columns
         breakdown_options = [col for col in breakdown_columns if col in final_df.columns]
         default_breakdown = ["Exit_CustomProgramType"] if "Exit_CustomProgramType" in breakdown_options else []
         
+        # UI layout with neutral card styling
         analysis_cols = st.columns([3, 1])
         with analysis_cols[0]:
             chosen_cols = st.multiselect(
@@ -414,21 +511,29 @@ def display_breakdowns(final_df: pd.DataFrame, return_period: int) -> None:
                 )
             except Exception as e:
                 st.error(f"📈 Breakdown Error: {str(e)}")
+        st.html('</div>')
+
 
 @st.fragment
 def display_client_flow(final_df: pd.DataFrame) -> None:
     """Display client journey flow visualization."""
-    st.divider()
+    st.html(create_styled_divider("gradient"))
     with st.container():
         st.markdown("### 🌊 Client Flow Analysis")
+        
         try:
             # Filter columns for exit and return dimensions
             exit_cols = [col for col in EXIT_COLUMNS if col in final_df.columns]
             return_cols = [col for col in RETURN_COLUMNS if col in final_df.columns]
             
             if exit_cols and return_cols:
-                # Dimension selectors
-                st.caption("📌 **Note:** Both the Exit and Entry Dimension filters apply to the entire flow section, including Client Flow Analysis, Top Client Pathways, and Client Flow Network.")
+                # Dimension selectors with info box
+                st.html(create_info_box(
+                    "Both the Exit and Entry Dimension filters apply to the entire flow section.",
+                    type="info",
+                    icon="📌"
+                ))
+                
                 flow_cols = st.columns(2)
                 with flow_cols[0]:
                     ex_choice = st.selectbox(
@@ -445,7 +550,7 @@ def display_client_flow(final_df: pd.DataFrame) -> None:
                         help="Characteristic at return point"
                     )
 
-                # Build pivot table (unfiltered for matrix and top pathways)
+                # Build pivot table
                 pivot_c = create_flow_pivot(final_df, ex_choice, ret_choice)
 
                 # Reorder columns to keep "No Return" last
@@ -454,23 +559,30 @@ def display_client_flow(final_df: pd.DataFrame) -> None:
                     pivot_c = pivot_c[cols_order]
 
                 columns_to_color = [col for col in pivot_c.columns if col != "No Return"]
-                with st.expander("🔍 Flow Matrix Details", expanded=True):
+                
+                # Flow Matrix with neutral styling
+                with st.expander("🔍 **Flow Matrix Details**", expanded=True):
                     render_dataframe_with_style(
                         pivot_c, 
                         highlight_cols=columns_to_color,
                         axis=1
                     )
 
-                # Top pathways (using unfiltered data)
+                # Top pathways section
+                st.html(create_styled_divider())
                 st.markdown("#### 🔝 Top Client Pathways")
-                top_n = st.slider(
-                    "Number of Pathways",
-                    min_value=5,
-                    max_value=25,
-                    value=5,
-                    step=1,
-                    help="Top N pathways to display"
-                )
+                
+                col1, col2 = st.columns([3, 1])
+                with col1:
+                    top_n = st.slider(
+                        "Number of Pathways",
+                        min_value=5,
+                        max_value=25,
+                        value=5,
+                        step=1,
+                        help="Top N pathways to display"
+                    )
+                
                 top_flows_df = get_top_flows_from_pivot(pivot_c, top_n=top_n)
                 if not top_flows_df.empty:
                     render_dataframe_with_style(
@@ -480,11 +592,16 @@ def display_client_flow(final_df: pd.DataFrame) -> None:
                 else:
                     st.info("No significant pathways detected")
 
-                # Sankey diagram section with focus controls
+                # Network visualization
+                st.html(create_styled_divider())
                 st.markdown("#### 🌐 Client Flow Network")
                 
-                # Focus controls (only for network graph)
-                st.caption("🎯 **Focus filters below apply only to the network visualization**")
+                st.html(create_info_box(
+                    "Focus filters below apply only to the network visualization",
+                    type="warning",
+                    icon="🎯"
+                ))
+                
                 colL, colR = st.columns(2)
                 focus_exit = colL.selectbox(
                     "🔍 Focus Exit Dimension",
@@ -497,86 +614,133 @@ def display_client_flow(final_df: pd.DataFrame) -> None:
                     help="Show only this return in the network"
                 )
 
-                # Create filtered pivot for Sankey only
+                # Create filtered pivot for Sankey
                 pivot_sankey = pivot_c.copy()
-                
-                # Apply focus filters only to the Sankey data
                 if focus_exit != "All":
                     pivot_sankey = pivot_sankey.loc[[focus_exit]]
                 if focus_return != "All":
                     pivot_sankey = pivot_sankey[[focus_return]]
 
-                # Generate Sankey with filtered data
+                # Generate Sankey with themed styling
                 sankey_fig = plot_flow_sankey(pivot_sankey, f"{ex_choice} → {ret_choice}")
+                sankey_fig = apply_chart_theme(sankey_fig)
                 st.plotly_chart(sankey_fig, use_container_width=True)
             else:
                 st.info("📭 Insufficient data for flow analysis")
+                
         except Exception as e:
             st.error(f"🌊 Flow Analysis Error: {str(e)}")
 
 
 def display_ph_comparison(final_df: pd.DataFrame, return_period: int) -> None:
     """Display PH vs. Non-PH exit comparison."""
-    st.divider()
+    st.html(create_styled_divider("gradient"))
     with st.container():
         st.markdown("## 🔄 PH vs. Non-PH Exit Comparison")
+        
         ph_df = final_df[final_df["PH_Exit"] == True]
         nonph_df = final_df[final_df["PH_Exit"] == False]
         
+        # Apply metric card styling for comparison
+        style_metric_cards(
+            border_left_color=NeutralColors.SUCCESS,
+            box_shadow=True
+        )
+        
         comp_cols = st.columns(2)
+        
+        # PH Exits
         with comp_cols[0]:
             st.markdown("### 🏠 Permanent Housing Exits")
             if not ph_df.empty:
                 ph_metrics = compute_summary_metrics(ph_df, return_period)
+                
+                # Display metrics with natural styling
                 st.metric("Number of Relevant Exits", ph_metrics.get("Number of Relevant Exits", 0))
-                st.metric("<6 Month Returns", f"{ph_metrics.get('Return < 6 Months', 0)} ({ph_metrics.get('% Return < 6M', 0):.1f}%)")
-                st.metric("6–12 Month Returns", f"{ph_metrics.get('Return 6–12 Months', 0)} ({ph_metrics.get('% Return 6–12M', 0):.1f}%)")
-                st.metric("12–24 Month Returns", f"{ph_metrics.get('Return 12–24 Months', 0)} ({ph_metrics.get('% Return 12–24M', 0):.1f}%)")
+                st.metric("<6 Month Returns", 
+                         f"{ph_metrics.get('Return < 6 Months', 0)} ({ph_metrics.get('% Return < 6M', 0):.1f}%)")
+                st.metric("6–12 Month Returns", 
+                         f"{ph_metrics.get('Return 6–12 Months', 0)} ({ph_metrics.get('% Return 6–12M', 0):.1f}%)")
+                st.metric("12–24 Month Returns", 
+                         f"{ph_metrics.get('Return 12–24 Months', 0)} ({ph_metrics.get('% Return 12–24M', 0):.1f}%)")
                 
-                # Only show >24 months if return period is greater than 730 days
                 if return_period > 730:
-                    st.metric(">24 Month Returns", f"{ph_metrics.get('Return > 24 Months', 0)} ({ph_metrics.get('% Return > 24M', 0):.1f}%)")
+                    st.metric(">24 Month Returns", 
+                             f"{ph_metrics.get('Return > 24 Months', 0)} ({ph_metrics.get('% Return > 24M', 0):.1f}%)")
                 
-                st.metric("Total Returns", f"{ph_metrics.get('Total Return', 0)} ({ph_metrics.get('% Return', 0):.1f}%)")
+                st.metric("Total Returns", 
+                         f"{ph_metrics.get('Total Return', 0)} ({ph_metrics.get('% Return', 0):.1f}%)")
                 st.metric("Median Return Days", f"{ph_metrics.get('Median Days (<=period)', 0):.0f}")
-                st.markdown(f"**Percentiles**: 25th: {ph_metrics.get('DaysToReturn 25th Pctl', 0):.0f} | 75th: {ph_metrics.get('DaysToReturn 75th Pctl', 0):.0f}")
+                
+                # Percentiles in info box
+                st.html(create_info_box(
+                    f"<strong>Percentiles:</strong> 25th: {ph_metrics.get('DaysToReturn 25th Pctl', 0):.0f} | "
+                    f"75th: {ph_metrics.get('DaysToReturn 75th Pctl', 0):.0f}",
+                    type="success"
+                ))
             else:
                 st.info("No PH exits in current filters")
                 
+        # Non-PH Exits
         with comp_cols[1]:
             st.markdown("### 🏕️ Non-Permanent Housing Exits")
             if not nonph_df.empty:
                 nonph_metrics = compute_summary_metrics(nonph_df, return_period)
+                
+                # Display metrics with natural styling
                 st.metric("Number of Relevant Exits", nonph_metrics.get("Number of Relevant Exits", 0))
-                st.metric("<6 Month Returns", f"{nonph_metrics.get('Return < 6 Months', 0)} ({nonph_metrics.get('% Return < 6M', 0):.1f}%)")
-                st.metric("6–12 Month Returns", f"{nonph_metrics.get('Return 6–12 Months', 0)} ({nonph_metrics.get('% Return 6–12M', 0):.1f}%)")
-                st.metric("12–24 Month Returns", f"{nonph_metrics.get('Return 12–24 Months', 0)} ({nonph_metrics.get('% Return 12–24M', 0):.1f}%)")
+                st.metric("<6 Month Returns", 
+                         f"{nonph_metrics.get('Return < 6 Months', 0)} ({nonph_metrics.get('% Return < 6M', 0):.1f}%)")
+                st.metric("6–12 Month Returns", 
+                         f"{nonph_metrics.get('Return 6–12 Months', 0)} ({nonph_metrics.get('% Return 6–12M', 0):.1f}%)")
+                st.metric("12–24 Month Returns", 
+                         f"{nonph_metrics.get('Return 12–24 Months', 0)} ({nonph_metrics.get('% Return 12–24M', 0):.1f}%)")
                 
-                # Only show >24 months if return period is greater than 730 days
                 if return_period > 730:
-                    st.metric(">24 Month Returns", f"{nonph_metrics.get('Return > 24 Months', 0)} ({nonph_metrics.get('% Return > 24M', 0):.1f}%)")
+                    st.metric(">24 Month Returns", 
+                             f"{nonph_metrics.get('Return > 24 Months', 0)} ({nonph_metrics.get('% Return > 24M', 0):.1f}%)")
                 
-                st.metric("Total Returns", f"{nonph_metrics.get('Total Return', 0)} ({nonph_metrics.get('% Return', 0):.1f}%)")
+                st.metric("Total Returns", 
+                         f"{nonph_metrics.get('Total Return', 0)} ({nonph_metrics.get('% Return', 0):.1f}%)")
                 st.metric("Median Return Days", f"{nonph_metrics.get('Median Days (<=period)', 0):.0f}")
-                st.markdown(f"**Percentiles**: 25th: {nonph_metrics.get('DaysToReturn 25th Pctl', 0):.0f} | 75th: {nonph_metrics.get('DaysToReturn 75th Pctl', 0):.0f}")
+                
+                # Percentiles in info box
+                st.html(create_info_box(
+                    f"<strong>Percentiles:</strong> 25th: {nonph_metrics.get('DaysToReturn 25th Pctl', 0):.0f} | "
+                    f"75th: {nonph_metrics.get('DaysToReturn 75th Pctl', 0):.0f}",
+                    type="warning"
+                ))
             else:
                 st.info("No Non-PH exits in current filters")
 
 
 def display_data_export(final_df: pd.DataFrame) -> None:
     """Display data export options."""
-    st.divider()
+    st.html(create_styled_divider("gradient"))
     with st.container():
         st.markdown("### 📤 Data Export")
-        render_download_button(
-            final_df,
-            filename="spm2_analysis_results.csv",
-            label="📥 Download SPM2 Data"
-        )
+        
+        # Export section with styled card
+        st.html('<div class="neutral-card">')
+        col1, col2, col3 = st.columns([1, 2, 1])
+        with col2:
+            render_download_button(
+                final_df,
+                filename="spm2_analysis_results.csv",
+                label="📥 Download SPM2 Data"
+            )
+        st.html('</div>')
 
+
+# ============================================================================
+# MAIN PAGE FUNCTION
+# ============================================================================
 
 def spm2_page() -> None:
     """Render the SPM2 Analysis page with all components."""
+    # Apply custom CSS theme
+    apply_custom_css()
+    
     st.header("📊 SPM2 Analysis")
     
     # About section
@@ -587,15 +751,26 @@ def spm2_page() -> None:
     if df is None:
         return
 
-    # Sidebar configuration
-    st.sidebar.header("⚙️ Analysis Parameters", divider="gray")
+    # Sidebar configuration with themed styling
+    st.sidebar.html('<div class="sidebar-content">')
+    st.sidebar.header("⚙️ Analysis Parameters")
+    st.sidebar.html(create_styled_divider())
     
     # Setup all filter parameters
     report_start, report_end, lookback_value, unit_choice, return_period = setup_date_config(df)
     allowed_continuum = setup_global_filters(df)
-    exit_allowed_cocs, exit_allowed_local_cocs, exit_allowed_agencies, exit_allowed_programs, exiting_projects, allowed_exit_dest_cats = setup_exit_filters(df)
-    return_allowed_cocs, return_allowed_local_cocs, return_allowed_agencies, return_allowed_programs, return_projects = setup_return_filters(df)
+    
+    exit_filters = setup_exit_filters(df)
+    (exit_allowed_cocs, exit_allowed_local_cocs, exit_allowed_agencies, 
+     exit_allowed_programs, exiting_projects, allowed_exit_dest_cats,
+     exit_ssvf_rrh, allowed_exit_destinations) = exit_filters
+    
+    return_filters = setup_return_filters(df)
+    (return_allowed_cocs, return_allowed_local_cocs, return_allowed_agencies, 
+     return_allowed_programs, return_projects, return_ssvf_rrh) = return_filters
+    
     compare_ph_others = setup_comparison_filters()
+    st.sidebar.html('</div>')
     
     # Prepare analysis parameters
     analysis_params = {
@@ -611,38 +786,34 @@ def spm2_page() -> None:
         "exit_allowed_programs": exit_allowed_programs,
         "exiting_projects": exiting_projects,
         "allowed_exit_dest_cats": allowed_exit_dest_cats,
+        "exit_ssvf_rrh": exit_ssvf_rrh,
+        "allowed_exit_destinations": allowed_exit_destinations,
         "return_allowed_cocs": return_allowed_cocs,
         "return_allowed_local_cocs": return_allowed_local_cocs,
         "return_allowed_agencies": return_allowed_agencies,
         "return_allowed_programs": return_allowed_programs,
-        "return_projects": return_projects
+        "return_projects": return_projects,
+        "return_ssvf_rrh": return_ssvf_rrh
     }
 
-    # Run analysis when button clicked
-    st.divider()
+    # Run analysis section
+    st.html(create_styled_divider("gradient"))
     run_analysis(df, analysis_params)
     
     # Display results if analysis was successful
     final_df = get_analysis_result("spm2")
     if final_df is not None and not final_df.empty:
-        # Display core metrics
-        
+        # Display all analysis sections with themed styling
         display_summary_metrics(final_df, return_period, allowed_exit_dest_cats)
-        
-        # Display days to return distribution
         display_days_to_return(final_df, return_period)
-        
-        # Display cohort breakdowns
         display_breakdowns(final_df, return_period)
-        
-        # Display client flow visualization
         display_client_flow(final_df)
         
-        # Display PH vs Non-PH comparison if enabled
+        # Conditional PH comparison
         if compare_ph_others:
             display_ph_comparison(final_df, return_period)
         
-        # Display data export options
+        # Export options
         display_data_export(final_df)
 
 

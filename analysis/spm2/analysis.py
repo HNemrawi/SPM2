@@ -114,7 +114,10 @@ def run_spm2(
     allowed_exit_dest_cats: Optional[List[str]] = None,
     exiting_projects: Optional[List[str]] = None,
     return_projects: Optional[List[str]] = None,
-    return_period: int = 730
+    return_period: int = 730,
+    exit_ssvf_rrh: Optional[List[str]] = None,
+    return_ssvf_rrh: Optional[List[str]] = None,
+    allowed_exit_destinations: Optional[List[str]] = None
 ) -> pd.DataFrame:
     """
     Main logic for SPM2 analysis.
@@ -171,6 +174,7 @@ def run_spm2(
         df_exit_base = filter_by_column(df_exit_base, "LocalCoCCode", exit_localcocs)
         df_exit_base = filter_by_column(df_exit_base, "AgencyName", exit_agencies)
         df_exit_base = filter_by_column(df_exit_base, "ProgramName", exit_programs)
+        df_exit_base = filter_by_column(df_exit_base, "SSVF_RRH", exit_ssvf_rrh)
 
         # Subset for RETURN filtering
         df_return_base = df.copy()
@@ -178,15 +182,12 @@ def run_spm2(
         df_return_base = filter_by_column(df_return_base, "LocalCoCCode", return_localcocs)
         df_return_base = filter_by_column(df_return_base, "AgencyName", return_agencies)
         df_return_base = filter_by_column(df_return_base, "ProgramName", return_programs)
+        df_return_base = filter_by_column(df_return_base, "SSVF_RRH", return_ssvf_rrh)
 
         # Apply continuum filter if specified
         if allowed_continuum and "ProgramsContinuumProject" in df.columns:
             df_exit_base = df_exit_base[df_exit_base["ProgramsContinuumProject"].isin(allowed_continuum)]
             df_return_base = df_return_base[df_return_base["ProgramsContinuumProject"].isin(allowed_continuum)]
-
-        # Use all exit destinations if none specified
-        if allowed_exit_dest_cats is None and "ExitDestinationCat" in df_exit_base.columns:
-            allowed_exit_dest_cats = df_exit_base["ExitDestinationCat"].dropna().unique().tolist()
 
         # Determine exit analysis window
         if lookback_unit == "Days":
@@ -201,8 +202,14 @@ def run_spm2(
         df_exits = df_exits[df_exits["ProjectTypeCode"].isin(exiting_projects)]
         df_exits = df_exits[(df_exits["ProjectExit"] >= exit_min) & (df_exits["ProjectExit"] <= exit_max)]
 
+        # Apply exit destination category filter
         if allowed_exit_dest_cats and "ExitDestinationCat" in df_exits.columns:
             df_exits = df_exits[df_exits["ExitDestinationCat"].isin(allowed_exit_dest_cats)]
+        
+        # Apply specific exit destination filter
+        # Note: create_multiselect_filter returns None when "ALL" is selected
+        if allowed_exit_destinations is not None and "ExitDestination" in df_exits.columns:
+            df_exits = df_exits[df_exits["ExitDestination"].isin(allowed_exit_destinations)]
 
         # Sort and deduplicate to first exit per client
         df_exits = df_exits.sort_values(["ClientID", "ProjectExit", "EnrollmentID"])

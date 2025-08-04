@@ -1,22 +1,69 @@
+"""
+Summary Metrics Section.
+"""
+
 from typing import Any, Dict, Optional, Set, Tuple
 
-import pandas as pd
 import streamlit as st
 from pandas import DataFrame, Timestamp
 
+# Import theme and styling modules
+from analysis.general.theme import (
+    Colors, fmt_int, fmt_pct, create_insight_container, styled_metric
+)
+from ui.styling import create_info_box, create_styled_divider, style_metric_cards
+
+# Import data utilities
 from analysis.general.data_utils import (
     calc_delta, households_served, inflow, outflow, 
     ph_exit_clients, ph_exit_rate, return_after_exit, served_clients,
-    period_comparison  # Add this import
-)
-from analysis.general.filter_utils import init_section_state
-from analysis.general.theme import (
-    MAIN_COLOR, SECONDARY_COLOR, SUCCESS_COLOR, WARNING_COLOR, NEUTRAL_COLOR,
-    fmt_int, fmt_pct, blue_divider
+    period_comparison
 )
 
-# Constants
+# Import filter utilities
+from analysis.general.filter_utils import init_section_state
+from core.ph_destinations import apply_custom_ph_destinations
+
+# ==================== CONSTANTS ====================
+
 SUMMARY_SECTION_KEY = "summary_metrics"
+
+# Help text definitions
+HELP_TEXTS = {
+    "Households Served": "Total households (heads of household) active during the period",
+    "Clients Served": "Unique clients with an active enrollment during the period",
+    "Inflow": {
+        True: "Clients entering filtered programs who weren't in any FILTERED programs the day before",
+        False: "Clients entering the system who weren't in any programs the day before"
+    },
+    "Outflow": {
+        True: "Clients exiting filtered programs who aren't in any FILTERED programs at period end",
+        False: "Clients leaving the system who aren't in any programs at period end"
+    },
+    "PH Exits": "Clients exiting to permanent housing destinations",
+    "PH Exit Rate": "Percentage of ALL exits that went to permanent housing",
+    "Returns to Homelessness": "PH exits who returned to ANY homeless program (tracked system-wide)",
+    "Return Rate": "Percentage of PH exits who return to homelessness",
+    "Net Flow": "Difference between inflow and outflow (positive = growth)"
+}
+
+# Housing outcome thresholds
+HOUSING_THRESHOLDS = {
+    "ph_exit_rate": {
+        "excellent": {"min": 50, "icon": "🏆", "label": "Excellent", "desc": "More than half of all exits are to permanent housing"},
+        "good": {"min": 35, "icon": "✅", "label": "Good", "desc": "Solid performance in housing placements"},
+        "needs_improvement": {"min": 20, "icon": "⚠️", "label": "Needs Improvement", "desc": "Below typical performance benchmarks"},
+        "critical": {"min": 0, "icon": "❌", "label": "Critical", "desc": "Significant challenges in achieving housing exits"}
+    },
+    "return_rate": {
+        "outstanding": {"max": 5, "icon": "🌟", "label": "Outstanding", "desc": "Exceptional housing stability"},
+        "strong": {"max": 10, "icon": "✅", "label": "Strong", "desc": "Good housing retention"},
+        "moderate": {"max": 20, "icon": "⚠️", "label": "Moderate", "desc": "Some stability challenges"},
+        "high": {"max": 100, "icon": "🚨", "label": "High", "desc": "Significant housing stability issues"}
+    }
+}
+
+# ==================== CALCULATION FUNCTIONS ====================
 
 @st.cache_data(show_spinner=False)
 def _get_summary_metrics(
@@ -30,47 +77,27 @@ def _get_summary_metrics(
 ) -> Dict[str, Any]:
     """
     Calculate summary metrics for both current and previous time periods.
-    
-    Parameters:
-    -----------
-    df_filt : DataFrame
-        Filtered DataFrame
-    full_df : DataFrame
-        Full DataFrame (MUST be the complete unfiltered dataset for accurate returns tracking)
-    t0 : Timestamp
-        Current period start
-    t1 : Timestamp
-        Current period end
-    prev_start : Timestamp
-        Previous period start
-    prev_end : Timestamp
-        Previous period end
-    return_window : int, optional
-        Days to check for returns
-        
-    Returns:
-    --------
-    dict
-        Dictionary of metrics for current and previous periods
     """
+    # Apply custom PH destinations to both dataframes
+    df_filt = apply_custom_ph_destinations(df_filt, force=True)
+    full_df = apply_custom_ph_destinations(full_df, force=True)
+    
     # Current period metrics
     served_ids = served_clients(df_filt, t0, t1)
     inflow_ids = inflow(df_filt, t0, t1)
     outflow_ids = outflow(df_filt, t0, t1)
     ph_ids = ph_exit_clients(df_filt, t0, t1)
     
-    # First, identify the PH exits
+    # Get PH exits for return tracking
     ph_exits_mask = (
         (df_filt["ProjectExit"].between(t0, t1))
         & (df_filt["ExitDestinationCat"] == "Permanent Housing Situations")
     )
     ph_exits_df = df_filt[ph_exits_mask]
     ph_exits_in_period = set(ph_exits_df["ClientID"].unique())
-
-    # Then pass ONLY those PH exits to return_after_exit
-    # This ensures it only checks returns for the clients we're using in the denominator
+    
+    # Track returns only for PH exits
     return_ids = return_after_exit(ph_exits_df, full_df, t0, t1, return_window)
-
     
     # Previous period metrics
     served_prev = served_clients(df_filt, prev_start, prev_end)
@@ -78,7 +105,7 @@ def _get_summary_metrics(
     outflow_prev = outflow(df_filt, prev_start, prev_end)
     ph_prev = ph_exit_clients(df_filt, prev_start, prev_end)
     
-    # Get PH exits for previous period return rate
+    # Get PH exits for previous period
     ph_exits_mask_prev = (
         (df_filt["ProjectExit"].between(prev_start, prev_end))
         & (df_filt["ExitDestinationCat"] == "Permanent Housing Situations")
@@ -87,7 +114,7 @@ def _get_summary_metrics(
     ph_exits_prev = set(ph_exits_df_prev["ClientID"].unique())
     return_ids_prev = return_after_exit(ph_exits_df_prev, full_df, prev_start, prev_end, return_window)
     
-    # ADD PERIOD COMPARISON
+    # Get period comparison
     period_comp = period_comparison(df_filt, t0, t1, prev_start, prev_end)
     
     return {
@@ -106,170 +133,179 @@ def _get_summary_metrics(
         "return_ids_prev": return_ids_prev,
         "households_current": households_served(df_filt, t0, t1),
         "households_prev": households_served(df_filt, prev_start, prev_end),
-        "period_comparison": period_comp  # ADD THIS
+        "period_comparison": period_comp
     }
+
+# ==================== DISPLAY HELPERS ====================
 
 def _get_metric_help_text(metric_name: str, is_filtered: bool) -> str:
     """Get appropriate help text based on metric and filter status."""
-    help_texts = {
-        "Households Served": "Total households (heads of household) active during the period",
-        "Clients Served": "Unique clients with an active enrollment during the period",
-        "Inflow": {
-            True: "Clients entering filtered programs who weren't in any FILTERED programs the day before",
-            False: "Clients entering the system who weren't in any programs the day before"
-        },
-        "Outflow": {
-            True: "Clients exiting filtered programs who aren't in any FILTERED programs at period end",
-            False: "Clients leaving the system who aren't in any programs at period end"
-        },
-        "PH Exits": "Clients exiting to permanent housing destinations",
-        "PH Exit Rate": "Percentage of ALL exits that went to permanent housing",
-        "Returns to Homelessness": "PH exits who returned to ANY homeless program (tracked system-wide)",
-        "Return Rate": "Percentage of PH exits who return to homelessness",
-        "Net Flow": "Difference between inflow and outflow (positive = growth)"
-    }
-    
-    text = help_texts.get(metric_name, "")
+    text = HELP_TEXTS.get(metric_name, "")
     if isinstance(text, dict):
         return text.get(is_filtered, text.get(False, ""))
     return text
 
+def _get_housing_outcome_status(value: float, metric_type: str) -> Dict[str, Any]:
+    """Get housing outcome assessment based on value and metric type."""
+    thresholds = HOUSING_THRESHOLDS.get(metric_type, {})
+    
+    if metric_type == "ph_exit_rate":
+        if value >= thresholds["excellent"]["min"]:
+            return {**thresholds["excellent"], "color": Colors.SUCCESS}
+        elif value >= thresholds["good"]["min"]:
+            return {**thresholds["good"], "color": Colors.PRIMARY}
+        elif value >= thresholds["needs_improvement"]["min"]:
+            return {**thresholds["needs_improvement"], "color": Colors.WARNING}
+        else:
+            return {**thresholds["critical"], "color": Colors.DANGER}
+    
+    elif metric_type == "return_rate":
+        if value <= thresholds["outstanding"]["max"]:
+            return {**thresholds["outstanding"], "color": Colors.SUCCESS}
+        elif value <= thresholds["strong"]["max"]:
+            return {**thresholds["strong"], "color": Colors.PRIMARY}
+        elif value <= thresholds["moderate"]["max"]:
+            return {**thresholds["moderate"], "color": Colors.WARNING}
+        else:
+            return {**thresholds["high"], "color": Colors.DANGER}
+    
+    return {}
+
 def _generate_flow_insight_html(inflow_count: int, outflow_count: int, net_flow: int) -> str:
-    """Generate HTML for system flow insight."""
+    """Generate HTML for system flow insight with proper theme support."""
     if net_flow > 0:
         icon = "📈"
         status = "Growing"
-        color = SUCCESS_COLOR
         description = f"More clients entering ({inflow_count:,}) than leaving ({outflow_count:,})"
+        insight_type = "info"
     elif net_flow < 0:
         icon = "📉"
         status = "Reducing"
-        color = WARNING_COLOR
         description = f"More clients leaving ({outflow_count:,}) than entering ({inflow_count:,})"
+        insight_type = "warning"
     else:
         icon = "➡️"
         status = "Balanced"
-        color = NEUTRAL_COLOR
         description = f"Equal number entering and leaving ({inflow_count:,} each)"
+        insight_type = "info"
     
-    return f"""
-    <div style="background-color: rgba(0,0,0,0.3); border: 2px solid {color}; 
-                border-radius: 10px; padding: 20px; margin: 10px 0;">
-        <h3 style="color: {color}; margin: 0 0 10px 0;">
-            {icon} System Flow: {status}
-        </h3>
-        <p style="margin: 0; font-size: 16px;">
-            {description}<br>
-            <strong style="font-size: 20px;">Net change: {net_flow:+,} clients</strong>
-        </p>
+    # Use structured content that will be properly styled by create_info_box
+    content = f"""
+    <div>
+        <strong>{icon} System Flow: {status}</strong><br/>
+        {description}<br/>
+        <strong>Net change: {net_flow:+,} clients</strong>
     </div>
     """
+    
+    return create_info_box(content, type=insight_type)
 
 def _generate_housing_outcomes_html(ph_rate: float, return_rate: float, return_window: int) -> str:
-    """Generate HTML for housing outcomes insights."""
-    # PH Exit Rate Assessment
-    if ph_rate >= 50:
-        ph_icon = "🏆"
-        ph_status = "Excellent"
-        ph_color = SUCCESS_COLOR
-        ph_desc = "More than half of all exits are to permanent housing"
-    elif ph_rate >= 35:
-        ph_icon = "✅"
-        ph_status = "Good"
-        ph_color = MAIN_COLOR
-        ph_desc = "Solid performance in housing placements"
-    elif ph_rate >= 20:
-        ph_icon = "⚠️"
-        ph_status = "Needs Improvement"
-        ph_color = WARNING_COLOR
-        ph_desc = "Below typical performance benchmarks"
-    else:
-        ph_icon = "❌"
-        ph_status = "Critical"
-        ph_color = SECONDARY_COLOR
-        ph_desc = "Significant challenges in achieving housing exits"
+    """Generate HTML for housing outcomes insights with proper theme support."""
+    ph_status = _get_housing_outcome_status(ph_rate, "ph_exit_rate")
+    ret_status = _get_housing_outcome_status(return_rate, "return_rate")
     
-    # Return Rate Assessment
-    if return_rate <= 5:
-        ret_icon = "🌟"
-        ret_status = "Outstanding"
-        ret_color = SUCCESS_COLOR
-        ret_desc = "Exceptional housing stability"
-    elif return_rate <= 10:
-        ret_icon = "✅"
-        ret_status = "Strong"
-        ret_color = MAIN_COLOR
-        ret_desc = "Good housing retention"
-    elif return_rate <= 20:
-        ret_icon = "⚠️"
-        ret_status = "Moderate"
-        ret_color = WARNING_COLOR
-        ret_desc = "Some stability challenges"
-    else:
-        ret_icon = "🚨"
-        ret_status = "High"
-        ret_color = SECONDARY_COLOR
-        ret_desc = "Significant housing stability issues"
+    # Use Streamlit columns instead of custom HTML for better theme support
+    col1, col2 = st.columns(2)
     
-    return f"""
-    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin: 20px 0;">
-        
-        <div style="background-color: rgba(0,0,0,0.3); border: 2px solid {ph_color}; 
-                    border-radius: 10px; padding: 20px;">
-            <h4 style="color: {ph_color}; margin: 0 0 10px 0;">
-                {ph_icon} Housing Placement: {ph_status}
-            </h4>
-            <p style="margin: 0;">
-                <strong style="font-size: 24px;">{ph_rate:.1f}%</strong> exit to permanent housing<br>
-                <span style="font-size: 14px; color: #ccc;">{ph_desc}</span>
-            </p>
-        </div>
-        
-        <div style="background-color: rgba(0,0,0,0.3); border: 2px solid {ret_color}; 
-                    border-radius: 10px; padding: 20px;">
-            <h4 style="color: {ret_color}; margin: 0 0 10px 0;">
-                {ret_icon} Housing Stability: {ret_status}
-            </h4>
-            <p style="margin: 0;">
-                <strong style="font-size: 24px;">{return_rate:.1f}%</strong> return within {return_window} days<br>
-                <span style="font-size: 14px; color: #ccc;">{ret_desc}</span>
-            </p>
-        </div>
-        
-    </div>
-    """
+    with col1:
+        content = f"""
+        <strong>{ph_status['icon']} Housing Placement: {ph_status['label']}</strong><br/>
+        <strong style="font-size: 1.5em;">{ph_rate:.1f}%</strong> exit to permanent housing<br/>
+        <em>{ph_status['desc']}</em>
+        """
+        st.html(create_info_box(content, type="info" if ph_rate >= 35 else "warning"))
+    
+    with col2:
+        content = f"""
+        <strong>{ret_status['icon']} Housing Stability: {ret_status['label']}</strong><br/>
+        <strong style="font-size: 1.5em;">{return_rate:.1f}%</strong> return within {return_window} days<br/>
+        <em>{ret_status['desc']}</em>
+        """
+        st.html(create_info_box(content, type="info" if return_rate <= 10 else "warning"))
+    
+    # Return empty string since we're using st.columns directly
+    return ""
+
+def _render_period_breakdown(period_comp: Dict[str, Any]) -> None:
+    """Render client population analysis using native Streamlit components."""
+    if not period_comp:
+        return
+    
+    # Calculate percentages
+    carryover_pct = (len(period_comp['carryover']) / len(period_comp['current_clients']) * 100) if period_comp['current_clients'] else 0
+    new_pct = (len(period_comp['new']) / len(period_comp['current_clients']) * 100) if period_comp['current_clients'] else 0
+    exited_pct = (len(period_comp['exited']) / len(period_comp['previous_clients']) * 100) if period_comp['previous_clients'] else 0
+    
+    # Display metrics using native Streamlit columns
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        st.metric(
+            label="🔄 Carryover Clients",
+            value=f"{len(period_comp['carryover']):,}",
+            delta=f"{carryover_pct:.1f}% of current",
+            delta_color="off",
+            help="Clients served in both periods"
+        )
+    
+    with col2:
+        st.metric(
+            label="🆕 New Clients",
+            value=f"{len(period_comp['new']):,}",
+            delta=f"{new_pct:.1f}% of current",
+            delta_color="off",
+            help="Clients not served in previous period"
+        )
+    
+    with col3:
+        st.metric(
+            label="🚪 Exited System",
+            value=f"{len(period_comp['exited']):,}",
+            delta=f"{exited_pct:.1f}% of previous",
+            delta_color="off",
+            help="Clients no longer in system"
+        )
+    
+    # Generate insight
+    if carryover_pct > 70:
+        insight = f"High carryover rate ({carryover_pct:.0f}%) indicates a stable but potentially stuck population. Consider enhanced interventions for chronic homelessness."
+        insight_type = "warning"
+    elif new_pct > 50:
+        insight = f"High influx of new clients ({new_pct:.0f}%) suggests growing need or improved outreach. Focus on prevention and diversion strategies."
+        insight_type = "info"
+    else:
+        insight = f"Balanced mix of carryover ({carryover_pct:.0f}%) and new clients ({new_pct:.0f}%). System shows healthy flow with room for improvement."
+        insight_type = "info"
+    
+    # Display insight
+    st.html(create_info_box(insight, type=insight_type, title="Population Insights"))
+
+# ==================== MAIN RENDER FUNCTION ====================
 
 @st.fragment
 def render_summary_metrics(df_filt: DataFrame, full_df: Optional[DataFrame] = None) -> None:
     """
     Render summary metrics with key performance indicators comparing
     the current window with the previous period.
-    
-    Parameters:
-    -----------
-    df_filt : DataFrame
-        Filtered DataFrame
-    full_df : DataFrame, optional
-        Full DataFrame for returns analysis
     """
     try:
-        # CRITICAL: Ensure we always have the true unfiltered dataset for returns
+        # Ensure we have the unfiltered dataset for returns tracking
         if full_df is None:
-            # Get the original unfiltered data from session state
             full_df = st.session_state.get("df")
             if full_df is None:
                 st.error("Original dataset not found. Please reload your data.")
                 return
 
-        # Initialize or retrieve cached section state
-        state: Dict[str, Any] = init_section_state(SUMMARY_SECTION_KEY)
+        # Initialize section state
+        state = init_section_state(SUMMARY_SECTION_KEY)
         filter_timestamp = st.session_state.get("last_filter_change", "")
         cache_valid = state.get("last_updated") == filter_timestamp
 
         if not cache_valid:
             state["last_updated"] = filter_timestamp
 
-        # Header with info button
+        # Header with help
         col_header, col_info = st.columns([6, 1])
         with col_header:
             st.subheader("📊 Summary Metrics")
@@ -322,11 +358,11 @@ def render_summary_metrics(df_filt: DataFrame, full_df: Optional[DataFrame] = No
                 - Each client is counted only once per metric, even with multiple enrollments
                 """)
         
-        # Time boundaries
-        t0: Timestamp = st.session_state.get("t0")
-        t1: Timestamp = st.session_state.get("t1")
-        prev_start: Timestamp = st.session_state.get("prev_start")
-        prev_end: Timestamp = st.session_state.get("prev_end")
+        # Get time boundaries
+        t0 = st.session_state.get("t0")
+        t1 = st.session_state.get("t1")
+        prev_start = st.session_state.get("prev_start")
+        prev_end = st.session_state.get("prev_end")
 
         if not all([t0, t1, prev_start, prev_end]):
             st.warning("⏰ Please set date ranges in the filter panel to view metrics.")
@@ -336,54 +372,43 @@ def render_summary_metrics(df_filt: DataFrame, full_df: Optional[DataFrame] = No
         current_days = (t1 - t0).days + 1
         previous_days = (prev_end - prev_start).days + 1
 
-        # Add return window control before computing metrics
+        # Return window control
         col1, col2 = st.columns([2, 2])
-
         with col1:
-            # Return window input with persistent state
             default_return_window = state.get("user_return_window", 180)
             return_window = st.number_input(
                 "Return tracking window (days)",
                 min_value=30,
-                max_value=1095,  # 3 years max
+                max_value=1095,
                 value=default_return_window,
                 step=30,
                 help="Number of days after PH exit to track returns to homelessness"
             )
             
-            # Check if return window changed
             if return_window != state.get("user_return_window", 180):
                 state["user_return_window"] = return_window
-                cache_valid = False  # Force recalculation if window changed
+                cache_valid = False
 
         with col2:
-            # Info about return window
             st.info(f"📅 Tracking returns for {return_window} days ({return_window/30:.1f} months) after PH exit")
 
-        # Compute metrics if cache is invalid or return window changed
+        # Compute metrics if needed
         if not cache_valid or state.get("last_return_window") != return_window:
             with st.spinner("Calculating key metrics..."):
-                # Store the return window used for this calculation
                 state["last_return_window"] = return_window
-                
-                # Calculate all metrics using the cached function
                 metrics = _get_summary_metrics(
                     df_filt, full_df, t0, t1, prev_start, prev_end, return_window
                 )
-                
-                # Update state with calculated metrics
                 state.update(metrics)
 
-        # Retrieve cached metrics
+        # Retrieve metrics from state
         served_ids = state.get("served_ids", set())
         inflow_ids = state.get("inflow_ids", set())
         outflow_ids = state.get("outflow_ids", set())
         ph_ids = state.get("ph_ids", set())
         ph_exits_in_period = state.get("ph_exits_in_period", set())
         return_ids = state.get("return_ids", set())
-        # Use the user-defined return window
-        return_window = state.get("user_return_window", 180)
-
+        
         served_prev = state.get("served_prev", set())
         inflow_prev = state.get("inflow_prev", set())
         outflow_prev = state.get("outflow_prev", set())
@@ -394,164 +419,188 @@ def render_summary_metrics(df_filt: DataFrame, full_df: Optional[DataFrame] = No
         households_current = state.get("households_current", 0)
         households_prev = state.get("households_prev", 0)
         
-        # GET PERIOD COMPARISON DATA
         period_comp = state.get("period_comparison", {})
 
-        # Compute rates
+        # Calculate rates
         ph_rate = ph_exit_rate(df_filt, t0, t1)
         ph_rate_prev = ph_exit_rate(df_filt, prev_start, prev_end)
         
-        # Calculate return rates with safe division
         return_rate = 0 if not ph_exits_in_period else (len(return_ids) / len(ph_exits_in_period) * 100)
         return_rate_prev = 0 if not ph_exits_prev else (len(return_ids_prev) / len(ph_exits_prev) * 100)
 
         # Check if filters are active
         active_filters = st.session_state.get("filters", {})
         is_filtered = any(active_filters.values())
+
+        # Check if custom destinations are being used
+        if "_custom_ph_destinations" in df_filt.columns and df_filt["_custom_ph_destinations"].any():
+            custom_content = """
+            <h4>🎯 Custom PH Destinations Active</h4>
+            <p>Using customized permanent housing destination definitions.</p>
+            """
+            st.html(create_info_box(custom_content, type="info"))
         
         # Display filter context if active
         if is_filtered:
-            # Count and describe active filters
             filter_details = []
             for name, values in active_filters.items():
                 if values:
                     filter_details.append(f"**{name}** ({len(values)} selected)")
             
-            filter_context_html = f"""
-            <div style="background-color: rgba(255,165,0,0.1); border: 2px solid {WARNING_COLOR}; 
-                        border-radius: 10px; padding: 15px; margin: 15px 0;">
-                <h4 style="color: {WARNING_COLOR}; margin: 0 0 10px 0;">
-                    🔍 Filtered View Active
-                </h4>
-                <p style="margin: 0 0 10px 0;">
-                    Metrics reflect filtered data only. Active filters: {", ".join(filter_details)}
-                </p>
-                <details style="margin-top: 10px;">
-                    <summary style="cursor: pointer; color: {WARNING_COLOR};">
-                        <strong>How filters affect metrics (click to expand)</strong>
-                    </summary>
-                    <div style="margin-top: 10px; padding: 10px; background-color: rgba(0,0,0,0.3); border-radius: 5px;">
-                        <ul style="margin: 0; padding-left: 20px;">
-                            <li><strong>Inflow/Outflow</strong>: Only tracks movement within filtered programs</li>
-                            <li><strong>PH Exit Rate</strong>: Based on exits from filtered programs only</li>
-                            <li><strong>Returns</strong>: Tracks returns to ANY program (system-wide) ✓</li>
-                        </ul>
-                        <p style="margin: 10px 0 0 0; font-style: italic;">
-                            For true system-wide metrics, remove all filters.
-                        </p>
-                    </div>
-                </details>
-            </div>
+            filter_content = f"""
+            <h4>🔍 Filtered View Active</h4>
+            <p>Metrics reflect filtered data only. Active filters: {", ".join(filter_details)}</p>
+            <details>
+                <summary><strong>How filters affect metrics (click to expand)</strong></summary>
+                <div>
+                    <ul>
+                        <li><strong>Inflow/Outflow</strong>: Only tracks movement within filtered programs</li>
+                        <li><strong>PH Exit Rate</strong>: Based on exits from filtered programs only</li>
+                        <li><strong>Returns</strong>: Tracks returns to ANY program (system-wide) ✓</li>
+                    </ul>
+                    <p><em>For true system-wide metrics, remove all filters.</em></p>
+                </div>
+            </details>
             """
-            st.html(filter_context_html)
+            st.html(create_info_box(filter_content, type="warning"))
         
         # Display period context
-        period_context_html = f"""
-        <div style="background-color: rgba(0,0,0,0.2); border-radius: 10px; padding: 15px; margin-bottom: 20px;">
-            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
-                <div>
-                    <strong style="color: {MAIN_COLOR};">📅 Current Period</strong><br>
-                    {t0.strftime('%B %d, %Y')} to {t1.strftime('%B %d, %Y')}<br>
-                    <span style="color: #999;">({current_days} days)</span>
-                </div>
-                <div>
-                    <strong style="color: {NEUTRAL_COLOR};">📅 Previous Period</strong><br>
-                    {prev_start.strftime('%B %d, %Y')} to {prev_end.strftime('%B %d, %Y')}<br>
-                    <span style="color: #999;">({previous_days} days)</span>
-                </div>
-            </div>
-        </div>
-        """
-        st.html(period_context_html)
+        col1, col2 = st.columns(2)
+        with col1:
+            st.html(create_info_box(
+                f"<strong>{t0.strftime('%B %d, %Y')}</strong> to <strong>{t1.strftime('%B %d, %Y')}</strong><br>({current_days} days)",
+                type="info",
+                title="📅 Current Period"
+            ))
         
-        # Prepare display in rows of metrics        
+        with col2:
+            st.html(create_info_box(
+                f"<strong>{prev_start.strftime('%B %d, %Y')}</strong> to <strong>{prev_end.strftime('%B %d, %Y')}</strong><br>({previous_days} days)",
+                type="info",
+                title="📅 Previous Period"
+            ))
+        
+        # Apply metric card styling
+        style_metric_cards(
+            border_left_color=Colors.PRIMARY,
+            box_shadow=True
+        )
+        
+        # Display metrics in rows
+        st.html(create_styled_divider())
+        
+        # Row 1
         row1_cols = st.columns(3)
-        row2_cols = st.columns(3)
-        row3_cols = st.columns(3)
-        
-        # Define all metrics to display
-        metrics_data = [
-            # Row 1
-            (row1_cols[0], "Households Served", households_current, households_prev, 
-             _get_metric_help_text("Households Served", is_filtered), "neutral"),
-            
-            (row1_cols[1], "Clients Served", len(served_ids), len(served_prev), 
-             _get_metric_help_text("Clients Served", is_filtered), "neutral"),
-            
-            (row1_cols[2], "Inflow", len(inflow_ids), len(inflow_prev), 
-             _get_metric_help_text("Inflow", is_filtered), "neutral"),
-            
-            # Row 2
-            (row2_cols[0], "Outflow", len(outflow_ids), len(outflow_prev), 
-             _get_metric_help_text("Outflow", is_filtered), "neutral"),
-            
-            (row2_cols[1], "PH Exits", len(ph_ids), len(ph_prev), 
-             _get_metric_help_text("PH Exits", is_filtered), "neutral"),
-            
-            (row2_cols[2], "PH Exit Rate", ph_rate, ph_rate_prev, 
-             _get_metric_help_text("PH Exit Rate", is_filtered), "normal"),
-            
-            # Row 3
-            (row3_cols[0], f"Returns ({return_window}d)", len(return_ids), len(return_ids_prev), 
-             _get_metric_help_text("Returns to Homelessness", is_filtered), "neutral"),
-            
-            (row3_cols[1], "Return Rate", return_rate, return_rate_prev, 
-             _get_metric_help_text("Return Rate", is_filtered), "inverse"),
-            
-            (row3_cols[2], "Net Flow", len(inflow_ids) - len(outflow_ids), 
-             len(inflow_prev) - len(outflow_prev), 
-             _get_metric_help_text("Net Flow", is_filtered), "neutral")
-        ]
-        
-        # Display each metric with filter indicators
-        for col, label, current, previous, help_text, direction in metrics_data:
-            # Add filter indicator to label if needed
-            display_label = label
-            if is_filtered and label in ["Inflow", "Outflow", "Net Flow"]:
-                display_label = f"{label} 🔍"
-            
-            # Handle rate metrics differently (showing percentage points change)
-            if "Rate" in label:
-                # For rates, show absolute pp change
-                delta = current - previous
-                delta_display = f"{delta:+.1f} pp" if previous is not None else "n/a"
-                display_value = fmt_pct(current)
-                
-                # Set color based on metric type and direction
-                if direction == "normal":  # PH Exit Rate - higher is better
-                    delta_color = "normal"
-                elif direction == "inverse":  # Return Rate - lower is better
-                    delta_color = "inverse"
-                else:
-                    delta_color = "off"  # Neutral
-            else:
-                # For counts, show both absolute and percentage change
-                if previous:
-                    delta, pct = calc_delta(current, previous)
-                    # Net Flow doesn't show percentage
-                    if label == "Net Flow":
-                        delta_display = fmt_int(delta)
-                    else:
-                        delta_display = f"{fmt_int(delta)} ({fmt_pct(pct)})"
-                else:
-                    delta_display = "n/a"
-                
-                display_value = fmt_int(current)
-                
-                # All non-rate metrics use neutral color
-                delta_color = "off"
-            
-            # Display the metric
-            col.metric(
-                display_label,
-                display_value,
+        with row1_cols[0]:
+            delta, pct = calc_delta(households_current, households_prev) if households_prev else (0, 0)
+            delta_display = f"{fmt_int(delta)} ({fmt_pct(pct)})" if households_prev else "n/a"
+            st.metric(
+                "Households Served",
+                fmt_int(households_current),
                 delta_display,
-                delta_color=delta_color,
-                help=help_text,
+                delta_color="off",
+                help=_get_metric_help_text("Households Served", is_filtered)
             )
-
-        # Enhanced System Insights
-        blue_divider()
+        
+        with row1_cols[1]:
+            delta, pct = calc_delta(len(served_ids), len(served_prev)) if served_prev else (0, 0)
+            delta_display = f"{fmt_int(delta)} ({fmt_pct(pct)})" if served_prev else "n/a"
+            st.metric(
+                "Clients Served",
+                fmt_int(len(served_ids)),
+                delta_display,
+                delta_color="off",
+                help=_get_metric_help_text("Clients Served", is_filtered)
+            )
+        
+        with row1_cols[2]:
+            delta, pct = calc_delta(len(inflow_ids), len(inflow_prev)) if inflow_prev else (0, 0)
+            delta_display = f"{fmt_int(delta)} ({fmt_pct(pct)})" if inflow_prev else "n/a"
+            label = "Inflow" + (" 🔍" if is_filtered else "")
+            st.metric(
+                label,
+                fmt_int(len(inflow_ids)),
+                delta_display,
+                delta_color="off",
+                help=_get_metric_help_text("Inflow", is_filtered)
+            )
+        
+        # Row 2
+        row2_cols = st.columns(3)
+        with row2_cols[0]:
+            delta, pct = calc_delta(len(outflow_ids), len(outflow_prev)) if outflow_prev else (0, 0)
+            delta_display = f"{fmt_int(delta)} ({fmt_pct(pct)})" if outflow_prev else "n/a"
+            label = "Outflow" + (" 🔍" if is_filtered else "")
+            st.metric(
+                label,
+                fmt_int(len(outflow_ids)),
+                delta_display,
+                delta_color="off",
+                help=_get_metric_help_text("Outflow", is_filtered)
+            )
+        
+        with row2_cols[1]:
+            delta, pct = calc_delta(len(ph_ids), len(ph_prev)) if ph_prev else (0, 0)
+            delta_display = f"{fmt_int(delta)} ({fmt_pct(pct)})" if ph_prev else "n/a"
+            st.metric(
+                "PH Exits",
+                fmt_int(len(ph_ids)),
+                delta_display,
+                delta_color="normal",  # Positive is good for PH exits
+                help=_get_metric_help_text("PH Exits", is_filtered)
+            )
+        
+        with row2_cols[2]:
+            delta = ph_rate - ph_rate_prev
+            delta_display = f"{delta:+.1f} pp" if ph_rate_prev is not None else "n/a"
+            st.metric(
+                "PH Exit Rate",
+                fmt_pct(ph_rate),
+                delta_display,
+                delta_color="normal",  # Higher is better
+                help=_get_metric_help_text("PH Exit Rate", is_filtered)
+            )
+        
+        # Row 3
+        row3_cols = st.columns(3)
+        with row3_cols[0]:
+            delta, pct = calc_delta(len(return_ids), len(return_ids_prev)) if return_ids_prev else (0, 0)
+            delta_display = f"{fmt_int(delta)} ({fmt_pct(pct)})" if return_ids_prev else "n/a"
+            st.metric(
+                f"Returns ({return_window}d)",
+                fmt_int(len(return_ids)),
+                delta_display,
+                delta_color="inverse",  # Lower is better for returns
+                help=_get_metric_help_text("Returns to Homelessness", is_filtered)
+            )
+        
+        with row3_cols[1]:
+            delta = return_rate - return_rate_prev
+            delta_display = f"{delta:+.1f} pp" if return_rate_prev is not None else "n/a"
+            st.metric(
+                "Return Rate",
+                fmt_pct(return_rate),
+                delta_display,
+                delta_color="inverse",  # Lower is better
+                help=_get_metric_help_text("Return Rate", is_filtered)
+            )
+        
+        with row3_cols[2]:
+            net_flow_current = len(inflow_ids) - len(outflow_ids)
+            net_flow_prev = len(inflow_prev) - len(outflow_prev)
+            delta, _ = calc_delta(net_flow_current, net_flow_prev) if net_flow_prev is not None else (0, 0)
+            delta_display = fmt_int(delta)
+            label = "Net Flow" + (" 🔍" if is_filtered else "")
+            st.metric(
+                label,
+                fmt_int(net_flow_current),
+                delta_display,
+                delta_color="off",
+                help=_get_metric_help_text("Net Flow", is_filtered)
+            )
+        
+        # System Analysis
+        st.html(create_styled_divider())
         st.markdown("### 🔍 System Analysis")
         
         # System Flow Analysis
@@ -559,118 +608,20 @@ def render_summary_metrics(df_filt: DataFrame, full_df: Optional[DataFrame] = No
         flow_html = _generate_flow_insight_html(len(inflow_ids), len(outflow_ids), net_flow)
         st.html(flow_html)
         
-        # ADD CLIENT POPULATION ANALYSIS HERE
+        # Client Population Analysis
         if period_comp:
-            # Create visual breakdown
-            carryover_pct = (len(period_comp['carryover']) / len(period_comp['current_clients']) * 100) if period_comp['current_clients'] else 0
-            new_pct = (len(period_comp['new']) / len(period_comp['current_clients']) * 100) if period_comp['current_clients'] else 0
-            exited_pct = (len(period_comp['exited']) / len(period_comp['previous_clients']) * 100) if period_comp['previous_clients'] else 0
-            
-            period_breakdown_html = f"""
-            <div style="background-color: rgba(0,0,0,0.2); border-radius: 10px; padding: 20px; margin: 20px 0;">
-                <h3 style="color: {MAIN_COLOR}; margin: 0 0 15px 0;">📊 Client Population Analysis</h3>
-                
-                <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 20px; margin-bottom: 20px;">
-                    <div style="background-color: rgba(255,255,255,0.05); padding: 15px; border-radius: 8px;">
-                        <h4 style="color: {NEUTRAL_COLOR}; margin: 0;">Previous Period</h4>
-                        <h2 style="margin: 10px 0; color: {NEUTRAL_COLOR};">{len(period_comp['previous_clients']):,}</h2>
-                        <p style="margin: 0; font-size: 14px;">Total clients</p>
-                    </div>
-                    
-                    <div style="background-color: rgba(255,255,255,0.05); padding: 15px; border-radius: 8px;">
-                        <h4 style="color: {MAIN_COLOR}; margin: 0;">Current Period</h4>
-                        <h2 style="margin: 10px 0; color: {MAIN_COLOR};">{len(period_comp['current_clients']):,}</h2>
-                        <p style="margin: 0; font-size: 14px;">Total clients</p>
-                    </div>
-                </div>
-                
-                <div style="background-color: rgba(255,255,255,0.05); padding: 20px; border-radius: 8px;">
-                    <h4 style="margin: 0 0 15px 0;">Population Breakdown</h4>
-                    
-                    <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px;">
-                        <div style="text-align: center;">
-                            <div style="font-size: 14px; color: #999; margin-bottom: 5px;">Carryover</div>
-                            <div style="font-size: 24px; font-weight: bold; color: {NEUTRAL_COLOR};">
-                                {len(period_comp['carryover']):,}
-                            </div>
-                            <div style="font-size: 14px; color: {NEUTRAL_COLOR};">
-                                {carryover_pct:.1f}%
-                            </div>
-                            <div style="font-size: 12px; color: #999; margin-top: 5px;">
-                                Served in both periods
-                            </div>
-                        </div>
-                        
-                        <div style="text-align: center;">
-                            <div style="font-size: 14px; color: #999; margin-bottom: 5px;">New</div>
-                            <div style="font-size: 24px; font-weight: bold; color: {SUCCESS_COLOR};">
-                                {len(period_comp['new']):,}
-                            </div>
-                            <div style="font-size: 14px; color: {SUCCESS_COLOR};">
-                                {new_pct:.1f}%
-                            </div>
-                            <div style="font-size: 12px; color: #999; margin-top: 5px;">
-                                Not served in previous period
-                            </div>
-                        </div>
-                        
-                        <div style="text-align: center;">
-                            <div style="font-size: 14px; color: #999; margin-bottom: 5px;">Exited System</div>
-                            <div style="font-size: 24px; font-weight: bold; color: {WARNING_COLOR};">
-                                {len(period_comp['exited']):,}
-                            </div>
-                            <div style="font-size: 14px; color: {WARNING_COLOR};">
-                                {exited_pct:.1f}%
-                            </div>
-                            <div style="font-size: 12px; color: #999; margin-top: 5px;">
-                                No longer in system
-                            </div>
-                        </div>
-                    </div>
-                </div>
-                
-                <div style="margin-top: 15px; padding: 15px; background-color: rgba(33,102,172,0.1); 
-                            border-left: 4px solid {MAIN_COLOR}; border-radius: 5px;">
-                    <p style="margin: 0; font-size: 14px;">
-                        <strong>Population Insights:</strong>
-            """
-            
-            # Add specific insights based on the data
-            if carryover_pct > 70:
-                period_breakdown_html += f"""
-                        High carryover rate ({carryover_pct:.0f}%) indicates a stable but potentially stuck population. 
-                        Consider enhanced interventions for chronic homelessness.
-                """
-            elif new_pct > 50:
-                period_breakdown_html += f"""
-                        High influx of new clients ({new_pct:.0f}%) suggests growing need or improved outreach. 
-                        Focus on prevention and diversion strategies.
-                """
-            else:
-                period_breakdown_html += f"""
-                        Balanced mix of carryover ({carryover_pct:.0f}%) and new clients ({new_pct:.0f}%). 
-                        System shows healthy flow with room for improvement.
-                """
-            
-            period_breakdown_html += """
-                    </p>
-                </div>
-            </div>
-            """
-            
-            st.html(period_breakdown_html)
+            st.markdown("#### 📊 Client Population Analysis")
+            _render_period_breakdown(period_comp)
         
         # Housing Outcomes Analysis
-        housing_html = _generate_housing_outcomes_html(ph_rate, return_rate, return_window)
-        st.html(housing_html)
+        st.markdown("#### 🏠 Housing Outcomes Assessment")
+        _generate_housing_outcomes_html(ph_rate, return_rate, return_window)
         
-        # Trend Analysis
-        st.markdown("### 📊 Period-over-Period Changes")
+        # Period-over-Period Changes
+        st.markdown("### 📈 Period-over-Period Changes")
         
-        # Find most significant changes
+        # Find significant changes
         significant_changes = []
-        
-        # Check each metric for significant changes
         metric_changes = [
             ("Clients Served", len(served_ids), len(served_prev)),
             ("Inflow", len(inflow_ids), len(inflow_prev)),
@@ -681,50 +632,37 @@ def render_summary_metrics(df_filt: DataFrame, full_df: Optional[DataFrame] = No
         for name, current, previous in metric_changes:
             if previous > 0:
                 _, pct_change = calc_delta(current, previous)
-                if abs(pct_change) >= 10:  # 10% or more change
+                if abs(pct_change) >= 10:
                     significant_changes.append((name, current, previous, pct_change))
         
         if significant_changes:
-            # Sort by absolute percentage change
             significant_changes.sort(key=lambda x: abs(x[3]), reverse=True)
             
-            change_html = """
-            <div style="background-color: rgba(0,0,0,0.2); border-radius: 10px; padding: 20px; margin: 20px 0;">
-                <h4 style="margin: 0 0 15px 0;">Notable Changes from Previous Period:</h4>
-                <div style="display: grid; gap: 10px;">
-            """
-            
-            for name, current, previous, pct_change in significant_changes[:3]:  # Show top 3
-                if pct_change > 0:
-                    icon = "📈"
-                    color = SUCCESS_COLOR if name != "Outflow" else WARNING_COLOR
+            for name, current, previous, pct_change in significant_changes[:3]:
+                icon = "📈" if pct_change > 0 else "📉"
+                # Use info type for neutral changes instead of success/warning
+                if name in ["Clients Served", "Inflow", "PH Exits"]:
+                    # These are generally positive when increasing
+                    color_type = "info" if abs(pct_change) < 20 else ("success" if pct_change > 0 else "warning")
+                elif name == "Outflow":
+                    # Context-dependent - neither inherently good nor bad
+                    color_type = "info"
                 else:
-                    icon = "📉"
-                    color = WARNING_COLOR if name != "Outflow" else SUCCESS_COLOR
+                    color_type = "info"
                 
-                change_html += f"""
-                <div style="display: flex; align-items: center; gap: 15px; padding: 10px; 
-                            background-color: rgba(0,0,0,0.3); border-radius: 5px;">
-                    <span style="font-size: 24px;">{icon}</span>
-                    <div style="flex: 1;">
-                        <strong>{name}</strong><br>
-                        <span style="color: {color};">{pct_change:+.1f}% change</span>
-                    </div>
-                    <div style="text-align: right;">
-                        <span style="color: #999;">{previous:,} → </span>
-                        <strong>{current:,}</strong>
-                    </div>
-                </div>
+                change_content = f"""
+                <strong>{icon} {name}</strong><br>
+                <span>{previous:,} → {current:,} ({pct_change:+.1f}% change)</span>
                 """
-            
-            change_html += """
-                </div>
-            </div>
-            """
-            st.html(change_html)
+                
+                st.html(create_info_box(change_content, type=color_type))
         else:
             st.info("📊 No significant changes (≥10%) detected between periods.")
 
     except Exception as e:
         st.error(f"Error calculating summary metrics: {str(e)}")
         st.info("💡 Try refreshing the page or reloading your data.")
+
+# ==================== PUBLIC API ====================
+
+__all__ = ['render_summary_metrics', 'SUMMARY_SECTION_KEY']

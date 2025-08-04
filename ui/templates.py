@@ -1,47 +1,156 @@
 """
-HTML templates and logo components
+UI Templates
 """
 
 import streamlit as st
+from typing import Optional
 
-# Header logo HTML
-HTML_HEADER_LOGO = """
-<div style="background-color: #111111; padding: 12px 20px; border-radius: 8px; text-align: left;">
-    <a href="https://icalliances.org/" target="_blank">
-        <img src="https://images.squarespace-cdn.com/content/v1/54ca7491e4b000c4d5583d9c/eb7da336-e61c-4e0b-bbb5-1a7b9d45bff6/Dash+Logo+2.png?format=1000w" width="350">
-    </a>
-</div>
-"""
+# ==================== NEUTRAL COLOR SYSTEM ====================
+class NeutralPalette:
+    """Enhanced neutral colors that adapt to theme context"""
+    # Primary brand colors
+    PRIMARY = "#0066CC"
+    PRIMARY_HOVER = "#0052A3"
+    
+    # Adaptive backgrounds using currentColor
+    BG_SUBTLE = "color-mix(in srgb, currentColor 5%, transparent)"
+    BG_LIGHT = "color-mix(in srgb, currentColor 8%, transparent)"
+    BG_MEDIUM = "color-mix(in srgb, currentColor 12%, transparent)"
+    
+    # Borders that adapt to theme
+    BORDER_SUBTLE = "color-mix(in srgb, currentColor 15%, transparent)"
+    BORDER_DEFAULT = "color-mix(in srgb, currentColor 20%, transparent)"
+    
+    # Text opacity levels for hierarchy
+    TEXT_PRIMARY = "1"
+    TEXT_SECONDARY = "0.85"
+    TEXT_MUTED = "0.65"
+    
+    # Semantic colors that work in both themes
+    SUCCESS = "#059862"
+    WARNING = "#D97706"
+    DANGER = "#DC2626"
+    INFO = "#0066CC"
+    
+    # Neutral colors for better adaptation
+    NEUTRAL_HEADER = "currentColor"
+    NEUTRAL_TEXT = "inherit"
+    NEUTRAL_MUTED = "color-mix(in srgb, currentColor 70%, transparent)"
+    NEUTRAL_LIGHT = "color-mix(in srgb, currentColor 50%, transparent)"
+    NEUTRAL_BORDER = "color-mix(in srgb, currentColor 25%, transparent)"
+    NEUTRAL_BG = "color-mix(in srgb, currentColor 10%, transparent)"
+    NEUTRAL_BG_LIGHT = "color-mix(in srgb, currentColor 5%, transparent)"
 
-# Footer HTML with copyright and logos
-HTML_FOOTER = """
-<div style="background-color: #111111; padding: 30px 25px; border-radius: 12px; margin-top: 50px;">
-    <div style="font-style: italic; color: #aaaaaa; text-align: center; font-size: 18px;">
-        <a href="https://icalliances.org/" target="_blank">
-            <img src="https://images.squarespace-cdn.com/content/v1/54ca7491e4b000c4d5583d9c/eb7da336-e61c-4e0b-bbb5-1a7b9d45bff6/Dash+Logo+2.png?format=900w" width="160"> 
+# ==================== HEADER COMPONENTS ====================
+
+def get_header_logo_html() -> str:
+    """
+    Enhanced header logo with better styling and hover effects.
+    """
+    return f"""
+    <div style="
+        background: {NeutralPalette.BG_SUBTLE};
+        padding: 20px 28px;
+        border-radius: 16px;
+        border: 1px solid {NeutralPalette.BORDER_SUBTLE};
+        text-align: left;
+        transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+    "
+    onmouseover="this.style.transform='translateY(-2px)'; this.style.boxShadow='0 4px 12px rgba(0, 0, 0, 0.1)';"
+    onmouseout="this.style.transform='translateY(0)'; this.style.boxShadow='0 1px 3px rgba(0, 0, 0, 0.05)';">
+        <a href="https://icalliances.org/" target="_blank" style="text-decoration: none;">
+            <img src="https://images.squarespace-cdn.com/content/v1/54ca7491e4b000c4d5583d9c/eb7da336-e61c-4e0b-bbb5-1a7b9d45bff6/Dash+Logo+2.png?format=1000w" 
+                 width="350" 
+                 alt="DASH Logo"
+                 style="max-width: 100%; height: auto; display: block;">
         </a>
-        <div style="margin-top: 10px;">DASH™ is a trademark of Institute for Community Alliances.</div>
     </div>
-    <div style="font-style: italic; color: #aaaaaa; text-align: center; margin-top: 20px; font-size: 16px;">
-        <a href="https://icalliances.org/" target="_blank">
-            <img src="https://images.squarespace-cdn.com/content/v1/54ca7491e4b000c4d5583d9c/1475614371395-KFTYP42QLJN0VD5V9VB1/ICA+Official+Logo+PNG+%28transparent%29.png?format=1500w" width="120">
-        </a>
-        <div style="margin-top: 8px;">© 2025 Institute for Community Alliances (ICA). All rights reserved.</div>
-    </div>
-</div>
-"""
+    """
 
-ABOUT_SPM2_CONTENT = """
-<div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; color: #e0e0e0; line-height: 1.6;">
+# ==================== FOOTER COMPONENTS ====================
+
+def get_footer_html() -> str:
+    """
+    Enhanced footer with improved spacing and visual design.
+    """
+    return f"""
+    <div style="
+        background: {NeutralPalette.BG_SUBTLE};
+        padding: 48px 36px;
+        border-radius: 16px;
+        border: 1px solid {NeutralPalette.BORDER_SUBTLE};
+        margin-top: 80px;
+        text-align: center;
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+    ">
+        <div style="margin-bottom: 36px;">
+            <a href="https://icalliances.org/" target="_blank" style="
+                display: inline-block;
+                transition: transform 0.2s ease, opacity 0.2s ease;
+            "
+            onmouseover="this.style.transform='scale(1.05)'; this.style.opacity='1';"
+            onmouseout="this.style.transform='scale(1)'; this.style.opacity='0.9';">
+                <img src="https://images.squarespace-cdn.com/content/v1/54ca7491e4b000c4d5583d9c/eb7da336-e61c-4e0b-bbb5-1a7b9d45bff6/Dash+Logo+2.png?format=900w" 
+                     width="160"
+                     alt="DASH Logo"
+                     style="opacity: 0.9;">
+            </a>
+            <div style="
+                margin-top: 16px;
+                font-style: italic;
+                opacity: {NeutralPalette.TEXT_MUTED};
+                font-size: 0.95rem;
+                letter-spacing: 0.01em;
+            ">
+                DASH™ is a trademark of Institute for Community Alliances.
+            </div>
+        </div>
+        
+        <div style="
+            padding-top: 24px;
+            border-top: 1px solid {NeutralPalette.BORDER_SUBTLE};
+        ">
+            <a href="https://icalliances.org/" target="_blank" style="
+                display: inline-block;
+                transition: transform 0.2s ease, opacity 0.2s ease;
+            "
+            onmouseover="this.style.transform='scale(1.05)'; this.style.opacity='0.9';"
+            onmouseout="this.style.transform='scale(1)'; this.style.opacity='0.75';">
+                <img src="https://images.squarespace-cdn.com/content/v1/54ca7491e4b000c4d5583d9c/1475614371395-KFTYP42QLJN0VD5V9VB1/ICA+Official+Logo+PNG+%28transparent%29.png?format=1500w" 
+                     width="120"
+                     alt="ICA Logo"
+                     style="opacity: 0.75;">
+            </a>
+            <div style="
+                margin-top: 16px;
+                opacity: {NeutralPalette.TEXT_MUTED};
+                font-size: 0.875rem;
+                letter-spacing: 0.025em;
+            ">
+                © 2025 Institute for Community Alliances (ICA). All rights reserved.
+            </div>
+        </div>
+    </div>
+    """
+
+def render_footer():
+    """Render the application footer"""
+    st.html(get_footer_html())
+
+# ==================== ORIGINAL ABOUT SECTIONS WITH NEUTRAL COLORS ====================
+
+ABOUT_SPM2_CONTENT = f"""
+<div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; color: {NeutralPalette.NEUTRAL_TEXT}; line-height: 1.6;">
     <p style="margin-bottom: 20px;">
-        <strong style="font-size: 1.1em; color: #ffffff;">SPM2 Analysis Overview</strong><br>
-        <em style="color: #b0b0b0;">Assessing housing stability by tracking if and when clients return to homeless services after exiting to permanent housing.</em>
+        <strong style="font-size: 1.1em; color: {NeutralPalette.NEUTRAL_HEADER};">SPM2 Analysis Overview</strong><br>
+        <em style="color: {NeutralPalette.NEUTRAL_MUTED};">Assessing housing stability by tracking if and when clients return to homeless services after exiting to permanent housing.</em>
     </p>
     
-    <hr style="border: none; border-top: 1px solid #444; margin: 20px 0;">
+    <hr style="border: none; border-top: 1px solid {NeutralPalette.NEUTRAL_BORDER}; margin: 20px 0;">
     
     <div style="margin-bottom: 25px;">
-        <h3 style="color: #ffffff; font-size: 1em; margin-bottom: 10px;">1. Default Client Universe</h3>
+        <h3 style="color: {NeutralPalette.NEUTRAL_HEADER}; font-size: 1em; margin-bottom: 10px;">1. Default Client Universe</h3>
         <p style="margin-bottom: 10px;"><strong>Included Project Types:</strong></p>
         <ul style="margin-left: 20px; margin-bottom: 15px;">
             <li>Street Outreach (SO)</li>
@@ -58,29 +167,29 @@ ABOUT_SPM2_CONTENT = """
             <li>Exit Date ≤ (Report End Date – 730 days)</li>
         </ul>
         
-        <p style="background-color: rgba(255, 193, 7, 0.1); padding: 10px; border-radius: 4px; border-left: 3px solid #ffc107;">
+        <p style="background-color: rgba(217, 119, 6, 0.1); padding: 10px; border-radius: 4px; border-left: 3px solid {NeutralPalette.WARNING};">
             <strong>NOTE:</strong> Subject to change based on filter selections.
         </p>
     </div>
     
-    <hr style="border: none; border-top: 1px solid #444; margin: 20px 0;">
+    <hr style="border: none; border-top: 1px solid {NeutralPalette.NEUTRAL_BORDER}; margin: 20px 0;">
     
     <div style="margin-bottom: 25px;">
-        <h3 style="color: #ffffff; font-size: 1em; margin-bottom: 10px;">2. Identifying the "Permanent Housing" Exit</h3>
+        <h3 style="color: {NeutralPalette.NEUTRAL_HEADER}; font-size: 1em; margin-bottom: 10px;">2. Identifying the "Permanent Housing" Exit</h3>
         <ul style="margin-left: 20px; margin-bottom: 15px;">
             <li><strong>Definition:</strong> the client's <strong>earliest</strong> exit to any Permanent Housing destination</li>
             <li><strong>Tie‑Breaker:</strong> if multiple exits share that date, pick the one with <strong>lowest Enrollment ID</strong></li>
         </ul>
         
-        <p style="background-color: rgba(255, 193, 7, 0.1); padding: 10px; border-radius: 4px; border-left: 3px solid #ffc107;">
+        <p style="background-color: rgba(217, 119, 6, 0.1); padding: 10px; border-radius: 4px; border-left: 3px solid {NeutralPalette.WARNING};">
             <strong>NOTE:</strong> Exit Filters are applied BEFORE we identify the earliest exit to permanent housing. So, if the earliest exit to permanent housing for this client is in a program type that has been filtered out, we will select the second-most recent exit to permanent housing, and so on.
         </p>
     </div>
     
-    <hr style="border: none; border-top: 1px solid #444; margin: 20px 0;">
+    <hr style="border: none; border-top: 1px solid {NeutralPalette.NEUTRAL_BORDER}; margin: 20px 0;">
     
     <div style="margin-bottom: 25px;">
-        <h3 style="color: #ffffff; font-size: 1em; margin-bottom: 10px;">3. Scanning for a Return to Homeless Services</h3>
+        <h3 style="color: {NeutralPalette.NEUTRAL_HEADER}; font-size: 1em; margin-bottom: 10px;">3. Scanning for a Return to Homeless Services</h3>
         <ol style="margin-left: 20px; margin-bottom: 15px;">
             <li style="margin-bottom: 8px;"><strong>Search Window:</strong> from the PH exit date up to the end of the reporting period</li>
             <li style="margin-bottom: 8px;"><strong>Eligible Return Enrollments:</strong>
@@ -104,121 +213,122 @@ ABOUT_SPM2_CONTENT = """
             </li>
         </ol>
         
-        <p style="background-color: rgba(255, 193, 7, 0.1); padding: 10px; border-radius: 4px; border-left: 3px solid #ffc107;">
+        <p style="background-color: rgba(217, 119, 6, 0.1); padding: 10px; border-radius: 4px; border-left: 3px solid {NeutralPalette.WARNING};">
             <strong>NOTE:</strong> Return Filters are applied BEFORE we begin scanning for re-entry. If returns to PSH are excluded, for example, the tool will not disqualify any returns due to overlap with PSH enrollments, even if they exist.
         </p>
     </div>
     
-    <hr style="border: none; border-top: 1px solid #444; margin: 20px 0;">
+    <hr style="border: none; border-top: 1px solid {NeutralPalette.NEUTRAL_BORDER}; margin: 20px 0;">
     
     <div style="margin-bottom: 25px;">
-        <h3 style="color: #ffffff; font-size: 1em; margin-bottom: 10px;">4. Classifying Return Timing</h3>
+        <h3 style="color: {NeutralPalette.NEUTRAL_HEADER}; font-size: 1em; margin-bottom: 10px;">4. Classifying Return Timing</h3>
         <table style="width: 100%; border-collapse: collapse; margin-top: 10px;">
             <thead>
-                <tr style="background-color: #333;">
-                    <th style="padding: 10px; text-align: left; border: 1px solid #555;">Category</th>
-                    <th style="padding: 10px; text-align: left; border: 1px solid #555;">Days from Exit</th>
+                <tr style="background-color: {NeutralPalette.NEUTRAL_BG};">
+                    <th style="padding: 10px; text-align: left; border: 1px solid {NeutralPalette.NEUTRAL_BORDER};">Category</th>
+                    <th style="padding: 10px; text-align: left; border: 1px solid {NeutralPalette.NEUTRAL_BORDER};">Days from Exit</th>
                 </tr>
             </thead>
             <tbody>
                 <tr>
-                    <td style="padding: 10px; border: 1px solid #555;"><strong>&lt; 6 months</strong></td>
-                    <td style="padding: 10px; border: 1px solid #555;">0–180 days</td>
+                    <td style="padding: 10px; border: 1px solid {NeutralPalette.NEUTRAL_BORDER};"><strong>&lt; 6 months</strong></td>
+                    <td style="padding: 10px; border: 1px solid {NeutralPalette.NEUTRAL_BORDER};">0–180 days</td>
                 </tr>
-                <tr style="background-color: rgba(255, 255, 255, 0.05);">
-                    <td style="padding: 10px; border: 1px solid #555;"><strong>6–12 months</strong></td>
-                    <td style="padding: 10px; border: 1px solid #555;">181–365 days</td>
+                <tr style="background-color: {NeutralPalette.NEUTRAL_BG_LIGHT};">
+                    <td style="padding: 10px; border: 1px solid {NeutralPalette.NEUTRAL_BORDER};"><strong>6–12 months</strong></td>
+                    <td style="padding: 10px; border: 1px solid {NeutralPalette.NEUTRAL_BORDER};">181–365 days</td>
                 </tr>
                 <tr>
-                    <td style="padding: 10px; border: 1px solid #555;"><strong>12–24 months</strong></td>
-                    <td style="padding: 10px; border: 1px solid #555;">366–730 days</td>
+                    <td style="padding: 10px; border: 1px solid {NeutralPalette.NEUTRAL_BORDER};"><strong>12–24 months</strong></td>
+                    <td style="padding: 10px; border: 1px solid {NeutralPalette.NEUTRAL_BORDER};">366–730 days</td>
                 </tr>
-                <tr style="background-color: rgba(255, 255, 255, 0.05);">
-                    <td style="padding: 10px; border: 1px solid #555;"><strong>&gt; 24 months</strong></td>
-                    <td style="padding: 10px; border: 1px solid #555;">731+ days</td>
+                <tr style="background-color: {NeutralPalette.NEUTRAL_BG_LIGHT};">
+                    <td style="padding: 10px; border: 1px solid {NeutralPalette.NEUTRAL_BORDER};"><strong>&gt; 24 months</strong></td>
+                    <td style="padding: 10px; border: 1px solid {NeutralPalette.NEUTRAL_BORDER};">731+ days</td>
                 </tr>
             </tbody>
         </table>
     </div>
     
-    <hr style="border: none; border-top: 1px solid #444; margin: 20px 0;">
+    <hr style="border: none; border-top: 1px solid {NeutralPalette.NEUTRAL_BORDER}; margin: 20px 0;">
     
     <div style="margin-bottom: 25px;">
-        <h3 style="color: #ffffff; font-size: 1em; margin-bottom: 10px;">5. Interpretation Guide</h3>
+        <h3 style="color: {NeutralPalette.NEUTRAL_HEADER}; font-size: 1em; margin-bottom: 10px;">5. Interpretation Guide</h3>
         <ul style="margin-left: 20px;">
             <li style="margin-bottom: 10px;">
                 <strong>Return Rate</strong><br>
-                <span style="color: #b0b0b0;">Percentage of clients who re‑enroll in any homeless service after exiting to Permanent Housing</span>
+                <span style="color: {NeutralPalette.NEUTRAL_MUTED};">Percentage of clients who re‑enroll in any homeless service after exiting to Permanent Housing</span>
             </li>
             <li style="margin-bottom: 10px;">
                 <strong>Timing Distribution</strong><br>
-                <span style="color: #b0b0b0;">How long (in days) it takes for clients to return, broken down by the categories above</span>
+                <span style="color: {NeutralPalette.NEUTRAL_MUTED};">How long (in days) it takes for clients to return, broken down by the categories above</span>
             </li>
             <li>
                 <strong>Trajectory Flows</strong><br>
-                <span style="color: #b0b0b0;">Sankey or flow diagrams showing client pathways from exit through return (if any)</span>
+                <span style="color: {NeutralPalette.NEUTRAL_MUTED};">Sankey or flow diagrams showing client pathways from exit through return (if any)</span>
             </li>
         </ul>
     </div>
 </div>
 """
 
-ABOUT_INBOUND_CONTENT = """
-<div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; color: #e0e0e0; line-height: 1.6;">
+ABOUT_INBOUND_CONTENT = f"""
+<div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; color: {NeutralPalette.NEUTRAL_TEXT}; line-height: 1.6;">
     <p style="margin-bottom: 20px;">
-        <strong style="font-size: 1.1em; color: #ffffff;">Inbound Recidivism Analysis Overview</strong><br>
-        <em style="color: #b0b0b0;">Evaluate client returns to homelessness programs after prior exits.</em>
+        <strong style="font-size: 1.1em; color: {NeutralPalette.NEUTRAL_HEADER};">Inbound Recidivism Analysis Overview</strong><br>
+        <em style="color: {NeutralPalette.NEUTRAL_MUTED};">Track each client’s first re-entry into homelessness services following a prior exit within the reporting period.</em>
     </p>
     
     <div style="margin-bottom: 25px;">
-        <h3 style="color: #ffffff; font-size: 1em; margin-bottom: 10px;">Key Features:</h3>
+        <h3 style="color: {NeutralPalette.NEUTRAL_HEADER}; font-size: 1em; margin-bottom: 10px;">Key Features:</h3>
         <ul style="margin-left: 20px;">
-            <li style="margin-bottom: 8px;"><strong>Configurable Lookback Window:</strong> Choose how many days before entry to search for exits.</li>
-            <li style="margin-bottom: 8px;"><strong>First-Entry Selection:</strong> Takes each client's first entry between <em>report_start</em> and <em>report_end</em>.</li>
-            <li style="margin-bottom: 8px;"><strong>Flexible Filters:</strong> Apply CoC, local CoC, agency, program, and project-type filters separately on entries and exits.</li>
+            <li style="margin-bottom: 8px;"><strong>Configurable Lookback Window:</strong> Define how many days before the entry date to search for a preceding exit.</li>
+            <li style="margin-bottom: 8px;"><strong>First Entry per Client:</strong> Only the earliest <em>ProjectStart</em> between <em>report_start</em> and <em>report_end</em> is analyzed for each client.</li>
+            <li style="margin-bottom: 8px;"><strong>Customizable Filters:</strong> Apply separate CoC, local CoC, agency, program, and project-type filters on entries and exits.</li>
             <li style="margin-bottom: 8px;"><strong>Return Classification:</strong>
                 <ul style="margin-left: 20px; margin-top: 5px;">
-                    <li>🆕 <strong>New Clients:</strong> No exit found within the lookback window.</li>
-                    <li>🔄 <strong>Returning Clients:</strong> Last exit within lookback, but not to permanent housing.</li>
-                    <li>🏠 <strong>Returning from Housing:</strong> Last exit destination was <code style="background-color: #333; padding: 2px 4px; border-radius: 3px;">Permanent Housing Situations</code>.</li>
+                    <li>🆕 <strong>New Enrollments:</strong> No exit found within the lookback window.</li>
+                    <li>🔄 <strong>Returning:</strong> Most recent exit in the lookback window to a non-permanent-housing destination.</li>
+                    <li>🏠 <strong>Returning from Housing:</strong> Most recent exit destination was <code style="background-color: {NeutralPalette.NEUTRAL_BG}; padding: 2px 4px; border-radius: 3px;">Permanent Housing Situations</code>.</li>
                 </ul>
             </li>
-            <li><strong>Interactive Visuals:</strong> Metrics cards, time‑to‑entry box plots, flow matrices, and Sankey diagrams.</li>
+            <li><strong>Interactive Visuals:</strong> Summary metrics cards, time-to-entry box plots, flow pivot tables, and Sankey diagrams.</li>
         </ul>
     </div>
     
     <div style="margin-bottom: 25px;">
-        <h3 style="color: #ffffff; font-size: 1em; margin-bottom: 10px;">Methodology Highlights:</h3>
+        <h3 style="color: {NeutralPalette.NEUTRAL_HEADER}; font-size: 1em; margin-bottom: 10px;">Methodology Highlights:</h3>
         <ol style="margin-left: 20px;">
-            <li style="margin-bottom: 8px;"><strong>Entry Identification:</strong> Filtered by date range, then deduplicated to first entry per client.</li>
-            <li style="margin-bottom: 8px;"><strong>Exit Lookup:</strong> For each entry, find the <strong>single most recent</strong> exit within <em>lookback_days</em>.</li>
+            <li style="margin-bottom: 8px;"><strong>Entry Selection:</strong> Filter by date range, sort by <em>ProjectStart</em>, then select the first entry per client.</li>
+            <li style="margin-bottom: 8px;"><strong>Exit Lookup:</strong> For each selected entry, identify the <strong>single most recent</strong> exit within <em>lookback_days</em> prior to entry.</li>
             <li><strong>Classification Logic:</strong>
                 <ul style="margin-left: 20px; margin-top: 5px;">
-                    <li><em>New</em> if no qualifying exit</li>
-                    <li><em>Returning From Housing</em> if exit's destination == <code style="background-color: #333; padding: 2px 4px; border-radius: 3px;">Permanent Housing Situations</code></li>
-                    <li><em>Returning</em> otherwise</li>
+                    <li><em>New</em> if no prior exit in the window.</li>
+                    <li><em>Returning from Housing</em> if the exit’s <em>ExitDestinationCat</em> equals <code style="background-color: {NeutralPalette.NEUTRAL_BG}; padding: 2px 4px; border-radius: 3px;">Permanent Housing Situations</code>.</li>
+                    <li><em>Returning</em> otherwise.</li>
                 </ul>
             </li>
         </ol>
     </div>
     
-    <div style="background-color: rgba(52, 152, 219, 0.1); padding: 15px; border-radius: 4px; border-left: 3px solid #3498db;">
-        <h3 style="color: #ffffff; font-size: 1em; margin-bottom: 10px;">Interpretation Guide:</h3>
+    <div style="background-color: rgba(0, 102, 204, 0.1); padding: 15px; border-radius: 4px; border-left: 3px solid {NeutralPalette.INFO};">
+        <h3 style="color: {NeutralPalette.NEUTRAL_HEADER}; font-size: 1em; margin-bottom: 10px;">Interpretation Guide:</h3>
         <ul style="margin-left: 20px; margin-bottom: 0;">
-            <li style="margin-bottom: 8px;"><strong>Metrics:</strong> Counts & percentages for <em>New</em>, <em>Returning</em>, and <em>Returning from Housing</em>.</li>
-            <li style="margin-bottom: 8px;"><strong>Timing Analysis:</strong> Box plots show distribution of days between exit and entry.</li>
-            <li><strong>Flow Analysis:</strong> Matrices & Sankey diagrams visualize exit→entry paths.</li>
+            <li style="margin-bottom: 8px;"><strong>Summary Metrics:</strong> Counts and percentages for <em>New</em>, <em>Returning</em>, and <em>Returning from Housing</em>.</li>
+            <li style="margin-bottom: 8px;"><strong>Timing Analysis:</strong> Box plots display the distribution of days between exit and entry.</li>
+            <li><strong>Flow Analysis:</strong> Pivot tables and Sankey diagrams visualize exit → entry pathways.</li>
         </ul>
     </div>
 </div>
 """
 
-ABOUT_OUTBOUND_CONTENT = """
-<div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; color: #e0e0e0; line-height: 1.6;">
-    <h3 style="color: #ffffff; font-size: 1.1em; margin-bottom: 15px;">How This Analysis Works</h3>
+
+ABOUT_OUTBOUND_CONTENT = f"""
+<div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; color: {NeutralPalette.NEUTRAL_TEXT}; line-height: 1.6;">
+    <h3 style="color: {NeutralPalette.NEUTRAL_HEADER}; font-size: 1.1em; margin-bottom: 15px;">How This Analysis Works</h3>
     
     <div style="margin-bottom: 25px;">
-        <h4 style="color: #ffffff; font-size: 0.95em; margin-bottom: 10px;">1. Which Exits Are Included?</h4>
+        <h4 style="color: {NeutralPalette.NEUTRAL_HEADER}; font-size: 0.95em; margin-bottom: 10px;">1. Which Exits Are Included?</h4>
         <p style="margin-left: 20px;">
             You configure filters (CoC, Agency, Program, Project Type, Destination Category, etc.) and a reporting date range.<br>
             For each client, only their <strong>last exit</strong> enrollment (matching filters and within the date window) is analyzed.
@@ -226,7 +336,7 @@ ABOUT_OUTBOUND_CONTENT = """
     </div>
     
     <div style="margin-bottom: 25px;">
-        <h4 style="color: #ffffff; font-size: 0.95em; margin-bottom: 10px;">2. Return Definitions</h4>
+        <h4 style="color: {NeutralPalette.NEUTRAL_HEADER}; font-size: 0.95em; margin-bottom: 10px;">2. Return Definitions</h4>
         <ul style="margin-left: 20px;">
             <li style="margin-bottom: 10px;">
                 <strong>Return</strong> = first enrollment after the exit (any project type).
@@ -238,7 +348,7 @@ ABOUT_OUTBOUND_CONTENT = """
                     <li style="margin-bottom: 5px;">Non-PH homeless enrollments (SO, ES, TH, SH) qualify immediately as returns to homelessness.</li>
                     <li>For PH enrollments, additional rules apply:
                         <ul style="margin-left: 20px; margin-top: 5px;">
-                            <li><strong>Skip</strong> any PH enrollment where <code style="background-color: #333; padding: 2px 4px; border-radius: 3px;">ProjectStart == HouseholdMoveInDate</code>.</li>
+                            <li><strong>Skip</strong> any PH enrollment where <code style="background-color: {NeutralPalette.NEUTRAL_BG}; padding: 2px 4px; border-radius: 3px;">ProjectStart == HouseholdMoveInDate</code>.</li>
                             <li>If gap ≤ 14 days, build an <strong>exclusion window</strong> (from day +1 after start to exit +14 days).</li>
                             <li>Skip any future PH entry falling within any exclusion window.</li>
                             <li>Otherwise, that PH entry <strong>qualifies</strong> as a return to homelessness.</li>
@@ -248,16 +358,16 @@ ABOUT_OUTBOUND_CONTENT = """
             </li>
         </ul>
         
-        <p style="background-color: rgba(255, 193, 7, 0.1); padding: 10px; border-radius: 4px; border-left: 3px solid #ffc107; margin-top: 15px;">
+        <p style="background-color: rgba(217, 119, 6, 0.1); padding: 10px; border-radius: 4px; border-left: 3px solid {NeutralPalette.WARNING}; margin-top: 15px;">
             <em><strong>Note:</strong> "Return to Homelessness" rates are computed <strong>only</strong> for exits to Permanent Housing.</em>
         </p>
     </div>
     
     <div style="margin-bottom: 25px;">
-        <h4 style="color: #ffffff; font-size: 0.95em; margin-bottom: 10px;">3. Key Output Metrics</h4>
+        <h4 style="color: {NeutralPalette.NEUTRAL_HEADER}; font-size: 0.95em; margin-bottom: 10px;">3. Key Output Metrics</h4>
         <ul style="margin-left: 20px;">
             <li style="margin-bottom: 8px;"><strong># Exits Analyzed:</strong> count of last exits matching your filters.</li>
-            <li style="margin-bottom: 8px;"><strong># Exits to PH:</strong> count where <code style="background-color: #333; padding: 2px 4px; border-radius: 3px;">ExitDestinationCat == "Permanent Housing Situations"</code>.</li>
+            <li style="margin-bottom: 8px;"><strong># Exits to PH:</strong> count where <code style="background-color: {NeutralPalette.NEUTRAL_BG}; padding: 2px 4px; border-radius: 3px;">ExitDestinationCat == "Permanent Housing Situations"</code>.</li>
             <li style="margin-bottom: 8px;"><strong>Return & % Return:</strong> # and share of exits with any subsequent enrollment.</li>
             <li style="margin-bottom: 8px;"><strong>Return to Homelessness (from PH) & %:</strong> among PH exits, # and share meeting the above "Return to Homelessness" criteria.</li>
             <li><strong>Timing Metrics:</strong> median/average/max days between exit and qualifying return.</li>
@@ -265,7 +375,7 @@ ABOUT_OUTBOUND_CONTENT = """
     </div>
     
     <div style="margin-bottom: 25px;">
-        <h4 style="color: #ffffff; font-size: 0.95em; margin-bottom: 10px;">4. PH vs. Non-PH Comparison</h4>
+        <h4 style="color: {NeutralPalette.NEUTRAL_HEADER}; font-size: 0.95em; margin-bottom: 10px;">4. PH vs. Non-PH Comparison</h4>
         <p style="margin-left: 20px;">
             Side-by-side metrics for exits to Permanent Housing vs. all other exits.<br>
             PH-specific "Return to Homelessness" metrics are shown only for the PH subset.
@@ -274,52 +384,23 @@ ABOUT_OUTBOUND_CONTENT = """
 </div>
 """
 
-def render_header():
-    """Render the application header with logo"""
-    col1, col2 = st.columns([2, 1])
-    with col1:
-        st.markdown("""
-        - Upload your data file to get started.
-        - Use the **Reset Session** button if you need to start over.
-        - Navigate between the available analyses:
-            1. **SPM 2 Analysis**
-            2. **Inbound Recidivism Analysis**
-            3. **Outbound Recidivism Analysis**
-            4. **General Analysis**
-        """)
-        
-        # Add the analysis type descriptions
-        with st.expander("What is the difference between these tabs? How do I choose?", expanded=False):
-            st.html("""
-            <div style="font-size: 15px; line-height: 1.8;">
-                <p><span style="color: #00629b; font-weight: bold;">SPM 2 Analysis</span>: Looks for returns to homelessness based on client's first exit (to perm destination by default) within the specified lookback period. Returns must be within the specified return period.</p>
-                <p><span style="color: #00629b; font-weight: bold;">Inbound Recidivism</span>: Of all clients entering a set of programs during the specified time period, how many are returners?</p>
-                <p><span style="color: #00629b; font-weight: bold;">Outbound Recidivism</span>: Looks for returns to homelessness based on a client's last exit during the reporting period. Any return found in the source report is included, regardless of time to return.</p>
-                <p><span style="color: #00629b; font-weight: bold;">General Analysis</span>: Comprehensive HMIS data analysis with metrics, trends, demographics, and equity analysis across your entire dataset.</p>
-            </div>
-            """)
-
-            
-    with col2:
-        st.html(HTML_HEADER_LOGO)
-
-ABOUT_GENERAL_ANALYSIS_CONTENT = """ 
-<div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; color: #e0e0e0; line-height: 1.6;">
+ABOUT_GENERAL_ANALYSIS_CONTENT = f""" 
+<div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; color: {NeutralPalette.NEUTRAL_TEXT}; line-height: 1.6;">
     <p style="margin-bottom: 20px;">
-        <strong style="font-size: 1.1em; color: #ffffff;">General Analysis Methodology</strong><br>
-        <em style="color: #b0b0b0;">Comprehensive HMIS data analysis with metrics, demographics, trends, length of stay, and equity analysis across your entire dataset.</em>
+        <strong style="font-size: 1.1em; color: {NeutralPalette.NEUTRAL_HEADER};">General Analysis Methodology</strong><br>
+        <em style="color: {NeutralPalette.NEUTRAL_MUTED};">Comprehensive HMIS data analysis with metrics, demographics, trends, length of stay, and equity analysis across your entire dataset.</em>
     </p>
     
-    <hr style="border: none; border-top: 1px solid #444; margin: 20px 0;">
+    <hr style="border: none; border-top: 1px solid {NeutralPalette.NEUTRAL_BORDER}; margin: 20px 0;">
     
     <div style="margin-bottom: 25px;">
-        <h3 style="color: #ffffff; font-size: 1em; margin-bottom: 10px;">1. Overview - Core Metric Calculations</h3>
+        <h3 style="color: {NeutralPalette.NEUTRAL_HEADER}; font-size: 1em; margin-bottom: 10px;">1. Overview - Core Metric Calculations</h3>
         
-        <h4 style="color: #b0b0b0; font-size: 0.9em; margin-top: 15px; margin-bottom: 10px;">System Flow Metrics</h4>
+        <h4 style="color: {NeutralPalette.NEUTRAL_MUTED}; font-size: 0.9em; margin-top: 15px; margin-bottom: 10px;">System Flow Metrics</h4>
         <ul style="margin-left: 20px; margin-bottom: 15px;">
             <li style="margin-bottom: 8px;">
                 <strong>Clients Served:</strong> Unique clients with active enrollment anytime during period<br>
-                <code style="background-color: #333; padding: 2px 4px; border-radius: 3px; font-size: 0.85em;">
+                <code style="background-color: {NeutralPalette.NEUTRAL_BG}; padding: 2px 4px; border-radius: 3px; font-size: 0.85em;">
                 (ProjectExit ≥ period_start OR ProjectExit is NULL) AND ProjectStart ≤ period_end
                 </code>
             </li>
@@ -328,13 +409,13 @@ ABOUT_GENERAL_ANALYSIS_CONTENT = """
             </li>
             <li style="margin-bottom: 8px;">
                 <strong>Inflow:</strong> Clients entering programs who weren't in ANY programs the day before period started<br>
-                <code style="background-color: #333; padding: 2px 4px; border-radius: 3px; font-size: 0.85em;">
+                <code style="background-color: {NeutralPalette.NEUTRAL_BG}; padding: 2px 4px; border-radius: 3px; font-size: 0.85em;">
                 ProjectStart BETWEEN period_start AND period_end AND ClientID NOT IN active_before_period
                 </code>
             </li>
             <li style="margin-bottom: 8px;">
                 <strong>Outflow:</strong> Clients exiting programs who aren't in ANY programs on the last day of period<br>
-                <code style="background-color: #333; padding: 2px 4px; border-radius: 3px; font-size: 0.85em;">
+                <code style="background-color: {NeutralPalette.NEUTRAL_BG}; padding: 2px 4px; border-radius: 3px; font-size: 0.85em;">
                 ProjectExit BETWEEN period_start AND period_end AND ClientID NOT IN active_at_period_end
                 </code>
             </li>
@@ -343,23 +424,23 @@ ABOUT_GENERAL_ANALYSIS_CONTENT = """
             </li>
         </ul>
         
-        <h4 style="color: #b0b0b0; font-size: 0.9em; margin-top: 15px; margin-bottom: 10px;">Housing Outcome Metrics</h4>
+        <h4 style="color: {NeutralPalette.NEUTRAL_MUTED}; font-size: 0.9em; margin-top: 15px; margin-bottom: 10px;">Housing Outcome Metrics</h4>
         <ul style="margin-left: 20px; margin-bottom: 15px;">
             <li style="margin-bottom: 8px;">
                 <strong>PH Exits:</strong> Unique clients who exited to permanent housing destinations<br>
-                <code style="background-color: #333; padding: 2px 4px; border-radius: 3px; font-size: 0.85em;">
+                <code style="background-color: {NeutralPalette.NEUTRAL_BG}; padding: 2px 4px; border-radius: 3px; font-size: 0.85em;">
                 ExitDestinationCat = "Permanent Housing Situations" AND ProjectExit BETWEEN period_start AND period_end
                 </code>
             </li>
             <li style="margin-bottom: 8px;">
                 <strong>PH Exit Rate:</strong> Percentage of unique exiting clients who went to permanent housing<br>
-                <code style="background-color: #333; padding: 2px 4px; border-radius: 3px; font-size: 0.85em;">
+                <code style="background-color: {NeutralPalette.NEUTRAL_BG}; padding: 2px 4px; border-radius: 3px; font-size: 0.85em;">
                 (Unique PH exit clients ÷ Unique clients with any exit) × 100
                 </code>
             </li>
         </ul>
         
-        <h4 style="color: #b0b0b0; font-size: 0.9em; margin-top: 15px; margin-bottom: 10px;">Returns to Homelessness (HUD-Compliant Logic)</h4>
+        <h4 style="color: {NeutralPalette.NEUTRAL_MUTED}; font-size: 0.9em; margin-top: 15px; margin-bottom: 10px;">Returns to Homelessness (HUD-Compliant Logic)</h4>
         <ol style="margin-left: 20px; margin-bottom: 15px;">
             <li style="margin-bottom: 10px;">
                 <strong>Base Population:</strong> Clients who exited to permanent housing during reporting period
@@ -383,7 +464,7 @@ ABOUT_GENERAL_ANALYSIS_CONTENT = """
             </li>
         </ol>
         
-        <h4 style="color: #b0b0b0; font-size: 0.9em; margin-top: 15px; margin-bottom: 10px;">Period Comparison Analysis</h4>
+        <h4 style="color: {NeutralPalette.NEUTRAL_MUTED}; font-size: 0.9em; margin-top: 15px; margin-bottom: 10px;">Period Comparison Analysis</h4>
         <ul style="margin-left: 20px; margin-bottom: 15px;">
             <li style="margin-bottom: 8px;">
                 <strong>Carryover Clients:</strong> Active in both current and previous periods
@@ -396,15 +477,15 @@ ABOUT_GENERAL_ANALYSIS_CONTENT = """
             </li>
         </ul>
         
-        <p style="background-color: rgba(255, 193, 7, 0.1); padding: 10px; border-radius: 4px; border-left: 3px solid #ffc107;">
+        <p style="background-color: rgba(217, 119, 6, 0.1); padding: 10px; border-radius: 4px; border-left: 3px solid {NeutralPalette.WARNING};">
             <strong>IMPORTANT:</strong> When filters are active, inflow/outflow only track movement within filtered programs. However, returns to homelessness are ALWAYS tracked system-wide regardless of filters.
         </p>
     </div>
     
-    <hr style="border: none; border-top: 1px solid #444; margin: 20px 0;">
+    <hr style="border: none; border-top: 1px solid {NeutralPalette.NEUTRAL_BORDER}; margin: 20px 0;">
     
     <div style="margin-bottom: 25px;">
-        <h3 style="color: #ffffff; font-size: 1em; margin-bottom: 10px;">2. Demographics - Breakdown Analysis</h3>
+        <h3 style="color: {NeutralPalette.NEUTRAL_HEADER}; font-size: 1em; margin-bottom: 10px;">2. Demographics - Breakdown Analysis</h3>
         
         <p style="margin-bottom: 10px;">Breaks down all core metrics by demographic dimensions:</p>
         <ul style="margin-left: 20px; margin-bottom: 15px;">
@@ -421,15 +502,15 @@ ABOUT_GENERAL_ANALYSIS_CONTENT = """
             <li>Returns Count, Returns to Homelessness Rate</li>
         </ul>
         
-        <p style="background-color: rgba(52, 152, 219, 0.1); padding: 10px; border-radius: 4px; border-left: 3px solid #3498db;">
+        <p style="background-color: rgba(0, 102, 204, 0.1); padding: 10px; border-radius: 4px; border-left: 3px solid {NeutralPalette.INFO};">
             <strong>Note:</strong> Returns use the FULL unfiltered dataset to scan for re-entries, ensuring accurate system-wide tracking even when viewing filtered subsets.
         </p>
     </div>
     
-    <hr style="border: none; border-top: 1px solid #444; margin: 20px 0;">
+    <hr style="border: none; border-top: 1px solid {NeutralPalette.NEUTRAL_BORDER}; margin: 20px 0;">
     
     <div style="margin-bottom: 25px;">
-        <h3 style="color: #ffffff; font-size: 1em; margin-bottom: 10px;">3. Trends - Time Series Analysis</h3>
+        <h3 style="color: {NeutralPalette.NEUTRAL_HEADER}; font-size: 1em; margin-bottom: 10px;">3. Trends - Time Series Analysis</h3>
         
         <p style="margin-bottom: 10px;"><strong>Time Aggregation Options:</strong></p>
         <ul style="margin-left: 20px; margin-bottom: 15px;">
@@ -444,22 +525,22 @@ ABOUT_GENERAL_ANALYSIS_CONTENT = """
             <li>Growth rates by demographic groups</li>
         </ul>
         
-        <p style="background-color: rgba(52, 152, 219, 0.1); padding: 10px; border-radius: 4px; border-left: 3px solid #3498db;">
+        <p style="background-color: rgba(0, 102, 204, 0.1); padding: 10px; border-radius: 4px; border-left: 3px solid {NeutralPalette.INFO};">
             <strong>Note:</strong> Each time bucket is calculated independently using the full metric logic, not simple counts. This ensures accurate deduplication and business rule application.
         </p>
     </div>
     
-    <hr style="border: none; border-top: 1px solid #444; margin: 20px 0;">
+    <hr style="border: none; border-top: 1px solid {NeutralPalette.NEUTRAL_BORDER}; margin: 20px 0;">
     
     <div style="margin-bottom: 25px;">
-        <h3 style="color: #ffffff; font-size: 1em; margin-bottom: 10px;">4. Length of Stay Analysis</h3>
+        <h3 style="color: {NeutralPalette.NEUTRAL_HEADER}; font-size: 1em; margin-bottom: 10px;">4. Length of Stay Analysis</h3>
         
-        <h4 style="color: #b0b0b0; font-size: 0.9em; margin-top: 15px; margin-bottom: 10px;">Analysis Level</h4>
-        <p style="margin-bottom: 10px; background-color: rgba(255, 193, 7, 0.1); padding: 10px; border-radius: 4px; border-left: 3px solid #ffc107;">
+        <h4 style="color: {NeutralPalette.NEUTRAL_MUTED}; font-size: 0.9em; margin-top: 15px; margin-bottom: 10px;">Analysis Level</h4>
+        <p style="margin-bottom: 10px; background-color: rgba(217, 119, 6, 0.1); padding: 10px; border-radius: 4px; border-left: 3px solid {NeutralPalette.WARNING};">
             <strong>IMPORTANT:</strong> This is ENROLLMENT-LEVEL analysis. Each enrollment is counted separately - a client with multiple enrollments appears multiple times. All days are calculated using entry/exit dates (not bed nights).
         </p>
         
-        <h4 style="color: #b0b0b0; font-size: 0.9em; margin-top: 15px; margin-bottom: 10px;">Calculation Method</h4>
+        <h4 style="color: {NeutralPalette.NEUTRAL_MUTED}; font-size: 0.9em; margin-top: 15px; margin-bottom: 10px;">Calculation Method</h4>
         <ul style="margin-left: 20px; margin-bottom: 15px;">
             <li style="margin-bottom: 8px;">
                 <strong>For Exited Enrollments:</strong> Exit Date - Entry Date + 1
@@ -480,10 +561,10 @@ ABOUT_GENERAL_ANALYSIS_CONTENT = """
             </li>
         </ul>
         
-        <h4 style="color: #b0b0b0; font-size: 0.9em; margin-top: 15px; margin-bottom: 10px;">Project Type Context</h4>
+        <h4 style="color: {NeutralPalette.NEUTRAL_MUTED}; font-size: 0.9em; margin-top: 15px; margin-bottom: 10px;">Project Type Context</h4>
         <p style="margin-bottom: 10px;">Length of stay interpretation varies by project type.</p>
         
-        <h4 style="color: #b0b0b0; font-size: 0.9em; margin-top: 15px; margin-bottom: 10px;">Additional Features</h4>
+        <h4 style="color: {NeutralPalette.NEUTRAL_MUTED}; font-size: 0.9em; margin-top: 15px; margin-bottom: 10px;">Additional Features</h4>
         <ul style="margin-left: 20px; margin-bottom: 15px;">
             <li style="margin-bottom: 8px;">
                 <strong>Exit Destination Analysis:</strong> Average LOS by exit destination category
@@ -500,12 +581,12 @@ ABOUT_GENERAL_ANALYSIS_CONTENT = """
         </ul>
     </div>
     
-    <hr style="border: none; border-top: 1px solid #444; margin: 20px 0;">
+    <hr style="border: none; border-top: 1px solid {NeutralPalette.NEUTRAL_BORDER}; margin: 20px 0;">
     
     <div style="margin-bottom: 25px;">
-        <h3 style="color: #ffffff; font-size: 1em; margin-bottom: 10px;">5. Equity Analysis</h3>
+        <h3 style="color: {NeutralPalette.NEUTRAL_HEADER}; font-size: 1em; margin-bottom: 10px;">5. Equity Analysis</h3>
         
-        <h4 style="color: #b0b0b0; font-size: 0.9em; margin-top: 15px; margin-bottom: 10px;">Statistical Methods</h4>
+        <h4 style="color: {NeutralPalette.NEUTRAL_MUTED}; font-size: 0.9em; margin-top: 15px; margin-bottom: 10px;">Statistical Methods</h4>
         <ul style="margin-left: 20px; margin-bottom: 15px;">
             <li style="margin-bottom: 8px;">
                 <strong>Chi-square test:</strong> For groups with n ≥ 5 in all cells (with Yates' correction)
@@ -521,17 +602,17 @@ ABOUT_GENERAL_ANALYSIS_CONTENT = """
             </li>
         </ul>
         
-        <h4 style="color: #b0b0b0; font-size: 0.9em; margin-top: 15px; margin-bottom: 10px;">Disparity Index Calculation</h4>
+        <h4 style="color: {NeutralPalette.NEUTRAL_MUTED}; font-size: 0.9em; margin-top: 15px; margin-bottom: 10px;">Disparity Index Calculation</h4>
         <ul style="margin-left: 20px; margin-bottom: 15px;">
             <li style="margin-bottom: 8px;">
                 <strong>For PH Exits (higher is better):</strong><br>
-                <code style="background-color: #333; padding: 2px 4px; border-radius: 3px; font-size: 0.85em;">
+                <code style="background-color: {NeutralPalette.NEUTRAL_BG}; padding: 2px 4px; border-radius: 3px; font-size: 0.85em;">
                 DI = Group Rate ÷ Highest Rate
                 </code>
             </li>
             <li style="margin-bottom: 8px;">
                 <strong>For Returns (lower is better):</strong><br>
-                <code style="background-color: #333; padding: 2px 4px; border-radius: 3px; font-size: 0.85em;">
+                <code style="background-color: {NeutralPalette.NEUTRAL_BG}; padding: 2px 4px; border-radius: 3px; font-size: 0.85em;">
                 DI = Lowest Rate ÷ Group Rate (or 1.0 - (Group Rate ÷ Worst Rate) if lowest = 0)
                 </code>
             </li>
@@ -540,44 +621,44 @@ ABOUT_GENERAL_ANALYSIS_CONTENT = """
             </li>
         </ul>
         
-        <h4 style="color: #b0b0b0; font-size: 0.9em; margin-top: 15px; margin-bottom: 10px;">Disparity Levels</h4>
+        <h4 style="color: {NeutralPalette.NEUTRAL_MUTED}; font-size: 0.9em; margin-top: 15px; margin-bottom: 10px;">Disparity Levels</h4>
         <table style="width: 100%; border-collapse: collapse; margin-top: 10px;">
             <thead>
-                <tr style="background-color: #333;">
-                    <th style="padding: 10px; text-align: left; border: 1px solid #555;">Level</th>
-                    <th style="padding: 10px; text-align: left; border: 1px solid #555;">DI Range</th>
-                    <th style="padding: 10px; text-align: left; border: 1px solid #555;">Gap from Best</th>
+                <tr style="background-color: {NeutralPalette.NEUTRAL_BG};">
+                    <th style="padding: 10px; text-align: left; border: 1px solid {NeutralPalette.NEUTRAL_BORDER};">Level</th>
+                    <th style="padding: 10px; text-align: left; border: 1px solid {NeutralPalette.NEUTRAL_BORDER};">DI Range</th>
+                    <th style="padding: 10px; text-align: left; border: 1px solid {NeutralPalette.NEUTRAL_BORDER};">Gap from Best</th>
                 </tr>
             </thead>
             <tbody>
                 <tr>
-                    <td style="padding: 10px; border: 1px solid #555; color: #10B981;">Minimal</td>
-                    <td style="padding: 10px; border: 1px solid #555;">0.95–1.0</td>
-                    <td style="padding: 10px; border: 1px solid #555;">< 5%</td>
+                    <td style="padding: 10px; border: 1px solid {NeutralPalette.NEUTRAL_BORDER}; color: {NeutralPalette.SUCCESS};">Minimal</td>
+                    <td style="padding: 10px; border: 1px solid {NeutralPalette.NEUTRAL_BORDER};">0.95–1.0</td>
+                    <td style="padding: 10px; border: 1px solid {NeutralPalette.NEUTRAL_BORDER};">< 5%</td>
                 </tr>
-                <tr style="background-color: rgba(255, 255, 255, 0.05);">
-                    <td style="padding: 10px; border: 1px solid #555; color: #60A5FA;">Moderate</td>
-                    <td style="padding: 10px; border: 1px solid #555;">0.80–0.94</td>
-                    <td style="padding: 10px; border: 1px solid #555;">5–20%</td>
+                <tr style="background-color: {NeutralPalette.NEUTRAL_BG_LIGHT};">
+                    <td style="padding: 10px; border: 1px solid {NeutralPalette.NEUTRAL_BORDER}; color: {NeutralPalette.INFO};">Moderate</td>
+                    <td style="padding: 10px; border: 1px solid {NeutralPalette.NEUTRAL_BORDER};">0.80–0.94</td>
+                    <td style="padding: 10px; border: 1px solid {NeutralPalette.NEUTRAL_BORDER};">5–20%</td>
                 </tr>
                 <tr>
-                    <td style="padding: 10px; border: 1px solid #555; color: #F59E0B;">Significant</td>
-                    <td style="padding: 10px; border: 1px solid #555;">0.50–0.79</td>
-                    <td style="padding: 10px; border: 1px solid #555;">20–50%</td>
+                    <td style="padding: 10px; border: 1px solid {NeutralPalette.NEUTRAL_BORDER}; color: {NeutralPalette.WARNING};">Significant</td>
+                    <td style="padding: 10px; border: 1px solid {NeutralPalette.NEUTRAL_BORDER};">0.50–0.79</td>
+                    <td style="padding: 10px; border: 1px solid {NeutralPalette.NEUTRAL_BORDER};">20–50%</td>
                 </tr>
-                <tr style="background-color: rgba(255, 255, 255, 0.05);">
-                    <td style="padding: 10px; border: 1px solid #555; color: #EF4444;">Severe</td>
-                    <td style="padding: 10px; border: 1px solid #555;">< 0.50</td>
-                    <td style="padding: 10px; border: 1px solid #555;">> 50%</td>
+                <tr style="background-color: {NeutralPalette.NEUTRAL_BG_LIGHT};">
+                    <td style="padding: 10px; border: 1px solid {NeutralPalette.NEUTRAL_BORDER}; color: {NeutralPalette.DANGER};">Severe</td>
+                    <td style="padding: 10px; border: 1px solid {NeutralPalette.NEUTRAL_BORDER};">< 0.50</td>
+                    <td style="padding: 10px; border: 1px solid {NeutralPalette.NEUTRAL_BORDER};">> 50%</td>
                 </tr>
             </tbody>
         </table>
     </div>
     
-    <hr style="border: none; border-top: 1px solid #444; margin: 20px 0;">
+    <hr style="border: none; border-top: 1px solid {NeutralPalette.NEUTRAL_BORDER}; margin: 20px 0;">
     
     <div style="margin-bottom: 25px;">
-        <h3 style="color: #ffffff; font-size: 1em; margin-bottom: 10px;">6. Important Technical Details</h3>
+        <h3 style="color: {NeutralPalette.NEUTRAL_HEADER}; font-size: 1em; margin-bottom: 10px;">6. Important Technical Details</h3>
         
         <ul style="margin-left: 20px;">
             <li style="margin-bottom: 10px;">
@@ -611,19 +692,207 @@ ABOUT_GENERAL_ANALYSIS_CONTENT = """
 </div>
 """
 
+# ==================== ENHANCED HELPER FUNCTIONS ====================
 
-def render_footer():
-    """Render the application footer"""
-    st.html(HTML_FOOTER)
-
-def render_about_section(title: str, content: str, expanded: bool = False):
+def render_about_section(
+    title: str, 
+    content: str, 
+    expanded: bool = False,
+    icon: str = "📘"
+):
     """
-    Render an about/help section with consistent styling.
+    Render an about/help section with enhanced styling.
+    Content is preserved from original.
+    """
+    # Add custom styling for expanders
+    st.markdown(f"""
+    <style>
+    div[data-testid="stExpander"] {{
+        background: {NeutralPalette.BG_SUBTLE};
+        border: 1px solid {NeutralPalette.BORDER_SUBTLE};
+        border-radius: 8px;
+        margin-bottom: 16px;
+    }}
     
-    Parameters:
-        title (str): Section title
-        content (str): Markdown content
-        expanded (bool): Whether the section is expanded by default
-    """
-    with st.expander(f"📘 {title}", expanded=expanded):
+    div[data-testid="stExpander"] > div:first-child {{
+        padding: 4px 8px;
+    }}
+    
+    div[data-testid="stExpander"] button {{
+        font-weight: 600;
+        font-size: 1rem;
+    }}
+    
+    div[data-testid="stExpander"] button:hover {{
+        background: {NeutralPalette.BG_LIGHT};
+    }}
+    </style>
+    """, unsafe_allow_html=True)
+    
+    with st.expander(f"{icon} {title}", expanded=expanded):
         st.html(content)
+
+def create_info_card(
+    title: str,
+    content: str,
+    type: str = "info",
+    icon: Optional[str] = None
+) -> str:
+    """
+    Create an enhanced information card with better visual design.
+    """
+    # Type configurations with improved styling
+    type_config = {
+        "info": {
+            "bg": f"rgba(0, 102, 204, 0.08)",
+            "border": f"{NeutralPalette.INFO}",
+            "border_bg": f"rgba(0, 102, 204, 0.15)",
+            "icon": "ℹ️"
+        },
+        "success": {
+            "bg": f"rgba(5, 152, 98, 0.08)",
+            "border": f"{NeutralPalette.SUCCESS}",
+            "border_bg": f"rgba(5, 152, 98, 0.15)",
+            "icon": "✅"
+        },
+        "warning": {
+            "bg": f"rgba(217, 119, 6, 0.08)",
+            "border": f"{NeutralPalette.WARNING}",
+            "border_bg": f"rgba(217, 119, 6, 0.15)",
+            "icon": "⚠️"
+        },
+        "danger": {
+            "bg": f"rgba(220, 38, 38, 0.08)",
+            "border": f"{NeutralPalette.DANGER}",
+            "border_bg": f"rgba(220, 38, 38, 0.15)",
+            "icon": "❌"
+        }
+    }
+    
+    config = type_config.get(type, type_config["info"])
+    icon = icon or config["icon"]
+    
+    return f"""
+    <div style="
+        background: {config["bg"]};
+        border: 1px solid {config["border_bg"]};
+        border-left: 4px solid {config["border"]};
+        padding: 20px;
+        border-radius: 8px;
+        margin: 16px 0;
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+        transition: all 0.2s ease;
+    ">
+        <h4 style="
+            margin: 0 0 12px 0;
+            color: {config["border"]};
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-size: 1.1rem;
+            font-weight: 600;
+        ">
+            <span style="font-size: 1.3em;">{icon}</span>
+            {title}
+        </h4>
+        <div style="
+            color: inherit; 
+            opacity: {NeutralPalette.TEXT_SECONDARY};
+            line-height: 1.6;
+        ">
+            {content}
+        </div>
+    </div>
+    """
+
+def create_metric_highlight(
+    label: str,
+    value: str,
+    subtext: Optional[str] = None,
+    color: Optional[str] = None,
+    trend: Optional[str] = None
+) -> str:
+    """
+    Create an enhanced metric highlight with better visual design.
+    """
+    color = color or NeutralPalette.PRIMARY
+    subtext_html = f'''
+        <p style="
+            margin: 8px 0 0 0; 
+            font-size: 0.875rem; 
+            opacity: {NeutralPalette.TEXT_MUTED};
+            line-height: 1.4;
+        ">{subtext}</p>
+    ''' if subtext else ""
+    
+    trend_html = f'''
+        <div style="
+            margin-top: 12px;
+            font-size: 0.9rem;
+            color: {color};
+            font-weight: 500;
+        ">{trend}</div>
+    ''' if trend else ""
+    
+    return f"""
+    <div style="
+        text-align: center;
+        padding: 24px;
+        background: {NeutralPalette.BG_LIGHT};
+        border-radius: 12px;
+        border: 1px solid {NeutralPalette.BORDER_SUBTLE};
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.04);
+        transition: all 0.2s ease;
+        position: relative;
+        overflow: hidden;
+    ">
+        <div style="
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 3px;
+            background: {color};
+        "></div>
+        <div style="
+            font-size: 0.875rem;
+            opacity: {NeutralPalette.TEXT_MUTED};
+            margin-bottom: 12px;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            font-weight: 600;
+        ">{label}</div>
+        <div style="
+            font-size: 2.5rem;
+            font-weight: 700;
+            color: {color};
+            line-height: 1;
+            letter-spacing: -0.02em;
+        ">{value}</div>
+        {subtext_html}
+        {trend_html}
+    </div>
+    """
+
+# ==================== EXPORT ALL PUBLIC FUNCTIONS ====================
+
+__all__ = [
+    'NeutralPalette',
+    'render_header',
+    'render_footer',
+    'render_about_section',
+    'create_info_card',
+    'create_metric_highlight',
+    'get_header_logo_html',
+    'get_footer_html',
+    'ABOUT_SPM2_CONTENT',
+    'ABOUT_INBOUND_CONTENT',
+    'ABOUT_OUTBOUND_CONTENT',
+    'ABOUT_GENERAL_ANALYSIS_CONTENT'
+]
+
+# ==================== LEGACY COMPATIBILITY ====================
+
+# Keep these for backward compatibility
+HTML_HEADER_LOGO = get_header_logo_html()
+HTML_FOOTER = get_footer_html()

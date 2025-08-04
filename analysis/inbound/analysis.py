@@ -6,12 +6,9 @@ Implements the core analysis for tracking clients returning to homelessness prog
 
 import streamlit as st
 import pandas as pd
-import numpy as np
-from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Tuple, Union, Any
 
 from config.constants import PH_CATEGORY
-
 
 def bucket_return_period(days: Optional[float]) -> str:
     """
@@ -36,7 +33,6 @@ def bucket_return_period(days: Optional[float]) -> str:
     if days <= 730:
         return "Return 12–24 Months"
     return "Return > 24 Months"
-
 
 def get_last_exit_record(
     row: pd.Series,
@@ -100,7 +96,6 @@ def get_last_exit_record(
     except Exception as e:
         raise RuntimeError(f"Error in get_last_exit_record for ClientID={row.get('ClientID', 'unknown')}: {e}")
 
-
 @st.cache_data(show_spinner=False)
 def run_return_analysis(
     df: pd.DataFrame,
@@ -112,12 +107,15 @@ def run_return_analysis(
     allowed_programs: Optional[List[str]],
     allowed_agencies: Optional[List[str]],
     entry_project_types: Optional[List[str]],
+    entry_ssvf_rrh: Optional[List[str]],
     allowed_cocs_exit: Optional[List[str]],
     allowed_localcocs_exit: Optional[List[str]],
     allowed_programs_exit: Optional[List[str]],
     allowed_agencies_exit: Optional[List[str]],
     exit_project_types: Optional[List[str]],
-    allowed_exit_dest_cats: Optional[List[str]] = None
+    exit_ssvf_rrh: Optional[List[str]],
+    allowed_exit_dest_cats: Optional[List[str]] = None,
+    allowed_exit_destinations: Optional[List[str]] = None
 ) -> pd.DataFrame:
     """
     Perform inbound recidivism analysis with entry & exit filtering and lookback.
@@ -181,6 +179,8 @@ def run_return_analysis(
             raw = raw[raw["AgencyName"].isin(allowed_agencies)]
         if entry_project_types and "ProjectTypeCode" in raw:
             raw = raw[raw["ProjectTypeCode"].isin(entry_project_types)]
+        if entry_ssvf_rrh and "SSVF_RRH" in raw:
+            raw = raw[raw["SSVF_RRH"].isin(entry_ssvf_rrh)]
 
         entries = (
             raw.dropna(subset=["ProjectStart"])
@@ -202,10 +202,16 @@ def run_return_analysis(
             exits = exits[exits["AgencyName"].isin(allowed_agencies_exit)]
         if exit_project_types and "ProjectTypeCode" in exits:
             exits = exits[exits["ProjectTypeCode"].isin(exit_project_types)]
+        if exit_ssvf_rrh and "SSVF_RRH" in exits:
+            exits = exits[exits["SSVF_RRH"].isin(exit_ssvf_rrh)]
         
         # Filter by exit destination category
         if allowed_exit_dest_cats and "ExitDestinationCat" in exits:
             exits = exits[exits["ExitDestinationCat"].isin(allowed_exit_dest_cats)]
+        
+        # Filter by specific exit destinations
+        if allowed_exit_destinations and "ExitDestination" in exits:
+            exits = exits[exits["ExitDestination"].isin(allowed_exit_destinations)]
         
         exits = exits.dropna(subset=["ProjectExit"])
 
@@ -229,7 +235,6 @@ def run_return_analysis(
     except Exception as e:
         st.error(f"Error during Return Analysis: {e}")
         return pd.DataFrame()
-
 
 @st.cache_data(show_spinner=False)
 def compute_return_metrics(final_df: pd.DataFrame) -> Dict[str, Any]:
@@ -285,7 +290,6 @@ def compute_return_metrics(final_df: pd.DataFrame) -> Dict[str, Any]:
         "Max Days": max_days
     }
 
-
 @st.cache_data(show_spinner=False)
 def return_breakdown_analysis(df: pd.DataFrame, group_cols: List[str]) -> pd.DataFrame:
     """
@@ -298,7 +302,7 @@ def return_breakdown_analysis(df: pd.DataFrame, group_cols: List[str]) -> pd.Dat
     Returns:
         pd.DataFrame: Aggregated results sorted by total entries.
     """
-    grouped = df.groupby(group_cols)
+    grouped = df.groupby(group_cols, observed=True)
     rows = []
     for group_vals, subdf in grouped:
         group_vals = group_vals if isinstance(group_vals, tuple) else (group_vals,)

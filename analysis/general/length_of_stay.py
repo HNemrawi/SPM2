@@ -5,7 +5,6 @@ Provides enrollment-level analysis with proper project type context and HUD alig
 
 from typing import Any, Dict, List, Optional, Set, Tuple
 
-import numpy as np
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
@@ -21,6 +20,8 @@ from analysis.general.theme import (
     SUCCESS_COLOR, WARNING_COLOR, DANGER_COLOR, apply_chart_style, create_insight_container, 
     fmt_int, fmt_pct, blue_divider
 )
+
+from core.ph_destinations import apply_custom_ph_destinations
 
 # Constants
 LOS_SECTION_KEY = "length_of_stay"
@@ -524,6 +525,9 @@ def analyze_los_with_destinations(df: DataFrame, los_data: Dict) -> DataFrame:
     if "los_by_enrollment" not in los_data or los_data["los_by_enrollment"].empty:
         return pd.DataFrame()
     
+    # Apply custom PH destinations
+    df = apply_custom_ph_destinations(df, force=True)
+    
     # Get enrollments with LOS
     los_df = los_data["los_by_enrollment"].copy()
     
@@ -591,17 +595,28 @@ def los_by_demographic(
     # Add demographic info
     demo_map = df[["EnrollmentID", dim_col]].copy()
     
+    # Handle categorical columns properly
+    if pd.api.types.is_categorical_dtype(demo_map[dim_col]):
+        # Add "Not Reported" to categories if not present
+        if "Not Reported" not in demo_map[dim_col].cat.categories:
+            demo_map[dim_col] = demo_map[dim_col].cat.add_categories(["Not Reported"])
+    
     # Handle missing values
     demo_map[dim_col] = demo_map[dim_col].fillna("Not Reported")
     
     # Merge with LOS data using EnrollmentID
     los_with_demo = los_df.merge(demo_map, on="EnrollmentID", how="left")
     
+    # Handle categorical columns in merged data
+    if pd.api.types.is_categorical_dtype(los_with_demo[dim_col]):
+        if "Not Reported" not in los_with_demo[dim_col].cat.categories:
+            los_with_demo[dim_col] = los_with_demo[dim_col].cat.add_categories(["Not Reported"])
+    
     # Fill any remaining NAs
     los_with_demo[dim_col] = los_with_demo[dim_col].fillna("Not Reported")
     
     # Calculate summary statistics by group
-    los_by_demo = los_with_demo.groupby(dim_col)["LOS"].agg(
+    los_by_demo = los_with_demo.groupby(dim_col, observed=True)["LOS"].agg(
         mean=lambda x: x.mean() if len(x) > 0 else 0,
         median=lambda x: x.median() if len(x) > 0 else 0,
         count="count",
@@ -914,7 +929,6 @@ def render_length_of_stay(df_filt: DataFrame) -> None:
             warning_html += f"<li>{quality_details['extremely_long_stays']} record(s) with stays over 5 years in non-permanent housing</li>"
         if quality_details.get("future_entry", 0) > 0:
             warning_html += f"<li>{quality_details['future_entry']} record(s) with entry dates after report end</li>"
-        
         warning_html += """
             </ul>
             <p style="margin: 10px 0 0 0; font-style: italic; font-size: 14px;">

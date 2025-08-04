@@ -35,7 +35,9 @@ EXIT_COLUMNS = [
     "Exit_HasIncome",
     "Exit_HasDisability",
     "Exit_HouseholdType",
+    "Exit_IsHeadOfHousehold",
     "Exit_CHStartHousehold",
+    "Exit_CurrentlyFleeingDV",
     "Exit_LocalCoCCode",
     "Exit_PriorLivingCat",
     "Exit_ProgramSetupCoC",
@@ -46,13 +48,17 @@ EXIT_COLUMNS = [
     "Exit_ExitDestination",
     "Exit_CustomProgramType",
     "Exit_AgeTieratEntry",
+    "Exit_SSVF_RRH",
+    "Exit_ProgramsContinuumProject",
 ]
 
 RETURN_COLUMNS = [
     "Return_HasIncome",
     "Return_HasDisability",
     "Return_HouseholdType",
+    "Return_IsHeadOfHousehold",
     "Return_CHStartHousehold",
+    "Return_CurrentlyFleeingDV",
     "Return_LocalCoCCode",
     "Return_PriorLivingCat",
     "Return_ProgramSetupCoC",
@@ -61,8 +67,8 @@ RETURN_COLUMNS = [
     "Return_ProgramName",
     "Return_ExitDestinationCat",
     "Return_ExitDestination",
-    "ReturnCategory",
-    "Return_AgeTieratEntry",
+    "Return_SSVF_RRH",
+    "Return_ProgramsContinuumProject",
 ]
 
 # Required columns for analysis

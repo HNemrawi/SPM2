@@ -6,7 +6,6 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 
 import numpy as np
 import pandas as pd
-import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
 from pandas import DataFrame, Timestamp
@@ -21,6 +20,8 @@ from analysis.general.theme import (
     SUCCESS_COLOR, WARNING_COLOR, DANGER_COLOR, apply_chart_style, fmt_int, fmt_pct,
     blue_divider
 )
+
+from core.ph_destinations import apply_custom_ph_destinations
 
 # Constants
 EQUITY_SECTION_KEY = "equity_analysis"
@@ -270,6 +271,11 @@ def equity_analysis(
     DataFrame
         A DataFrame with equity analysis results
     """
+    # Apply custom PH destinations
+    df = apply_custom_ph_destinations(df, force=True)
+    if full_df is not None:
+        full_df = apply_custom_ph_destinations(full_df, force=True)
+
     # Check required columns
     required_cols = ["ClientID", "ProjectStart", "ProjectExit"]
     if not all(col in df.columns for col in required_cols + [demographic_col]):
@@ -317,7 +323,7 @@ def equity_analysis(
 
     # Step 3: Get unique client counts by demographic group
     client_demos = population[["ClientID", demographic_col]].drop_duplicates()
-    demo_pop = client_demos.groupby(demographic_col)["ClientID"].count()
+    demo_pop = client_demos.groupby(demographic_col, observed=True)["ClientID"].count()
     universe = int(demo_pop.sum())
 
     # Step 4: Get the overall outcome IDs based on the metric type
@@ -499,11 +505,17 @@ def equity_analysis(
 
 def ph_exit_pop_filter(df: DataFrame, s: Timestamp, e: Timestamp) -> Set[int]:
     """Filter function to get clients who exited during the period."""
+    # Apply custom PH destinations
+    df = apply_custom_ph_destinations(df, force=True)
+    
     mask = (df["ProjectExit"] >= s) & (df["ProjectExit"] <= e)
     return set(df.loc[mask, "ClientID"])
     
 def returns_pop_filter(df: DataFrame, s: Timestamp, e: Timestamp) -> Set[int]:
     """Filter function to get clients who exited to PH during the period."""
+    # Apply custom PH destinations
+    df = apply_custom_ph_destinations(df, force=True)
+    
     mask = (
         (df["ProjectExit"] >= s) 
         & (df["ProjectExit"] <= e)

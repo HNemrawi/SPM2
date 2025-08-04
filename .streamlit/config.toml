@@ -1,6 +1,7 @@
 [theme]
-base="dark"
-primaryColor = "#00629b"
+base = "light"             # Sets default theme: "dark" forces dark mode; use "light" to default to light (with toggle)
+primaryColor = "#0066CC"  # Accent color for buttons, links, sliders, etc.
+font = "sans serif"       # Base font family for all text in the app
 
 [server]
-maxUploadSize = 250
+maxUploadSize = 500            # Maximum file-upload size in megabytes
