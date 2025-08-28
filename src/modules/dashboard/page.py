@@ -486,8 +486,13 @@ def _render_export_section():
             )
 
         with col2:
-            # Note: Excel export might need additional dependencies
-            st.info("Excel export requires xlsxwriter")
+            render_download_button(
+                df=df_filt_cached,
+                filename="hmis_filtered_data",
+                label="Download as Excel",
+                file_format="xlsx",
+                key="download_xlsx",
+            )
 
         with col3:
             render_download_button(

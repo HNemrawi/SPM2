@@ -283,10 +283,11 @@ def render_download_button(
         mime_type = "text/csv"
         file_ext = "csv"
     elif file_format == "xlsx":
-        buffer = pd.io.excel.ExcelWriter(engine="xlsxwriter")
-        df.to_excel(buffer, index=False)
-        buffer.save()
-        file_data = buffer
+        from io import BytesIO
+        buffer = BytesIO()
+        with pd.ExcelWriter(buffer, engine="xlsxwriter") as writer:
+            df.to_excel(writer, index=False, sheet_name="Data")
+        file_data = buffer.getvalue()
         mime_type = (
             "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
