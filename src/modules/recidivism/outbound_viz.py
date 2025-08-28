@@ -113,7 +113,7 @@ def display_spm_metrics_ph(metrics: Dict[str, Any]) -> None:
     ui.metric_row(
         {
             "Return to Homeless (from PH)": f"{
-                metrics['Return to Homelessness']:,        }",
+                metrics['Return to Homelessness']:,}",
             "% Return to Homeless (from PH)": f"{
                 metrics['% Return to Homelessness']:.1f}%",
         },
