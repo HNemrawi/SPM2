@@ -1,0 +1,86 @@
+# HMIS Data Analysis Suite Configuration
+
+app:
+  name: "HMIS Data Analysis Suite"
+  version: "2.0"
+  page_title: "HMIS Data Analysis"
+  page_icon: "📊"
+  layout: "wide"
+  sidebar_state: "expanded"
+
+data:
+  # Maximum file size in MB
+  max_file_size: 500
+  
+  # Supported file types
+  supported_formats:
+    - csv
+    - xlsx
+    - xls
+  
+  # Date format for parsing
+  date_format: "%Y-%m-%d"
+  
+  # Chunk size for large file processing
+  chunk_size: 10000
+
+analysis:
+  # Default date ranges
+  default_lookback_days: 730  # 2 years
+  default_reporting_period_days: 365  # 1 year
+  
+  # SPM2 specific settings
+  spm2:    
+    default_return_period_days: 180  # 6 months
+
+
+visualization:
+  # Color schemes
+  color_palette:
+    primary: "#1f77b4"
+    secondary: "#ff7f0e"
+    success: "#2ca02c"
+    warning: "#ff9800"
+    danger: "#d62728"
+    info: "#17a2b8"
+    
+  # Chart defaults
+  chart_height: 400
+  chart_template: "plotly_white"
+  
+  # Number formatting
+  decimal_places: 1
+  thousands_separator: ","
+
+performance:
+  # Cache settings (in seconds)
+  cache_ttl:
+    data: 3600      # 1 hour
+    analysis: 7200  # 2 hours
+    plots: 1800     # 30 minutes
+  
+  # Processing limits
+  max_records_interactive: 100000
+  warning_threshold: 50000
+
+logging:
+  level: "INFO"
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+  file: "logs/hmis_analysis.log"
+  max_file_size: 10485760  # 10MB
+  backup_count: 5
+
+ui:
+  # Display settings
+  show_debug_info: false
+  show_data_preview: true
+  preview_rows: 100
+  
+  # Progress indicators
+  show_progress_bars: true
+  show_spinners: true
+  
+  # Export options
+  enable_csv_export: true
+  enable_excel_export: true
+  enable_pdf_export: false

@@ -1,20 +1,30 @@
 # Core app framework
-streamlit
+streamlit>=1.40.0
 
 # Data handling
-pandas
-numpy
-openpyxl
+pandas>=2.2.0
+numpy>=1.26.0
+openpyxl>=3.1.5
+xlsxwriter>=3.2.0
 
 # Visualization
-plotly
-matplotlib
+plotly>=5.24.0
+matplotlib>=3.9.0
 
 # Machine learning & preprocessing
-scikit-learn
-scipy
-joblib
+scikit-learn>=1.6.0
+scipy>=1.14.0
+joblib>=1.4.0
 
-# Typing and development (optional but useful)
-typing-extensions
-chardet
+# Utilities
+python-dateutil>=2.9.0
+pytz>=2024.1
+pyyaml>=6.0.2
+
+# File encoding detection
+chardet>=5.2.0
+
+# Development tools (optional)
+pycodestyle>=2.12.0  # For PEP8 checking
+black>=24.0.0  # Code formatter
+isort>=5.13.0  # Import sorting

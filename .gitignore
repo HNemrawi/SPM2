@@ -3,91 +3,68 @@ __pycache__/
 *.py[cod]
 *$py.class
 
-# C extensions
-*.so
+# Virtual Environment
+venv/
+envn/
+env/
+.venv/
+.envn/
+.env/
 
-# Distribution / packaging
-.Python
-build/
-develop-eggs/
-dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-*.egg-info/
-.installed.cfg
-*.egg
+# IDE
+.idea/
+.vscode/
+*.sublime-*
+CLAUDE.md
 
-# PyInstaller
-*.manifest
-*.spec
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
 
-# Installer logs
-pip-log.txt
-pip-delete-this-directory.txt
+# Streamlit
+.streamlit/secrets.toml
+.streamlit/cache/
 
-# Unit test / coverage reports
-htmlcov/
-.tox/
-.nox/
-.coverage
-.coverage.*
-.cache
-nosetests.xml
-coverage.xml
-*.cover
-*.py,cover
-.hypothesis/
+# Data files
+*.csv
+*.xlsx
+*.xls
+uploads/
+temp/
 
-# Translations
-*.mo
-*.pot
-
-# Django/Flask logs
+# Logs
+logs/
 *.log
 
-# Virtual environment directories
-.env
-.venv
-env/
-venv/
-ENV/
-env.bak/
-venv.bak/
-.vet
-vet/
-envn/
-.envn
-envn.bak/
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+*.cover
 
-# IDE and editor files
-.vscode/
-.idea/
-*.sublime-project
-*.sublime-workspace
+# Build
+build/
+dist/
+*.egg-info/
+.claude
 
-# Jupyter Notebook checkpoints
+# Temporary files
+*.tmp
+*.bak
+*.swp
+*~
+.~*
+
+# Python
+*.pyc
+.Python
+
+# Jupyter
 .ipynb_checkpoints/
+*.ipynb
 
-# IPython
-profile_default/
-ipython_config.py
-
-# mypy
-.mypy_cache/
-.dmypy.json
-
-# Pyre type checker
-.pyre/
-
-# Additional project files
-*.db
-*.sqlite3
-
-# New features
-pathway.py
+# Environment variables
+.env
+.env.local
+.env.*.local
