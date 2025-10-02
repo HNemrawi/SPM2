@@ -12,7 +12,7 @@ textColor = "#1E293B"  # Dark slate for primary text
 # ============ Application Settings ============
 [client]
 showSidebarNavigation = true
-toolbarMode = "minimal"
+toolbarMode = "viewer"
 
 [runner]
 fastReruns = true
