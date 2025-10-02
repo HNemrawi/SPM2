@@ -1,7 +1,6 @@
-"""
-Data Loading & Preprocessing with Duplicate Detection
-"""
+"""Data loading and preprocessing with intelligent column mapping and duplicate detection."""
 
+import traceback
 from datetime import datetime
 from io import BytesIO
 from pathlib import Path
@@ -16,11 +15,11 @@ from src.ui.themes.theme import theme
 
 
 class DataLoadError(Exception):
-    """Custom exception for data loading errors"""
+    pass
 
 
 class ColumnMapper:
-    """Centralized column mapping configuration"""
+    """Maps HMIS export column variations to standardized names."""
 
     STANDARD_MAPPINGS = {
         "UniqueIdentifier": [
@@ -186,8 +185,9 @@ class ColumnMapper:
     }
 
     @classmethod
-    def create_mapping(cls, columns: List[str]) -> Dict[str, str]:
-        """Create column mapping based on available columns"""
+    @st.cache_data(show_spinner=False)
+    def create_mapping(cls, _columns: List[str]) -> Dict[str, str]:
+        columns = _columns
         mapping = {}
         columns_lower = {col.lower(): col for col in columns}
 
@@ -204,7 +204,7 @@ class ColumnMapper:
 
 
 class DataValidator:
-    """Data validation utilities"""
+    """Validates HMIS data structure and content."""
 
     REQUIRED_COLUMNS = ["ClientID", "ProjectStart"]
     DATE_COLUMNS = [
@@ -225,7 +225,6 @@ class DataValidator:
 
     @classmethod
     def validate_structure(cls, df: pd.DataFrame) -> Tuple[bool, List[str]]:
-        """Validate dataframe structure"""
         issues = []
 
         missing_required = [
@@ -248,47 +247,49 @@ class DataValidator:
 
 
 class DuplicateAnalyzer:
-    """Analyze and handle duplicate EnrollmentIDs"""
+    """Analyzes and reports duplicate EnrollmentID records."""
 
     @staticmethod
     def analyze_duplicates(
         df: pd.DataFrame,
     ) -> Tuple[pd.DataFrame, Dict[str, Any]]:
-        """
-        Analyze duplicates based on EnrollmentID
-
-        Returns:
-            Tuple of (duplicates_df, analysis_dict)
-        """
         if "EnrollmentID" not in df.columns:
             return pd.DataFrame(), {
                 "has_duplicates": False,
                 "message": "EnrollmentID column not found",
             }
 
-        # Find duplicate EnrollmentIDs
+        # Vectorized duplicate detection
         duplicate_mask = df.duplicated(subset=["EnrollmentID"], keep=False)
-        duplicates_df = df[duplicate_mask].copy()
 
-        if duplicates_df.empty:
+        if not duplicate_mask.any():
             return pd.DataFrame(), {"has_duplicates": False, "count": 0}
 
-        # Sort by EnrollmentID for better viewing
-        duplicates_df = duplicates_df.sort_values("EnrollmentID")
+        duplicates_df = df[duplicate_mask].copy()
 
-        # Analyze what columns differ among duplicates
+        # Use sort_values with kind='stable' for consistent ordering
+        duplicates_df = duplicates_df.sort_values(
+            "EnrollmentID", kind="stable"
+        )
+
+        # Vectorized column variation detection
         varying_columns = []
-        enrollment_groups = duplicates_df.groupby("EnrollmentID")
+        enrollment_groups = duplicates_df.groupby("EnrollmentID", sort=False)
 
-        for enrollment_id, group in enrollment_groups:
-            if len(group) > 1:
-                # Check each column for variations
-                for col in group.columns:
-                    if col != "EnrollmentID":
-                        unique_values = group[col].nunique(dropna=False)
-                        if unique_values > 1:
-                            if col not in varying_columns:
-                                varying_columns.append(col)
+        # Process only groups with multiple records
+        multi_record_groups = enrollment_groups.filter(lambda x: len(x) > 1)
+
+        if not multi_record_groups.empty:
+            # Check variations for each column using vectorized operations
+            for col in multi_record_groups.columns:
+                if col != "EnrollmentID":
+                    # Group by EnrollmentID and count unique values per group
+                    unique_counts = multi_record_groups.groupby(
+                        "EnrollmentID"
+                    )[col].nunique(dropna=False)
+                    # If any group has more than 1 unique value, column varies
+                    if (unique_counts > 1).any():
+                        varying_columns.append(col)
 
         # Count duplicate groups
         duplicate_count = df["EnrollmentID"].duplicated(keep=False).sum()
@@ -305,9 +306,8 @@ class DuplicateAnalyzer:
         return duplicates_df, analysis
 
 
-@st.cache_data(show_spinner=False, ttl=3600)
+@st.cache_data(show_spinner=False)
 def detect_file_encoding(file_content: bytes, sample_size: int = 10000) -> str:
-    """Detect file encoding using chardet"""
     sample = (
         file_content[:sample_size]
         if len(file_content) > sample_size
@@ -320,13 +320,6 @@ def detect_file_encoding(file_content: bytes, sample_size: int = 10000) -> str:
 def show_duplicate_info(
     df: pd.DataFrame, analysis: Dict[str, Any]
 ) -> pd.DataFrame:
-    """
-    Display duplicate information in an expander with deduplication options
-
-    Returns:
-        Processed DataFrame (deduplicated if user chooses, original otherwise)
-    """
-    # Main duplicate detection warning
     metrics_html = f"""
     <div style='display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-top: 1rem;'>
         <div style='
@@ -425,9 +418,10 @@ def show_duplicate_info(
     with col_action1:
         if st.button(
             "Keep All Records",
-            width='stretch',
+            width="stretch",
             type="primary",
             help="Continue with all records including duplicates",
+            key="keep_all_records_button",
         ):
             st.session_state["dedup_action"] = "keep_all"
             st.success("Keeping all records including duplicates")
@@ -436,34 +430,40 @@ def show_duplicate_info(
     with col_action2:
         if st.button(
             "Keep First Occurrence",
-            width='stretch',
+            width="stretch",
             type="secondary",
             help=(
                 "Remove duplicates, keeping the first occurrence "
                 "of each EnrollmentID"
             ),
+            key="keep_first_occurrence_button",
         ):
-            st.session_state["dedup_action"] = "keep_first"
             df_dedup = df.drop_duplicates(
                 subset=["EnrollmentID"], keep="first"
             )
             removed = len(df) - len(df_dedup)
+            # Batch state updates to avoid multiple reruns
+            st.session_state.update(
+                {"dedup_action": "keep_first", "df": df_dedup}
+            )
             st.success(f"Removed {removed:,} duplicate records")
-            st.session_state["df"] = df_dedup
             st.rerun()
 
     with col_action3:
         if st.button(
             "Keep Last Occurrence",
-            width='stretch',
+            width="stretch",
             type="secondary",
             help="Remove duplicates, keeping the last occurrence of each EnrollmentID",
+            key="keep_last_occurrence_button",
         ):
-            st.session_state["dedup_action"] = "keep_last"
             df_dedup = df.drop_duplicates(subset=["EnrollmentID"], keep="last")
             removed = len(df) - len(df_dedup)
+            # Batch state updates to avoid multiple reruns
+            st.session_state.update(
+                {"dedup_action": "keep_last", "df": df_dedup}
+            )
             st.success(f"Removed {removed:,} duplicate records")
-            st.session_state["df"] = df_dedup
             st.rerun()
 
     # Show sample of duplicates - Clean presentation
@@ -474,8 +474,10 @@ def show_duplicate_info(
 
         st.html(
             html_factory.info_box(
-                content=f"Showing first {sample_size} of {
-            len(analysis['duplicate_df']):,} duplicate records",
+                content=(
+                    f"Showing first {sample_size} of "
+                    f"{len(analysis['duplicate_df']):,} duplicate records"
+                ),
                 type="info",
             )
         )
@@ -483,7 +485,7 @@ def show_duplicate_info(
         # Display the dataframe
         st.dataframe(
             analysis["duplicate_df"].head(sample_size),
-            width='stretch',
+            width="stretch",
             height=300,
         )
 
@@ -492,10 +494,13 @@ def show_duplicate_info(
         st.download_button(
             label="Download All Duplicate Records",
             data=csv,
-            file_name=f"duplicate_enrollments_{
-                datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+            file_name=(
+                f"duplicate_enrollments_"
+                f"{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+            ),
             mime="text/csv",
             type="secondary",
+            key="download_duplicates_button",
         )
 
     return df
@@ -506,11 +511,6 @@ def _load_file_data(
     encoding: Optional[str] = None,
     chunk_size: Optional[int] = None,
 ) -> pd.DataFrame:
-    """Load data from uploaded file based on file type.
-
-    Returns:
-        Raw DataFrame from the file
-    """
     file_extension = Path(uploaded_file.name).suffix.lower()
 
     with st.spinner(f"Loading {uploaded_file.name}..."):
@@ -519,12 +519,34 @@ def _load_file_data(
                 file_content = uploaded_file.read()
                 encoding = detect_file_encoding(file_content)
                 uploaded_file.seek(0)
+            optimized_dtypes = {
+                "Clients Client ID": "Int32",
+                "Enrollments Enrollment ID": "Int32",
+                "Programs Project Type Code": "category",
+                "Clients Gender": "category",
+                "Clients Race and Ethnicity": "category",
+                "Clients Veteran Status": "category",
+                "Programs Agency Name": "category",
+                "Programs Name": "category",
+                "Update/Exit Screen Destination Category": "category",
+                "Update/Exit Screen Destination": "category",
+                "Entry Screen Prior Living Situation Category": "category",
+                "Entry Screen Head of Household (Yes / No)": "category",
+                "Entry Screen Income from any Source": "category",
+                "Entry Screen Any Disability": "category",
+                "Enrollments Household Type": "category",
+                "Programs Continuum Project": "category",
+                "Program Custom Local CoC Code": "category",
+                "Programs Program Setup CoC": "category",
+            }
 
             read_params = {
                 "low_memory": False,
                 "encoding": encoding,
                 "on_bad_lines": "warn",
-                "dtype": str,
+                "dtype": optimized_dtypes,
+                "engine": "c",
+                "parse_dates": False,
             }
 
             if chunk_size:
@@ -537,12 +559,6 @@ def _load_file_data(
             else:
                 df = pd.read_csv(uploaded_file, **read_params)
 
-        elif file_extension in [".xlsx", ".xls"]:
-            df = pd.read_excel(
-                uploaded_file,
-                engine="openpyxl" if file_extension == ".xlsx" else "xlrd",
-                dtype=str,
-            )
         else:
             raise DataLoadError(f"Unsupported file type: {file_extension}")
 
@@ -552,29 +568,18 @@ def _load_file_data(
 def _process_loaded_data(
     df: pd.DataFrame, validate: bool, parse_dates: bool
 ) -> pd.DataFrame:
-    """Process the loaded DataFrame with cleaning, mapping, and validation.
-
-    Returns:
-        Processed DataFrame
-    """
     with st.spinner("Processing data..."):
-        # Clean and standardize
         df = clean_columns(df)
 
-        # Apply column mapping
         column_mapping = ColumnMapper.create_mapping(df.columns)
         if column_mapping:
             df = df.rename(columns=column_mapping)
 
-        # Parse dates if requested
         if parse_dates:
             df = parse_date_columns(df)
 
-        # Standardize data types and add derived columns
         df = standardize_data_types(df)
         df = add_derived_columns(df)
-
-        # Validate if requested
         if validate:
             is_valid, issues = DataValidator.validate_structure(df)
             if not is_valid:
@@ -590,11 +595,9 @@ def _process_loaded_data(
 
 
 def _handle_duplicate_detection(df: pd.DataFrame) -> None:
-    """Detect and store duplicate analysis in session state."""
     if "EnrollmentID" in df.columns:
         duplicates_df, analysis = DuplicateAnalyzer.analyze_duplicates(df)
         if analysis.get("has_duplicates", False):
-            # Store duplicate info in session state
             st.session_state["duplicate_analysis"] = {
                 "has_duplicates": analysis["has_duplicates"],
                 "total_duplicate_records": analysis["total_duplicate_records"],
@@ -630,12 +633,17 @@ def load_and_preprocess_data(
         DataLoadError: If critical loading errors occur
     """
     try:
+        # Validate input parameters
+        if uploaded_file is None:
+            st.error("No file provided for processing.")
+            return pd.DataFrame()
+
         # Load raw data from file
         df = _load_file_data(uploaded_file, encoding, chunk_size)
 
         # Check for empty data early
-        if df.empty:
-            st.error("The uploaded file is empty.")
+        if df is None or not isinstance(df, pd.DataFrame) or df.empty:
+            st.error("The uploaded file is empty or invalid.")
             return pd.DataFrame()
 
         # Process the data
@@ -681,8 +689,6 @@ def load_and_preprocess_data(
 
         with st.expander("Error details"):
             st.code(str(type(e).__name__) + ": " + str(e))
-            import traceback
-
             st.code(traceback.format_exc())
 
         return pd.DataFrame()
@@ -703,7 +709,7 @@ def clean_columns(df: pd.DataFrame) -> pd.DataFrame:
 def parse_date_columns(
     df: pd.DataFrame, date_formats: Optional[List[str]] = None
 ) -> pd.DataFrame:
-    """Parse date columns with multiple format support"""
+    """Parse date columns with optimized single-pass parsing"""
     if date_formats is None:
         date_formats = [
             "%Y-%m-%d",
@@ -718,31 +724,65 @@ def parse_date_columns(
 
     for col in DataValidator.DATE_COLUMNS:
         if col in df.columns:
-            for fmt in date_formats:
-                try:
-                    df[col] = pd.to_datetime(
-                        df[col], format=fmt, errors="coerce"
-                    )
-                    break
-                except (ValueError, TypeError):
-                    continue
-            else:
-                df[col] = pd.to_datetime(
-                    df[col], errors="coerce", dayfirst=False
-                )
+            # Use pandas' optimized datetime parsing with format inference
+            df[col] = pd.to_datetime(df[col], errors="coerce", dayfirst=False)
 
     return df
 
 
 def standardize_data_types(df: pd.DataFrame) -> pd.DataFrame:
-    """Convert columns to appropriate data types"""
-    for col in DataValidator.NUMERIC_COLUMNS:
-        if col in df.columns:
-            df[col] = pd.to_numeric(df[col], errors="coerce")
+    """Convert columns to appropriate data types with optimization"""
+    # Enable copy-on-write for memory efficiency
+    with pd.option_context("mode.copy_on_write", True):
+        # Convert numeric columns with optimized types
+        for col in DataValidator.NUMERIC_COLUMNS:
+            if col in df.columns:
+                # Try Int32 first for memory efficiency
+                try:
+                    # Check if values fit in Int32 range
+                    numeric_vals = pd.to_numeric(df[col], errors="coerce")
+                    max_val = numeric_vals.max()
+                    if pd.notna(max_val) and max_val < 2147483647:
+                        df[col] = numeric_vals.astype("Int32")
+                    else:
+                        df[col] = numeric_vals.astype("Int64")
+                except (ValueError, TypeError, AttributeError):
+                    df[col] = pd.to_numeric(df[col], errors="coerce")
 
-    for col in DataValidator.CATEGORICAL_COLUMNS:
+    # Extended list of categorical columns for better memory efficiency
+    categorical_candidates = [
+        "Gender",
+        "RaceEthnicity",
+        "VeteranStatus",
+        "ProjectTypeCode",
+        "AgencyName",
+        "ProgramName",
+        "HouseholdType",
+        "IsHeadOfHousehold",
+        "ExitDestination",
+        "ExitDestinationCat",
+        "PriorLivingCat",
+        "CHStartHousehold",
+        "HasIncome",
+        "HasDisability",
+        "CurrentlyFleeingDV",
+        "AgeTieratEntry",
+        "LocalCoCCode",
+        "ProgramSetupCoC",
+        "SSVF_RRH",
+        "ProgramsContinuumProject",
+    ]
+
+    for col in categorical_candidates:
         if col in df.columns:
-            df[col] = df[col].astype("category")
+            # Convert to category if not already
+            if df[col].dtype != "category":
+                unique_ratio = (
+                    df[col].nunique() / len(df) if len(df) > 0 else 1
+                )
+                # Use categorical for any column with < 50% unique values
+                if unique_ratio < 0.5:
+                    df[col] = df[col].astype("category")
 
     return df
 
@@ -759,6 +799,34 @@ def add_derived_columns(df: pd.DataFrame) -> pd.DataFrame:
             (df["ProjectStart"] - df["DOB"]).dt.days / 365.25
         ).round(1)
         df["AgeAtEntry"] = df["AgeAtEntry"].clip(lower=0, upper=120)
+
+    # Pre-convert common filter columns to strings for performance
+    # These are frequently used in filter comparisons
+    filter_columns = [
+        "Gender",
+        "RaceEthnicity",
+        "VeteranStatus",
+        "ProjectTypeCode",
+        "AgencyName",
+        "ProgramName",
+        "ExitDestination",
+        "ExitDestinationCat",
+        "PriorLivingCat",
+        "IsHeadOfHousehold",
+        "HasIncome",
+        "HasDisability",
+        "LocalCoCCode",
+        "ProgramSetupCoC",
+        "ProgramsContinuumProject",
+    ]
+
+    for col in filter_columns:
+        if col in df.columns:
+            # Convert to string with proper handling of categorical types
+            if df[col].dtype == "category":
+                df[col + "_str"] = df[col].astype(str)
+            else:
+                df[col + "_str"] = df[col].astype(str)
 
     return df
 
@@ -783,17 +851,14 @@ def export_preprocessing_report(
         duplicates_df, analysis = DuplicateAnalyzer.analyze_duplicates(df)
         if analysis.get("has_duplicates", False):
             report.append(
-                f"\nDuplicate EnrollmentIDs: {
-                    analysis['total_duplicate_records']} records"
+                f"\nDuplicate EnrollmentIDs: {analysis['total_duplicate_records']} records"
             )
             report.append(
-                f"Unique EnrollmentIDs with duplicates: {
-                    analysis['unique_enrollment_ids_with_duplicates']}"
+                f"Unique EnrollmentIDs with duplicates: {analysis['unique_enrollment_ids_with_duplicates']}"
             )
             if analysis.get("varying_columns"):
                 report.append(
-                    f"Columns with variations: {
-                    ', '.join(analysis['varying_columns'][:10])}"
+                    f"Columns with variations: {', '.join(analysis['varying_columns'][:10])}"
                 )
 
     return "\n".join(report)

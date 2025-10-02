@@ -82,10 +82,11 @@ class HTMLFactory:
             background: {self.theme.colors.surface};
             border: 1px solid {
             self.theme.colors.border};
-            border-left: 4px solid {border_color};
+            border-left: 3px solid {border_color};
             border-radius: {self.theme.borders.radius_md};
             padding: {padding};
             margin: {margin};
+            box-shadow: {self.theme.shadows.sm};
             {self._transition_style() if self.config.include_transitions else ''}
         ">
             {title_html}
@@ -111,16 +112,22 @@ class HTMLFactory:
             dismissible: Whether to show a close button
         """
         type_styles = {
-            "info": (self.theme.colors.info, self.theme.colors.info_bg),
+            "info": (
+                self.theme.colors.info,
+                self.theme.colors.info_bg_subtle,
+            ),
             "success": (
                 self.theme.colors.success,
-                self.theme.colors.success_bg,
+                self.theme.colors.success_bg_subtle,
             ),
             "warning": (
                 self.theme.colors.warning,
-                self.theme.colors.warning_bg,
+                self.theme.colors.warning_bg_subtle,
             ),
-            "danger": (self.theme.colors.danger, self.theme.colors.danger_bg),
+            "danger": (
+                self.theme.colors.danger,
+                self.theme.colors.danger_bg_subtle,
+            ),
         }
 
         border_color, bg_color = type_styles.get(type, type_styles["info"])
@@ -178,23 +185,26 @@ class HTMLFactory:
             """
         elif display_icon:
             # Only add icon to content if no title and icon exists
-            content = f'<span style="margin-right: 0.5rem;">{
-                display_icon}</span>{content}'
+            content = (
+                f'<span style="margin-right: 0.5rem;">{display_icon}</span>'
+                f"{content}"
+            )
 
         return f"""
         <div style="
             position: relative;
             background: {bg_color};
-            border-left: 4px solid {border_color};
+            border: 1px solid {border_color};
+            border-left: 3px solid {border_color};
             border-radius: {self.theme.borders.radius_md};
-            padding: {self.theme.spacing.md};
-            margin: {self.theme.spacing.md} 0;
+            padding: 0.875rem 1rem;
+            margin: 0.75rem 0;
             color: {
             self.theme.colors.text_primary};
         ">
             {dismiss_html}
             {title_html}
-            <div style="font-size: 0.9rem; color: {self.theme.colors.text_secondary};">
+            <div style="font-size: 0.875rem; line-height: 1.6; color: {self.theme.colors.text_secondary};">
                 {content}
             </div>
         </div>
@@ -214,14 +224,14 @@ class HTMLFactory:
         """Create a title with proper hierarchy (h1-h6) and optional background highlight."""
         level = max(1, min(6, level))  # Clamp between 1-6
 
-        # Title styling based on level with background highlights
+        # Title styling based on level with subtle background highlights
         title_styles = {
             1: {
                 "font-size": self.theme.typography.size_3xl,
                 "font-weight": self.theme.typography.weight_bold,
                 "margin": margin or "0 0 2rem 0",
-                "background": f"linear-gradient(135deg, {self.theme.colors.primary_bg} 0%, rgba(255,255,255,0.8) 100%)",
-                "border_left": f"4px solid {self.theme.colors.primary}",
+                "background": self.theme.colors.primary_bg_subtle,
+                "border_left": f"3px solid {self.theme.colors.primary}",
                 "padding": "1.5rem 2rem",
                 "border_radius": self.theme.borders.radius_lg,
             },
@@ -229,8 +239,8 @@ class HTMLFactory:
                 "font-size": self.theme.typography.size_2xl,
                 "font-weight": self.theme.typography.weight_semibold,
                 "margin": margin or "0 0 1.5rem 0",
-                "background": f"linear-gradient(135deg, {self.theme.colors.surface} 0%, rgba(255,255,255,0.9) 100%)",
-                "border_left": f"3px solid {self.theme.colors.primary_light}",
+                "background": self.theme.colors.primary_bg_subtle,
+                "border_left": f"2px solid {self.theme.colors.primary_light}",
                 "padding": "1.25rem 1.5rem",
                 "border_radius": self.theme.borders.radius_md,
             },
@@ -239,7 +249,7 @@ class HTMLFactory:
                 "font-weight": self.theme.typography.weight_semibold,
                 "margin": margin or "0 0 1rem 0",
                 "background": self.theme.colors.background_secondary,
-                "border_left": f"3px solid {self.theme.colors.accent}",
+                "border_left": f"2px solid {self.theme.colors.accent}",
                 "padding": "1rem 1.25rem",
                 "border_radius": self.theme.borders.radius_md,
             },
@@ -256,7 +266,7 @@ class HTMLFactory:
                 "font-size": self.theme.typography.size_base,
                 "font-weight": self.theme.typography.weight_medium,
                 "margin": margin or "0 0 0.5rem 0",
-                "background": f"linear-gradient(135deg, {self.theme.colors.info_bg} 0%, rgba(255,255,255,0.95) 100%)",
+                "background": self.theme.colors.info_bg_subtle,
                 "border_left": f"2px solid {self.theme.colors.info}",
                 "padding": "0.5rem 0.75rem",
                 "border_radius": self.theme.borders.radius_sm,
@@ -265,7 +275,7 @@ class HTMLFactory:
                 "font-size": self.theme.typography.size_sm,
                 "font-weight": self.theme.typography.weight_medium,
                 "margin": margin or "0 0 0.5rem 0",
-                "background": f"linear-gradient(135deg, {self.theme.colors.surface} 0%, rgba(255,255,255,0.9) 100%)",
+                "background": self.theme.colors.background_secondary,
                 "border_left": f"1px solid {self.theme.colors.neutral_400}",
                 "padding": "0.5rem 0.75rem",
                 "border_radius": self.theme.borders.radius_sm,
@@ -425,9 +435,10 @@ class HTMLFactory:
             background: {self.theme.colors.surface};
             border: 1px solid {
             self.theme.colors.border};
-            border-left: 4px solid {color};
+            border-left: 3px solid {color};
             border-radius: {self.theme.borders.radius_md};
             padding: {self.theme.spacing.lg};
+            box-shadow: {self.theme.shadows.sm};
             {self._transition_style() if self.config.include_transitions else ''}
         ">
             {icon_html}
@@ -524,13 +535,11 @@ class HTMLFactory:
         if features:
             features_list = "".join(
                 [
-                    f"<li style='font-size: 0.85rem; color: {
-                self.theme.colors.text_muted}; margin-bottom: 0.25rem;'>• {f}</li>"
+                    f"<li style='font-size: 0.85rem; color: {self.theme.colors.text_muted}; margin-bottom: 0.25rem;'>• {f}</li>"
                     for f in features
                 ]
             )
-            features_html = f"<ul style='margin: 1rem 0 0 0; padding: 0; list-style: none;'>{
-                features_list}</ul>"
+            features_html = f"<ul style='margin: 1rem 0 0 0; padding: 0; list-style: none;'>{features_list}</ul>"
 
         hover_class = (
             "module-card-hover" if self.config.include_transitions else ""
@@ -552,7 +561,7 @@ class HTMLFactory:
         {hover_css}
         <div class='{hover_class}' style='
             border: 1px solid {self.theme.colors.border};
-            border-left: 4px solid {color};
+            border-left: 3px solid {color};
             border-radius: {self.theme.borders.radius_lg};
             padding: {self.theme.spacing.lg};
             margin: 0 0 {self.theme.spacing.md} 0;
@@ -565,7 +574,7 @@ class HTMLFactory:
         '>
             <div style='display: flex; align-items: center; margin-bottom: {self.theme.spacing.sm};'>
                 <span style='font-size: 1.5rem; margin-right: {self.theme.spacing.xs};'>{icon}</span>
-                <h4 style='margin: 0; color: {self.theme.colors.text_primary}; font-size: {self.theme.typography.size_lg};'>{title}</h4>
+                <h4 style='margin: 0; color: {self.theme.colors.text_primary}; font-size: {self.theme.typography.size_lg}; font-weight: {self.theme.typography.weight_semibold};'>{title}</h4>
             </div>
             <div style='flex: 1; display: flex; align-items: flex-start;'>
                 <p style='margin: 0; color: {self.theme.colors.text_secondary}; line-height: 1.6;'>{description}</p>
@@ -616,7 +625,7 @@ class HTMLFactory:
     def upload_area(
         self,
         title: str = "Drop your HMIS data file here or click to browse",
-        subtitle: str = "Supports CSV, XLSX, XLS formats",
+        subtitle: str = "Supports CSV format",
         icon: str = "📁",
     ) -> str:
         """Create an upload area component."""

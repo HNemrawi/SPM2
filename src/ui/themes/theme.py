@@ -18,6 +18,7 @@ class ThemeColors:
     primary_light = "#4d94c1"  # Light blue
     primary_hover = "#0074b3"  # Hover state
     primary_bg = "#e6f2f8"  # Lightest blue background
+    primary_bg_subtle = "rgba(0, 98, 155, 0.04)"  # Very subtle blue
 
     # Secondary colors
     secondary = "#7C3AED"  # Purple
@@ -33,27 +34,32 @@ class ThemeColors:
     success = "#10B981"  # Emerald green
     success_light = "#34D399"
     success_dark = "#059669"
-    success_bg = "#D1FAE5"
+    success_bg = "#ECFDF5"  # Softer green background
+    success_bg_subtle = "rgba(16, 185, 129, 0.04)"  # Very subtle green
 
     warning = "#F59E0B"  # Orange/Amber
     warning_light = "#FCD34D"
     warning_dark = "#D97706"
-    warning_bg = "#FED7AA"
+    warning_bg = "#FFFBEB"  # Softer amber background
+    warning_bg_subtle = "rgba(245, 158, 11, 0.04)"  # Very subtle amber
 
     danger = "#EF4444"  # Red
     danger_light = "#F87171"
     danger_dark = "#DC2626"
-    danger_bg = "#FEE2E2"
+    danger_bg = "#FEF2F2"  # Softer red background
+    danger_bg_subtle = "rgba(239, 68, 68, 0.04)"  # Very subtle red
 
     error = danger  # Alias for danger
     error_light = danger_light
     error_dark = danger_dark
-    error_bg = danger_bg
+    error_bg = "#FEF2F2"  # Softer red background
+    error_bg_subtle = danger_bg_subtle
 
     info = "#3B82F6"  # Blue/Cyan
     info_light = "#60A5FA"
     info_dark = "#2563EB"
-    info_bg = "#E0F2FE"
+    info_bg = "#EFF6FF"  # Softer blue background
+    info_bg_subtle = "rgba(59, 130, 246, 0.04)"  # Very subtle blue
 
     # Text hierarchy
     text_primary = "#1E293B"  # Dark slate
@@ -197,9 +203,11 @@ class ThemeSpacing:
     xxxl = "4rem"  # 64px
 
     # Common spacing patterns
-    card_padding = "1.5rem"
-    section_gap = "2rem"
-    container_padding = "1rem"
+    card_padding = "1.5rem"  # 24px
+    section_gap = "2rem"  # 32px
+    container_padding = "1rem"  # 16px
+    title_margin = "0.75rem"  # 12px
+    element_gap = "1rem"  # 16px between elements
 
 
 @dataclass

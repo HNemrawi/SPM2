@@ -1,6 +1,5 @@
 """
-Trend explorer section for HMIS dashboard with enhanced UI and auto-adjusting charts.
-Optimized for both dark and light themes with improved organization.
+Trend explorer section.
 """
 
 from typing import Any, Dict, List, Optional
@@ -387,18 +386,19 @@ def _render_interpretation_note(
     if is_neutral_metric:
         type_val = "info"
         icon = "ℹ️"
-        message = f"{
-            metric_name} is a <strong>volume metric</strong>. Changes show fluctuations in client numbers but are neither positive nor negative outcomes."
+        message = (
+            f"{metric_name} is a <strong>volume metric</strong>. "
+            "Changes show fluctuations in client numbers but are "
+            "neither positive nor negative outcomes."
+        )
     elif increase_is_negative:
         type_val = "warning"
         icon = "⚠️"
-        message = f"For {
-            metric_name}, <strong>increases are negative</strong> - we want to see this number go down."
+        message = f"For {metric_name}, <strong>increases are negative</strong> - we want to see this number go down."
     else:
         type_val = "success"
         icon = "✅"
-        message = f"For {
-            metric_name}, <strong>increases are positive</strong> - we want to see this number go up."
+        message = f"For {metric_name}, <strong>increases are positive</strong> - we want to see this number go up."
 
     create_insight_container(
         title="Interpretation Note", content=message, icon=icon, type=type_val
@@ -407,11 +407,12 @@ def _render_interpretation_note(
 
 def _render_section_header():
     """Render the section header with help information using UI factory."""
-    st.html(html_factory.title("Trend Analysis", level=2, icon="📈"))
-
-    col_help = st.columns([11, 1])[1]
-    with col_help:
-        with st.popover("ℹ️ Help", width='stretch'):
+    # Header with help button (consistent with Summary & Demographics)
+    col_header, col_info = st.columns([6, 1])
+    with col_header:
+        st.html(html_factory.title("Trend Analysis", level=2, icon="📈"))
+    with col_info:
+        with st.popover("ℹ️ Help", width="stretch"):
             st.markdown(
                 """
             ### Understanding Trend Analysis
@@ -490,10 +491,11 @@ def _render_section_header():
 # ================================================================================
 
 
+@st.cache_data(show_spinner=False)
 def _get_trend_data(
     df_filt: DataFrame,
     full_df: DataFrame,
-    metric_funcs: Dict[str, Any],
+    _metric_funcs: Dict[str, Any],
     sel_metrics: List[str],
     sel_freq: str,
     group_col: Optional[str],
@@ -501,7 +503,14 @@ def _get_trend_data(
     t1: Timestamp,
     return_window: int,
 ) -> Dict[str, DataFrame]:
-    """Calculate trend data for selected metrics and groups."""
+    """
+    Calculate trend data for selected metrics and groups.
+
+    Cached for performance with filters and parameters as cache keys.
+    Note: _metric_funcs has leading underscore to skip hashing (functions not hashable).
+    """
+    # Use the parameter internally without underscore
+    metric_funcs = _metric_funcs
 
     # Apply custom PH destinations
     df_filt = apply_custom_ph_destinations(df_filt, force=True)
@@ -555,23 +564,25 @@ def _get_trend_data(
                 ts = ts.sort_values(["group", "bucket"])
                 ts["metric"] = metric_name
 
-                # Process each group separately
-                ts_groups = []
-                for group, group_data in ts.groupby("group"):
-                    group_data = group_data.sort_values("bucket")
-                    group_data["delta"] = group_data["count"].diff().fillna(0)
-                    group_data["pct_change"] = (
-                        group_data["count"].pct_change().fillna(0) * 100
-                    )
-                    group_data["rolling"] = (
-                        group_data["count"]
-                        .rolling(window=3, min_periods=1)
-                        .mean()
-                    )
-                    ts_groups.append(group_data)
-
-                if ts_groups:
-                    ts = pd.concat(ts_groups)
+                # Process all groups vectorized - OPTIMIZED
+                # Sort by group and bucket first
+                ts = ts.sort_values(["group", "bucket"])
+                # Calculate delta, pct_change, and rolling for all groups at once
+                ts["delta"] = (
+                    ts.groupby("group", sort=False)["count"].diff().fillna(0)
+                )
+                ts["pct_change"] = (
+                    ts.groupby("group", sort=False)["count"]
+                    .pct_change()
+                    .fillna(0)
+                    * 100
+                )
+                ts["rolling"] = (
+                    ts.groupby("group", sort=False)["count"]
+                    .rolling(window=3, min_periods=1)
+                    .mean()
+                    .reset_index(level=0, drop=True)
+                )
 
             multi_data[metric_name] = ts
 
@@ -933,7 +944,9 @@ def _render_insights_panel(
     trend_direction = (
         "increasing"
         if total_change > 0
-        else "decreasing" if total_change < 0 else "stable"
+        else "decreasing"
+        if total_change < 0
+        else "stable"
     )
 
     # Determine colors
@@ -1381,9 +1394,12 @@ def render_trend_explorer(
             list(metric_opts.keys()),
             default=default_metrics,
             key=metrics_key,
-            on_change=on_metrics_change,
             help="Select multiple metrics to compare trends over time",
         )
+        # Update state without callback
+        if sel_metrics != state.get("prev_metrics"):
+            state["needs_recalc"] = True
+            state["prev_metrics"] = sel_metrics
 
     with filter_col2:
         # Frequency selection
@@ -1410,9 +1426,17 @@ def render_trend_explorer(
             list(FREQUENCY_MAP.keys()),
             index=list(FREQUENCY_MAP.keys()).index(freq_default),
             key=freq_key,
-            on_change=on_freq_change,
             help="Choose how to group data points over time",
         )
+        # Update state without callback
+        if sel_freq_label != st.session_state.get("prev_trend_freq"):
+            state["needs_recalc"] = True
+            st.session_state["prev_trend_freq"] = sel_freq_label
+            # Adjust rolling window size
+            roll_win_key = f"trend_roll_win_{key_suffix}"
+            st.session_state[roll_win_key] = SUGGESTED_ROLLING_WINDOWS.get(
+                sel_freq_label, 3
+            )
 
         sel_freq = FREQUENCY_MAP[sel_freq_label]
 
@@ -1442,9 +1466,14 @@ def render_trend_explorer(
             break_options,
             index=break_options.index(break_default),
             key=break_key,
-            on_change=on_break_change,
             help="Choose a demographic dimension to compare trends across different groups",
         )
+        # Update state without callback
+        if sel_break != st.session_state.get("prev_trend_break"):
+            state["needs_recalc"] = True
+            st.session_state["prev_trend_break"] = sel_break
+            if "trend_groups_selection" in state:
+                state.pop("trend_groups_selection")
 
         group_col = dict(breakdown_opts)[sel_break]
 
@@ -1564,7 +1593,7 @@ def render_trend_explorer(
                 multi_data,
             )
 
-            st.plotly_chart(fig, width='stretch')
+            st.plotly_chart(fig, use_container_width=True)
 
             # Period changes
             if do_delta:
@@ -1604,9 +1633,7 @@ def render_trend_explorer(
                                         increase_is_negative,
                                         sel_freq,
                                     )
-                                    st.plotly_chart(
-                                        fig_delta, width='stretch'
-                                    )
+                                    st.plotly_chart(fig_delta, use_container_width=True)
                                     _render_interpretation_note(
                                         metric_name,
                                         is_neutral_metric,
@@ -1715,7 +1742,7 @@ def render_trend_explorer(
                             hovertemplate=_get_hover_template(sel_freq)
                         )
 
-                        st.plotly_chart(fig, width='stretch')
+                        st.plotly_chart(fig, use_container_width=True)
 
                         # Additional analysis
                         if len(df) >= 2:
@@ -1737,9 +1764,7 @@ def render_trend_explorer(
                                         increase_is_negative,
                                         sel_freq,
                                     )
-                                    st.plotly_chart(
-                                        fig_delta, width='stretch'
-                                    )
+                                    st.plotly_chart(fig_delta, use_container_width=True)
                                     _render_interpretation_note(
                                         metric_name,
                                         is_neutral_metric,
@@ -1808,14 +1833,11 @@ def render_trend_explorer(
                         if filtered_groups:
                             filtered_df = df[df["group"].isin(filtered_groups)]
                             st.caption(
-                                f"Showing {
-                                    len(filtered_groups)} of {
-                                    len(all_groups)} total {sel_break} groups"
+                                f"Showing {len(filtered_groups)} of {len(all_groups)} total {sel_break} groups"
                             )
                         else:
                             st.warning(
-                                f"Please select at least one {
-                                sel_break} group to display."
+                                f"Please select at least one {sel_break} group to display."
                             )
                             continue
                     else:
@@ -1903,7 +1925,7 @@ def render_trend_explorer(
                             )
                         )
 
-                        st.plotly_chart(fig, width='stretch')
+                        st.plotly_chart(fig, use_container_width=True)
 
                         # Growth analysis
                         if len(filtered_df["bucket"].unique()) >= 2:
@@ -1980,72 +2002,84 @@ def render_trend_explorer(
                                                 # Create growth chart
                                                 fig_growth = go.Figure()
 
-                                                # Pre-calculate colors and
-                                                # opacities for better
-                                                # performance
-                                                def get_growth_color(
-                                                    growth_pct,
-                                                ):
-                                                    if growth_pct > 50:
-                                                        return (
-                                                            theme_config.colors.success
-                                                        )
-                                                    elif growth_pct > 0:
-                                                        return (
-                                                            theme_config.colors.success_light
-                                                        )
-                                                    elif growth_pct > -50:
-                                                        return (
-                                                            theme_config.colors.warning
-                                                        )
-                                                    else:
-                                                        return (
-                                                            theme_config.colors.danger
-                                                        )
+                                                # OPTIMIZED: Vectorized color assignment
+                                                colors = pd.cut(
+                                                    growth_vis_df[
+                                                        "growth_pct"
+                                                    ],
+                                                    bins=[
+                                                        -float("inf"),
+                                                        -50,
+                                                        0,
+                                                        50,
+                                                        float("inf"),
+                                                    ],
+                                                    labels=[
+                                                        theme_config.colors.danger,
+                                                        theme_config.colors.warning,
+                                                        theme_config.colors.success_light,
+                                                        theme_config.colors.success,
+                                                    ],
+                                                ).astype(str)
 
-                                                colors = growth_vis_df[
-                                                    "growth_pct"
-                                                ].apply(get_growth_color)
+                                                # Vectorized opacity assignment
                                                 opacities = growth_vis_df[
                                                     "significant"
-                                                ].apply(
-                                                    lambda x: 1.0 if x else 0.6
+                                                ].map({True: 1.0, False: 0.6})
+
+                                                # OPTIMIZED: Create hover text vectorized
+                                                hover_text = (
+                                                    "<b>"
+                                                    + growth_vis_df[
+                                                        "group"
+                                                    ].astype(str)
+                                                    + "</b><br><br>"
+                                                    "<b>Growth Rate:</b> "
+                                                    + growth_vis_df[
+                                                        "growth_pct"
+                                                    ].apply(
+                                                        lambda x: f"{x:+.1f}"
+                                                    )
+                                                    + "%<br><br>"
+                                                    "<b>Start Period:</b> "
+                                                    + growth_vis_df[
+                                                        "first_count"
+                                                    ]
+                                                    .astype(int)
+                                                    .astype(str)
+                                                    + " clients<br>"
+                                                    "<b>End Period:</b> "
+                                                    + growth_vis_df[
+                                                        "last_count"
+                                                    ]
+                                                    .astype(int)
+                                                    .astype(str)
+                                                    + " clients<br>"
+                                                    "<b>Net Change:</b> "
+                                                    + growth_vis_df["growth"]
+                                                    .astype(int)
+                                                    .astype(str)
+                                                    + " clients<br>"
                                                 )
 
-                                                # Add bars with pre-calculated
-                                                # properties
-                                                for (
-                                                    (idx, row),
-                                                    color,
-                                                    opacity,
-                                                ) in zip(
-                                                    growth_vis_df.iterrows(),
-                                                    colors,
-                                                    opacities,
-                                                ):
-                                                    fig_growth.add_trace(
-                                                        go.Bar(
-                                                            x=[row["group"]],
-                                                            y=[
-                                                                row[
-                                                                    "growth_pct"
-                                                                ]
-                                                            ],
-                                                            marker_color=color,
-                                                            opacity=opacity,
-                                                            hovertemplate=(
-                                                                f"<b>{row['group']}</b><br>"
-                                                                f"<br>"
-                                                                f"<b>Growth Rate:</b> {row['growth_pct']:+.1f}%<br>"
-                                                                f"<br>"
-                                                                f"<b>Start Period:</b> {int(row['first_count'])} clients<br>"
-                                                                f"<b>End Period:</b> {int(row['last_count'])} clients<br>"
-                                                                f"<b>Net Change:</b> {int(row['growth'])} clients<br>"
-                                                                f"<extra></extra>"
-                                                            ),
-                                                            showlegend=False,
-                                                        )
+                                                # OPTIMIZED: Single trace instead of loop
+                                                fig_growth.add_trace(
+                                                    go.Bar(
+                                                        x=growth_vis_df[
+                                                            "group"
+                                                        ],
+                                                        y=growth_vis_df[
+                                                            "growth_pct"
+                                                        ],
+                                                        marker=dict(
+                                                            color=colors,
+                                                            opacity=opacities,
+                                                        ),
+                                                        hovertemplate="%{text}<extra></extra>",
+                                                        text=hover_text,
+                                                        showlegend=False,
                                                     )
+                                                )
 
                                                 # Update layout with theme
                                                 # support
@@ -2157,8 +2191,7 @@ def render_trend_explorer(
                                                 # Add annotations
                                                 if showing_subset:
                                                     fig_growth.add_annotation(
-                                                        text=f"📊 Showing top 6 and bottom 6 of {
-                                                            len(growth_df)} total groups for clarity",
+                                                        text=f"📊 Showing top 6 and bottom 6 of {len(growth_df)} total groups for clarity",
                                                         xref="paper",
                                                         yref="paper",
                                                         x=0.5,
@@ -2196,7 +2229,7 @@ def render_trend_explorer(
 
                                                 st.plotly_chart(
                                                     fig_growth,
-                                                    width='stretch',
+                                                    width="stretch",
                                                 )
                                             else:
                                                 st.info(
@@ -2210,10 +2243,10 @@ def render_trend_explorer(
                                             display_df["Growth"] = display_df[
                                                 "growth"
                                             ].map(lambda x: fmt_int(x))
-                                            display_df["Growth %"] = (
-                                                display_df["growth_pct"].map(
-                                                    lambda x: fmt_pct(x)
-                                                )
+                                            display_df[
+                                                "Growth %"
+                                            ] = display_df["growth_pct"].map(
+                                                lambda x: fmt_pct(x)
                                             )
                                             display_df = display_df.rename(
                                                 columns={
@@ -2224,15 +2257,17 @@ def render_trend_explorer(
                                             )
 
                                             # Format count columns
-                                            display_df["Initial Value"] = (
-                                                display_df[
-                                                    "Initial Value"
-                                                ].map(fmt_int)
+                                            display_df[
+                                                "Initial Value"
+                                            ] = display_df[
+                                                "Initial Value"
+                                            ].map(
+                                                fmt_int
                                             )
-                                            display_df["Latest Value"] = (
-                                                display_df["Latest Value"].map(
-                                                    fmt_int
-                                                )
+                                            display_df[
+                                                "Latest Value"
+                                            ] = display_df["Latest Value"].map(
+                                                fmt_int
                                             )
 
                                             # Show table
@@ -2246,7 +2281,7 @@ def render_trend_explorer(
                                                         "Growth %",
                                                     ]
                                                 ],
-                                                width='stretch',
+                                                width="stretch",
                                                 hide_index=True,
                                             )
                                         else:
@@ -2255,8 +2290,7 @@ def render_trend_explorer(
                                             )
                             except Exception as e:
                                 st.warning(
-                                    f"Could not calculate growth trends: {
-                                        str(e)}"
+                                    f"Could not calculate growth trends: {str(e)}"
                                 )
                     else:
                         st.info(

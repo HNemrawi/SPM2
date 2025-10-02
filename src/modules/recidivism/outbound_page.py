@@ -11,11 +11,15 @@ import pandas as pd
 import streamlit as st
 
 from src.core.constants import DEFAULT_PROJECT_TYPES
-from src.core.session.manager import (
-    check_data_available,
+from src.core.session import (
+    ModuleType,
     get_analysis_result,
+    get_outbound_state,
+    get_session_manager,
     set_analysis_result,
 )
+
+# Widget persistence now handled by enhanced session system
 from src.core.utils.helpers import (
     check_date_range_validity,
     create_multiselect_filter,
@@ -33,14 +37,14 @@ from src.modules.recidivism.outbound_viz import (
     plot_days_to_return_box,
     plot_flow_sankey,
 )
-from src.ui.factories.components import ui
-from src.ui.factories.html import html_factory
-from src.ui.layouts.templates import ABOUT_OUTBOUND_CONTENT
-from src.ui.layouts.widgets import (
+from src.ui.factories.components import (
     render_about_section,
     render_dataframe_with_style,
     render_download_button,
+    ui,
 )
+from src.ui.factories.html import html_factory
+from src.ui.layouts.templates import ABOUT_OUTBOUND_CONTENT
 from src.ui.themes.styles import (
     NeutralColors,
     apply_chart_theme,
@@ -49,12 +53,22 @@ from src.ui.themes.styles import (
 )
 
 # ============================================================================
+# CONSTANTS
+# ============================================================================
+
+# Enhanced session management
+session_manager = get_session_manager()
+outbound_state = get_outbound_state()
+OUTBOUND_MODULE = ModuleType.OUTBOUND
+
+# ============================================================================
 # CONFIGURATION FUNCTIONS
 # ============================================================================
 
 
 def _set_dirty_flag():
-    st.session_state.outbound_dirty = True
+    # Deprecated - use check_and_mark_dirty for value-aware dirty checking
+    outbound_state.mark_dirty()
 
 
 def setup_reporting_period(
@@ -67,14 +81,31 @@ def setup_reporting_period(
         default_start = datetime(2025, 1, 1)
         default_end = datetime(2025, 1, 31)
 
+        # Get saved date range from enhanced session system
+        saved_dates = outbound_state.get_widget_state("date_range", None)
+        if saved_dates and len(saved_dates) == 2:
+            default_start = saved_dates[0]
+            default_end = saved_dates[1]
+
+        def _save_dates():
+            # The date_range_input function will trigger this callback when dates change
+            # We need to save the current dates to enhanced session system
+            _set_dirty_flag()
+
         report_start, report_end = ui.date_range_input(
             label="Exit Date Range",
             default_start=default_start,
             default_end=default_end,
             help_text="Clients must have an exit date inside this window.",
             info_message="The selected end date will be included in the analysis period.",
-            on_change_callback=_set_dirty_flag,
+            on_change_callback=_save_dates,
         )
+
+        # Save the selected dates to enhanced session system after selection
+        if report_start and report_end:
+            outbound_state.set_widget_state(
+                "date_range", [report_start, report_end]
+            )
 
         # Use defaults if date input failed
         if report_start is None or report_end is None:
@@ -123,7 +154,9 @@ def setup_exit_filters(df: pd.DataFrame) -> Dict[str, Any]:
             ),
             default=None,
             help_text="Filter exits by CoC code",
-            on_change=_set_dirty_flag,
+            key="outbound_exit_cocs",
+            module=OUTBOUND_MODULE,
+            on_change=lambda: outbound_state.mark_dirty(),
         )
 
         exit_localcocs = create_multiselect_filter(
@@ -135,7 +168,9 @@ def setup_exit_filters(df: pd.DataFrame) -> Dict[str, Any]:
             ),
             default=None,
             help_text="Filter exits by local CoC",
-            on_change=_set_dirty_flag,
+            key="outbound_exit_localcocs",
+            module=OUTBOUND_MODULE,
+            on_change=lambda: outbound_state.mark_dirty(),
         )
 
         exit_agencies = create_multiselect_filter(
@@ -147,7 +182,9 @@ def setup_exit_filters(df: pd.DataFrame) -> Dict[str, Any]:
             ),
             default=None,
             help_text="Filter exits by agency",
-            on_change=_set_dirty_flag,
+            key="outbound_exit_agencies",
+            module=OUTBOUND_MODULE,
+            on_change=lambda: outbound_state.mark_dirty(),
         )
 
         exit_programs = create_multiselect_filter(
@@ -159,7 +196,9 @@ def setup_exit_filters(df: pd.DataFrame) -> Dict[str, Any]:
             ),
             default=None,
             help_text="Filter exits by program",
-            on_change=_set_dirty_flag,
+            key="outbound_exit_programs",
+            module=OUTBOUND_MODULE,
+            on_change=lambda: outbound_state.mark_dirty(),
         )
 
         exit_ssvf_rrh = create_multiselect_filter(
@@ -171,7 +210,9 @@ def setup_exit_filters(df: pd.DataFrame) -> Dict[str, Any]:
             ),
             default=None,
             help_text="SSVF RRH filter for exits",
-            on_change=_set_dirty_flag,
+            key="outbound_exit_ssvf_rrh",
+            module=OUTBOUND_MODULE,
+            on_change=lambda: outbound_state.mark_dirty(),
         )
 
         all_project_types = sorted(
@@ -180,22 +221,49 @@ def setup_exit_filters(df: pd.DataFrame) -> Dict[str, Any]:
         default_projects = [
             p for p in DEFAULT_PROJECT_TYPES if p in all_project_types
         ]
+        # Get saved project types from enhanced session system
+        saved_projects = outbound_state.get_widget_state(
+            "exiting_projects", default_projects
+        )
+
+        def _save_projects():
+            value = st.session_state.get(
+                "outbound_exiting_projects", default_projects
+            )
+            outbound_state.set_widget_state("exiting_projects", value)
+            outbound_state.check_and_mark_dirty("exiting_projects", value)
+
         exiting_projects = st.multiselect(
             "Project Types (Exit)",
             all_project_types,
-            default=default_projects,
+            default=saved_projects,
             help="Project types treated as exits",
-            on_change=_set_dirty_flag,
+            key="outbound_exiting_projects",
+            on_change=_save_projects,
         )
 
         allowed_exit_dest_cats = None
         if "ExitDestinationCat" in df.columns:
+            # Get saved exit destination categories from enhanced session system
+            saved_exit_dest_cats = outbound_state.get_widget_state(
+                "exit_dest_cats", ["Permanent Housing Situations"]
+            )
+
+            def _save_exit_dest_cats():
+                value = st.session_state.get(
+                    "outbound_exit_dest_cats",
+                    ["Permanent Housing Situations"],
+                )
+                outbound_state.set_widget_state("exit_dest_cats", value)
+                outbound_state.check_and_mark_dirty("exit_dest_cats", value)
+
             allowed_exit_dest_cats = st.multiselect(
                 "Exit Destination Categories",
                 sorted(df["ExitDestinationCat"].dropna().unique()),
-                default=["Permanent Housing Situations"],
+                default=saved_exit_dest_cats,
                 help="Limit exits to these destination categories",
-                on_change=_set_dirty_flag,
+                key="outbound_exit_dest_cats",
+                on_change=_save_exit_dest_cats,
             )
 
         allowed_exit_destinations = None
@@ -205,7 +273,9 @@ def setup_exit_filters(df: pd.DataFrame) -> Dict[str, Any]:
                 sorted(df["ExitDestination"].dropna().unique().tolist()),
                 default=["ALL"],
                 help_text="Limit exits to these specific destinations",
-                on_change=_set_dirty_flag,
+                key="outbound_exit_destinations",
+                module=OUTBOUND_MODULE,
+                on_change=lambda: outbound_state.mark_dirty(),
             )
 
         return {
@@ -224,9 +294,7 @@ def setup_return_filters(df: pd.DataFrame) -> Dict[str, Any]:
     """Configure return-specific filters."""
     with st.sidebar.expander("↩️ **Return Filters**", expanded=False):
         st.html(
-            html_factory.title(
-                "Return Enrollment Criteria", level=4, icon="🔄"
-            )
+            html_factory.title("Return Enrollment Criteria", level=4, icon="🔄")
         )
 
         return_cocs = create_multiselect_filter(
@@ -238,7 +306,9 @@ def setup_return_filters(df: pd.DataFrame) -> Dict[str, Any]:
             ),
             default=None,
             help_text="Filter next enrollments by CoC code",
-            on_change=_set_dirty_flag,
+            key="outbound_return_cocs",
+            module=OUTBOUND_MODULE,
+            on_change=lambda: outbound_state.mark_dirty(),
         )
 
         return_localcocs = create_multiselect_filter(
@@ -250,7 +320,9 @@ def setup_return_filters(df: pd.DataFrame) -> Dict[str, Any]:
             ),
             default=None,
             help_text="Filter next enrollments by local CoC",
-            on_change=_set_dirty_flag,
+            key="outbound_return_localcocs",
+            module=OUTBOUND_MODULE,
+            on_change=lambda: outbound_state.mark_dirty(),
         )
 
         return_agencies = create_multiselect_filter(
@@ -262,7 +334,9 @@ def setup_return_filters(df: pd.DataFrame) -> Dict[str, Any]:
             ),
             default=None,
             help_text="Filter next enrollments by agency",
-            on_change=_set_dirty_flag,
+            key="outbound_return_agencies",
+            module=OUTBOUND_MODULE,
+            on_change=lambda: outbound_state.mark_dirty(),
         )
 
         return_programs = create_multiselect_filter(
@@ -274,7 +348,9 @@ def setup_return_filters(df: pd.DataFrame) -> Dict[str, Any]:
             ),
             default=None,
             help_text="Filter next enrollments by program",
-            on_change=_set_dirty_flag,
+            key="outbound_return_programs",
+            module=OUTBOUND_MODULE,
+            on_change=lambda: outbound_state.mark_dirty(),
         )
 
         return_ssvf_rrh = create_multiselect_filter(
@@ -286,7 +362,9 @@ def setup_return_filters(df: pd.DataFrame) -> Dict[str, Any]:
             ),
             default=None,
             help_text="SSVF RRH filter for returns",
-            on_change=_set_dirty_flag,
+            key="outbound_return_ssvf_rrh",
+            module=OUTBOUND_MODULE,
+            on_change=lambda: outbound_state.mark_dirty(),
         )
 
         all_project_types = sorted(
@@ -295,12 +373,25 @@ def setup_return_filters(df: pd.DataFrame) -> Dict[str, Any]:
         default_projects = [
             p for p in DEFAULT_PROJECT_TYPES if p in all_project_types
         ]
+        # Get saved return project types from enhanced session system
+        saved_return_projects = outbound_state.get_widget_state(
+            "return_projects", default_projects
+        )
+
+        def _save_return_projects():
+            value = st.session_state.get(
+                "outbound_return_projects", default_projects
+            )
+            outbound_state.set_widget_state("return_projects", value)
+            outbound_state.check_and_mark_dirty("return_projects", value)
+
         return_projects = st.multiselect(
             "Project Types (Return)",
             all_project_types,
-            default=default_projects,
+            default=saved_return_projects,
             help="Project types treated as candidate returns",
-            on_change=_set_dirty_flag,
+            key="outbound_return_projects",
+            on_change=_save_return_projects,
         )
 
         return {
@@ -326,7 +417,9 @@ def setup_continuum_filters(df: pd.DataFrame) -> Optional[List[str]]:
             cont_opts,
             default=None,
             help_text="Optional continuum filter",
-            on_change=_set_dirty_flag,
+            key="outbound_continuum_projects",
+            module=OUTBOUND_MODULE,
+            on_change=lambda: outbound_state.mark_dirty(),
         )
 
 
@@ -338,7 +431,7 @@ def setup_continuum_filters(df: pd.DataFrame) -> Optional[List[str]]:
 def run_analysis(df: pd.DataFrame, analysis_params: Dict[str, Any]) -> bool:
     """Run the outbound recidivism analysis with the provided parameters."""
     try:
-        st.session_state.outbound_dirty = False
+        outbound_state.request_analysis()
         with st.status(
             "🔄 Running Outbound Recidivism Analysis…", expanded=True
         ) as status:
@@ -405,7 +498,14 @@ def run_analysis(df: pd.DataFrame, analysis_params: Dict[str, Any]) -> bool:
 
             status.write("💾 Finalizing results...")
 
-            set_analysis_result("outbound", outbound_df)
+            set_analysis_result(OUTBOUND_MODULE, outbound_df)
+
+            # Clear analysis request and save current params as new baseline
+            outbound_state.clear_analysis_request()
+
+            # Explicitly save all current parameter values as baseline
+            outbound_state.save_params_snapshot()
+
             status.update(
                 label="✅ Outbound Analysis Complete!",
                 state="complete",
@@ -430,9 +530,7 @@ def display_summary_metrics(
 ) -> None:
     """Display the core performance metrics summary with natural styling."""
     st.html(html_factory.divider("gradient"))
-    st.html(
-        html_factory.title("Outbound Analysis Summary", level=3, icon="📊")
-    )
+    st.html(html_factory.title("Outbound Analysis Summary", level=3, icon="📊"))
 
     if allowed_exit_dest_cats == ["Permanent Housing Situations"]:
         ui.info_section(
@@ -545,7 +643,7 @@ def display_days_to_return(out_df: pd.DataFrame) -> None:
 
     fig = plot_days_to_return_box(out_df)
     fig = apply_chart_theme(fig)
-    st.plotly_chart(fig, width='stretch')
+    st.plotly_chart(fig, use_container_width=True)
 
 
 @st.fragment
@@ -751,10 +849,8 @@ def display_client_flow(out_df: pd.DataFrame) -> None:
             non_zero_cells = (pivot_c > 0).sum().sum()
 
             if non_zero_cells <= 5:
-                st.info(
-                    f"Only {non_zero_cells} pathway{
-                        's' if non_zero_cells != 1 else ''} detected"
-                )
+                plural = "s" if non_zero_cells != 1 else ""
+                st.info(f"Only {non_zero_cells} pathway{plural} detected")
                 try:
                     top_flows_df = get_top_flows_from_pivot(
                         pivot_c, top_n=int(non_zero_cells)
@@ -852,7 +948,7 @@ def display_client_flow(out_df: pd.DataFrame) -> None:
             pivot_sankey, f"{ex_choice} → {ret_choice}"
         )
         sankey_fig = apply_chart_theme(sankey_fig)
-        st.plotly_chart(sankey_fig, width='stretch')
+        st.plotly_chart(sankey_fig, use_container_width=True)
     else:
         st.info("📭 Insufficient data for flow analysis")
 
@@ -921,9 +1017,16 @@ def display_data_export(out_df: pd.DataFrame) -> None:
 
 def outbound_recidivism_page() -> None:
     """Render the Outbound Recidivism page with all components."""
+    # Initialize enhanced session management
+    outbound_state.initialize()
+
+    # Initialize parameter baseline on first load to prevent false dirty flags
+    # This ensures widgets created for the first time don't trigger "changed" state
+    if not st.session_state.get(f"{outbound_state.key_prefix}last_params"):
+        outbound_state.save_params_snapshot()
+
     # Apply custom CSS theme
     apply_custom_css()
-    st.session_state.setdefault("outbound_dirty", False)
 
     st.html(
         html_factory.title("Outbound Recidivism Analysis", level=1, icon="📈")
@@ -937,9 +1040,14 @@ def outbound_recidivism_page() -> None:
         icon="📤",
     )
 
-    # Check data availability
-    df = check_data_available()
+    # Check data availability using enhanced session manager
+    if not session_manager.has_data():
+        st.warning("Please upload data using the sidebar to begin analysis.")
+        return
+
+    df = session_manager.get_data()
     if df is None:
+        st.error("Data is not available. Please check your upload.")
         return
 
     # Sidebar configuration with themed styling
@@ -980,17 +1088,17 @@ def outbound_recidivism_page() -> None:
     st.html(html_factory.divider("gradient"))
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
-        if st.session_state.get("outbound_dirty"):
+        if outbound_state.is_dirty():
             st.info("Parameters have changed. Click 'Run Analysis' to update.")
         if st.button(
             "▶️ Run Outbound Analysis",
             type="primary",
-            width='stretch',
+            width="stretch",
         ):
             run_analysis(df, analysis_params)
 
     # Display results if analysis was successful
-    out_df = get_analysis_result("outbound")
+    out_df = get_analysis_result(OUTBOUND_MODULE)
     if out_df is not None and not out_df.empty:
         # Display all analysis sections with themed styling
         display_summary_metrics(out_df, exit_filters["allowed_exit_dest_cats"])

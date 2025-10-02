@@ -1,10 +1,4 @@
-"""
-Core Constants Module
-====================
-Central location for application-wide constants.
-"""
-
-# ==================== PROJECT TYPES ====================
+"""Application-wide constants for HMIS analysis."""
 
 PH_PROJECTS = {
     "PH – Housing Only",
@@ -21,10 +15,8 @@ NON_HOMELESS_PROJECTS = {
     "Services Only",
 }
 
-# Exit/Return categories
 PH_CATEGORY = "Permanent Housing Situations"
 
-# Return period categories
 RETURN_PERIODS = {
     "< 6 Months": 180,
     "6–12 Months": 365,
@@ -32,7 +24,6 @@ RETURN_PERIODS = {
     "> 24 Months": float("inf"),
 }
 
-# Standard column groups for filtering
 EXIT_COLUMNS = [
     "Exit_HasIncome",
     "Exit_HasDisability",
@@ -73,7 +64,6 @@ RETURN_COLUMNS = [
     "Return_ProgramsContinuumProject",
 ]
 
-# Required columns for analysis
 REQUIRED_COLUMNS = {
     "base": [
         "ClientID",
@@ -87,7 +77,6 @@ REQUIRED_COLUMNS = {
     "demographics": ["DOB", "Gender", "RaceEthnicity", "VeteranStatus"],
 }
 
-# Standard columns that may need cleaning when generating summary dataframes
 COLUMNS_TO_REMOVE = [
     "Return_UniqueIdentifier",
     "Return_ClientID",
@@ -110,7 +99,6 @@ COLUMNS_TO_RENAME = {
     "Exit_VeteranStatus": "VeteranStatus",
 }
 
-# Default project types
 DEFAULT_PROJECT_TYPES = [
     "Street Outreach",
     "Emergency Shelter – Entry Exit",
@@ -122,8 +110,6 @@ DEFAULT_PROJECT_TYPES = [
     "PH – Permanent Supportive Housing (disability required for entry)",
     "PH – Rapid Re-Housing",
 ]
-
-# ==================== DEMOGRAPHIC DIMENSIONS ====================
 
 DEMOGRAPHIC_DIMENSIONS = [
     ("Race / Ethnicity", "RaceEthnicity"),
@@ -138,8 +124,6 @@ DEMOGRAPHIC_DIMENSIONS = [
     ("Chronically Homeless", "CHStartHousehold"),
     ("Currently Fleeing DV", "CurrentlyFleeingDV"),
 ]
-
-# ==================== EXPORT ALL ====================
 
 __all__ = [
     "PH_PROJECTS",

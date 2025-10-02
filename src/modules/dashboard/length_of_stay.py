@@ -1,6 +1,5 @@
 """
-Length of stay analysis section for HMIS dashboard - Enhanced Version
-Provides enrollment-level analysis with proper project type context and HUD alignment
+Length of stay analysis section for HMIS dashboard
 """
 
 from typing import Any, Dict, List, Tuple
@@ -347,9 +346,10 @@ def _create_demographic_insights_html(
     metrics_html += html_factory.metric_card(
         label="Longest Average Stays",
         value=longest_stay[dim_col],
-        delta=f"{
-            longest_stay['mean']:.0f} days • {
-            longest_stay['count']:,} enrollments",
+        delta=(
+            f"{longest_stay['mean']:.0f} days • "
+            f"{longest_stay['count']:,} enrollments"
+        ),
         color=SECONDARY_COLOR,
         icon="🔺",
     )
@@ -358,9 +358,9 @@ def _create_demographic_insights_html(
     metrics_html += html_factory.metric_card(
         label="Shortest Average Stays",
         value=shortest_stay[dim_col],
-        delta=f"{
-            shortest_stay['mean']:.0f} days • {
-            shortest_stay['count']:,} enrollments",
+        delta=(
+            f"{shortest_stay['mean']:.0f} days • {shortest_stay['count']:,} enrollments"
+        ),
         color=SUCCESS_COLOR,
         icon="🔻",
     )
@@ -369,8 +369,7 @@ def _create_demographic_insights_html(
     metrics_html += html_factory.metric_card(
         label="Disparity Level",
         value=disparity_level,
-        delta=f"{
-            disparity_ratio:.1f}x difference between longest and shortest",
+        delta=f"{disparity_ratio:.1f}x difference between longest and shortest",
         color=disparity_color,
         icon="📊",
     )
@@ -401,11 +400,14 @@ def _create_demographic_insights_html(
     return title_html + metrics_html + gap_info
 
 
+@st.cache_data(show_spinner=False)
 def length_of_stay(
     df: DataFrame, start: Timestamp, end: Timestamp
 ) -> Dict[str, Any]:
     """
     Calculate length of stay statistics for all enrollments.
+
+    Cached for performance with dates as cache keys.
 
     Parameters:
     -----------
@@ -519,9 +521,9 @@ def length_of_stay(
 
     if extremely_long_mask.any():
         issues_df = active[extremely_long_mask].copy()
-        issues_df["Issue_Type"] = (
-            "Extremely Long Stay (5+ years) in Non-Permanent Housing"
-        )
+        issues_df[
+            "Issue_Type"
+        ] = "Extremely Long Stay (5+ years) in Non-Permanent Housing"
         issues_df["Issue_Description"] = (
             "Length of Stay = " + issues_df["LOS"].astype(str) + " days"
         )
@@ -662,7 +664,7 @@ def analyze_los_with_destinations(df: DataFrame, los_data: Dict) -> DataFrame:
         if not exits_only.empty:
             # Group by destination type
             dest_summary = (
-                exits_only.groupby("ExitDestinationCat")["LOS"]
+                exits_only.groupby("ExitDestinationCat", observed=True)["LOS"]
                 .agg(mean_los="mean", median_los="median", count="count")
                 .round(1)
             )
@@ -677,6 +679,7 @@ def analyze_los_with_destinations(df: DataFrame, los_data: Dict) -> DataFrame:
     return pd.DataFrame()
 
 
+@st.cache_data(show_spinner=False)
 def los_by_demographic(
     df: DataFrame,
     dim_col: str,
@@ -686,6 +689,8 @@ def los_by_demographic(
 ) -> DataFrame:
     """
     Calculate length of stay statistics by demographic group.
+
+    Cached for performance with filters and dates as cache keys.
 
     Parameters:
     -----------
@@ -983,12 +988,14 @@ def render_length_of_stay(df_filt: DataFrame) -> None:
             if k not in ["last_updated"]:
                 state.pop(k, None)
 
-    # Header with info button using UI factory
-    st.html(html_factory.title("Length of Stay Analysis", level=2, icon="⏱️"))
-
-    col_help = st.columns([11, 1])[1]
-    with col_help:
-        with st.popover("ℹ️ Help", width='stretch'):
+    # Header with help button (consistent with Summary & Demographics)
+    col_header, col_info = st.columns([6, 1])
+    with col_header:
+        st.html(
+            html_factory.title("Length of Stay Analysis", level=2, icon="⏱️")
+        )
+    with col_info:
+        with st.popover("ℹ️ Help", width="stretch"):
             st.markdown(
                 """
             ### Understanding Length of Stay
@@ -1136,9 +1143,9 @@ def render_length_of_stay(df_filt: DataFrame) -> None:
             st.download_button(
                 label="📥 Download Data Quality Issues Report",
                 data=csv,
-                file_name=f"los_data_quality_issues_{
-                    t0.strftime('%Y%m%d')}_{
-                    t1.strftime('%Y%m%d')}.csv",
+                file_name=(
+                    f"los_data_quality_issues_{t0.strftime('%Y%m%d')}_{t1.strftime('%Y%m%d')}.csv"
+                ),
                 mime="text/csv",
                 help="Download the list of enrollments with data quality issues for review",
             )
@@ -1235,7 +1242,7 @@ def render_length_of_stay(df_filt: DataFrame) -> None:
             bargap=0.2,
         )
 
-        st.plotly_chart(fig, width='stretch')
+        st.plotly_chart(fig, use_container_width=True)
 
         # Category explanation with improved UI
         category_content = "<div style='display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px;'>"
@@ -1305,7 +1312,7 @@ def render_length_of_stay(df_filt: DataFrame) -> None:
                         yaxis_title="Average Length of Stay (days)",
                     )
 
-                    st.plotly_chart(fig_dest, width='stretch')
+                    st.plotly_chart(fig_dest, use_container_width=True)
 
                     # Show summary table
                     st.dataframe(
@@ -1316,7 +1323,7 @@ def render_length_of_stay(df_filt: DataFrame) -> None:
                                 "count": "{:,}",
                             }
                         ),
-                        width='stretch',
+                        width="stretch",
                     )
                 else:
                     st.info("No exit destination data available.")
@@ -1450,8 +1457,7 @@ def render_length_of_stay(df_filt: DataFrame) -> None:
 
                     if los_by_demo.empty:
                         st.info(
-                            f"No groups meet the minimum size threshold of {
-                            min_group} enrollments."
+                            f"No groups meet the minimum size threshold of {min_group} enrollments."
                         )
                         return
 
@@ -1499,8 +1505,7 @@ def render_length_of_stay(df_filt: DataFrame) -> None:
                     ),
                     showlegend=idx == 0,  # Only show in legend once
                     hoverinfo="text",
-                    hovertext=f"Most enrollments ({row[demo_col]}) stay between {
-                        row['q1']:.0f}-{row['q3']:.0f} days",
+                    hovertext=f"Most enrollments ({row[demo_col]}) stay between {row['q1']:.0f}-{row['q3']:.0f} days",
                 )
             )
 
@@ -1588,7 +1593,7 @@ def render_length_of_stay(df_filt: DataFrame) -> None:
         )
 
         # Display the chart
-        st.plotly_chart(fig_combined, width='stretch')
+        st.plotly_chart(fig_combined, use_container_width=True)
 
         # Chart guide
         chart_guide_html = f"""
@@ -1688,7 +1693,7 @@ def render_length_of_stay(df_filt: DataFrame) -> None:
         )
 
         # Display the chart
-        st.plotly_chart(fig_compare, width='stretch')
+        st.plotly_chart(fig_compare, use_container_width=True)
 
         # Insights section
         with st.expander("💡 Key Findings", expanded=True):

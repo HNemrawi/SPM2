@@ -37,6 +37,13 @@ A professional Streamlit-based application for analyzing Homeless Management Inf
 - **Length of Stay**: Duration patterns, disparities, and quality checks
 - **Equity Analysis**: Identifies outcome disparities across demographic groups
 
+### 💾 Session Management (v2.1+)
+- **Save Configurations**: Export current analysis settings to JSON
+- **Restore Sessions**: Import previously saved configurations
+- **Smart Validation**: Automatic compatibility checking with current dataset
+- **Session Metadata**: Timestamped saves with descriptions
+- **Module-Specific**: Save settings per analysis module
+
 ## 🚀 Quick Start
 
 ### Prerequisites
@@ -58,7 +65,7 @@ pip install -r requirements.txt
 
 3. Run the application:
 ```bash
-streamlit run app.py
+streamlit run main.py
 ```
 
 The application will open in your default browser at `http://localhost:8501`
@@ -88,16 +95,18 @@ The application expects HMIS data in CSV or Excel format with these essential co
 
 ### Data Quality Features
 - **Automatic duplicate detection** based on EnrollmentID
+- **Interactive duplicate handling** with multiple resolution options
 - **Data validation** with clear error messages
-- **Encoding detection** for various file formats
-- **Quality issue reporting** with downloadable reports
+- **Encoding detection** for various file formats (UTF-8, Latin-1, CP1252)
+- **Quality issue reporting** with downloadable Excel reports
+- **Column mapping intelligence** supports multiple HMIS export formats
 
 ## 🏗️ Architecture
 
 ### Project Structure
 ```
 SPM2/
-├── app.py                      # Main application entry point
+├── main.py                     # Main application entry point
 ├── requirements.txt            # Python dependencies
 ├── README.md                   # This file
 ├── CLAUDE.md                   # AI assistant guidelines
@@ -107,50 +116,63 @@ SPM2/
 │   ├── core/                  # Core functionality
 │   │   ├── constants.py       # Project types and definitions
 │   │   ├── data/              # Data loading components
-│   │   ├── session/           # Session management components
-│   │   └── utils/            
-│   │       └── helpers.py    # Utility functions
+│   │   │   ├── loader.py      # Data loading, column mapping
+│   │   │   └── destinations.py # Destination classifications
+│   │   ├── session/           # Session management (v2.1+)
+│   │   │   ├── manager.py     # Session state manager
+│   │   │   ├── keys.py        # Session key constants
+│   │   │   ├── serializer.py  # Import/export logic
+│   │   │   └── patterns.py    # Common patterns
+│   │   ├── filters/           # Centralized filter system (v2.1+)
+│   │   │   ├── manager.py     # Filter manager
+│   │   │   └── constants.py   # Filter configurations
+│   │   └── utils/
+│   │       └── helpers.py     # Utility functions
 │   ├── modules/               # Analysis modules
-│   │   ├── spm2/             
-│   │   │   ├── calculator.py # SPM2 business logic
-│   │   │   ├── page.py      # SPM2 UI rendering
+│   │   ├── common/            # Shared module patterns (v2.1+)
+│   │   │   ├── base_page.py   # Base classes for modules
+│   │   │   └── date_config.py # Date configuration patterns
+│   │   ├── spm2/
+│   │   │   ├── calculator.py  # SPM2 business logic
+│   │   │   ├── page.py        # SPM2 UI rendering
 │   │   │   └── visualizations.py # SPM2 charts
-│   │   ├── recidivism/       
+│   │   ├── recidivism/
 │   │   │   ├── inbound_calculator.py
 │   │   │   ├── inbound_page.py
 │   │   │   ├── inbound_viz.py
 │   │   │   ├── outbound_calculator.py
 │   │   │   ├── outbound_page.py
 │   │   │   └── outbound_viz.py
-│   │   └── dashboard/        
-│   │       ├── page.py       # Dashboard main page
-│   │       ├── summary.py    # Summary metrics
+│   │   └── dashboard/
+│   │       ├── page.py        # Dashboard main page
+│   │       ├── summary.py     # Summary metrics
 │   │       ├── demographics.py # Demographic analysis
-│   │       ├── trends.py     # Trend analysis
+│   │       ├── trends.py      # Trend analysis
 │   │       ├── length_of_stay.py # LOS analysis
-│   │       ├── equity.py     # Equity/disparity analysis
-│   │       ├── filters.py    # Filter components
-│   │       └── data_utils.py # Dashboard utilities
-│   └── ui/                   # User interface layer
-│       ├── factories/        
-│       │   ├── html.py      # HTML component factory
-│       │   ├── charts.py    # Chart creation factory
-│       │   ├── components.py # Master UI component factory
-│       │   └── formatters.py # Data formatting utilities
-│       ├── layouts/         
-│       │   └── widgets.py   # Reusable UI widgets
-│       └── themes/          
-│           ├── theme.py     # Unified theme system
-│           └── styles.py    # Additional styling
+│   │       ├── equity.py      # Equity/disparity analysis
+│   │       ├── filters.py     # Filter components
+│   │       └── data_utils.py  # Dashboard utilities
+│   └── ui/                    # User interface layer
+│       ├── factories/
+│       │   ├── html.py        # HTML component factory
+│       │   ├── charts.py      # Chart creation factory
+│       │   ├── components.py  # Master UI component factory
+│       │   └── formatters.py  # Data formatting utilities
+│       ├── layouts/
+│       │   ├── widgets.py     # Reusable UI widgets
+│       │   └── templates.py   # Page templates
+│       └── themes/
+│           ├── theme.py       # Unified theme system
+│           └── styles.py      # Additional styling
 ```
 
 ### Design Patterns
 
 #### Factory Pattern
 UI components are created through centralized factories ensuring consistency:
-- `HTMLFactory`: Generates styled HTML components with enhanced titles
-- `ChartFactory`: Creates Plotly charts with consistent styling
-- `UIComponentFactory`: Master factory combining all UI elements
+- **HTMLFactory** (`src/ui/factories/html.py`): Generates styled HTML components with enhanced titles
+- **ChartFactory** (`src/ui/factories/charts.py`): Creates Plotly charts with consistent styling
+- **UIComponentFactory** (`src/ui/factories/components.py`): Master factory combining all UI elements
 
 #### Enhanced UI System
 - **Hierarchical Titles**: 6 levels with gradient backgrounds and icons
@@ -158,10 +180,29 @@ UI components are created through centralized factories ensuring consistency:
 - **Metric Cards**: Professional displays with deltas and icons
 - **Consistent Theme**: Unified color system throughout
 
-#### Session Management
-- Centralized state management via `SessionManager`
+#### Session Management (v2.1+)
+Sophisticated session management system for state persistence:
+- **SessionManager** (`src/core/session/manager.py`): Centralized state with validation and logging
+- **SessionSerializer** (`src/core/session/serializer.py`): Import/export configurations to JSON
+- **Session Keys** (`src/core/session/keys.py`): Type-safe key constants
 - Efficient data caching with Streamlit's `@st.cache_data`
-- Automatic cleanup and reset functionality
+- Module-specific state isolation
+- Data hash validation for imported sessions
+
+#### Filter Management (v2.1+)
+Unified filter system eliminates code duplication:
+- **FilterManager** (`src/core/filters/manager.py`): Centralized filter management
+- **Filter Configurations** (`src/core/filters/constants.py`): Common filter patterns
+- Automatic state persistence
+- Cache invalidation based on data changes
+- Consistent UI across all modules
+
+#### Base Classes (v2.1+)
+Shared patterns reduce duplication across modules:
+- **BaseDateConfig** (`src/modules/common/date_config.py`): Standardized date inputs
+- **BasePage** (`src/modules/common/base_page.py`): Common page initialization
+- Session-aware components
+- Automatic validation and error handling
 
 ## 🎨 UI Components
 
@@ -190,23 +231,65 @@ Professional metric displays featuring:
 
 ## 🔧 Configuration
 
-### Settings File (config/settings.yaml)
+### Type-Safe Configuration System (v2.1+)
+
+The application uses a modern dataclass-based configuration system with type validation:
+
+**Configuration File** (`config/app_config.py`):
+```python
+from config.app_config import config
+
+# Access typed configuration values
+max_file_size = config.data.max_file_size_mb
+lookback_days = config.dates.default_lookback_days
+primary_color = config.ui.primary_color
+```
+
+**Configuration Classes:**
+- **PageConfig**: Page layout, title, icon settings
+- **DateConfig**: Date handling, default periods, quick ranges
+- **DataConfig**: File processing, validation, encoding options
+- **AnalysisConfig**: Module-specific analysis settings
+- **UIConfig**: Theme colors, component styling
+- **PerformanceConfig**: Caching, processing limits
+
+### YAML Settings (config/settings.yaml)
 ```yaml
 data:
-  max_file_size_mb: 100
-  cache_ttl_seconds: 3600
-  date_formats: ["%Y-%m-%d", "%m/%d/%Y", "%d/%m/%Y"]
-  
+  max_file_size: 500  # MB
+  supported_formats: [csv]
+  chunk_size: 10000
+
 analysis:
-  default_lookback_days: 730
-  default_return_window_days: 365
-  min_group_size: 10
-  
-ui:
-  enable_animations: true
-  show_borders: true
-  responsive: true
-  max_chart_points: 1000
+  default_lookback_days: 730  # 2 years
+  default_reporting_period_days: 365  # 1 year
+  spm2:
+    default_return_period_days: 180  # 6 months
+
+visualization:
+  chart_height: 400
+  chart_template: "plotly_white"
+  decimal_places: 1
+
+performance:
+  cache_ttl:
+    data: 3600      # 1 hour
+    analysis: 7200  # 2 hours
+```
+
+### Streamlit Configuration (.streamlit/config.toml)
+```toml
+[theme]
+base = "light"
+primaryColor = "#00629b"  # Deep professional blue
+backgroundColor = "#FFFFFF"
+secondaryBackgroundColor = "#F8FAFC"
+textColor = "#1E293B"
+
+[server]
+maxUploadSize = 300  # MB
+maxMessageSize = 200  # MB
+enableXsrfProtection = true
 ```
 
 ### Environment Variables
@@ -244,15 +327,33 @@ ui:
 ### Standards Applied
 - **PEP8 Compliant**: All code formatted with black (79-char lines)
 - **Import Organization**: isort applied (standard → third-party → local)
-- **No Dead Code**: Unused imports and code removed
-- **Type Hints**: Used where appropriate for clarity
-- **Comprehensive Docstrings**: All major functions documented
+- **No Dead Code**: Unused imports and code removed with autoflake
+- **Type Hints**: Used extensively for type safety
+- **Comprehensive Docstrings**: All public functions documented
+- **Dataclass Validation**: Type-safe configuration with Python 3.8+ dataclasses
+
+### Code Quality Commands
+```bash
+# Format code
+black --line-length 79 .
+
+# Sort imports
+isort .
+
+# Remove unused imports
+autoflake --remove-all-unused-imports --in-place -r .
+
+# Run all at once
+black --line-length 79 . && isort . && autoflake --remove-all-unused-imports --in-place -r .
+```
 
 ### Testing Considerations
 - Module imports verified
 - Core functionality tested
 - Data validation in place
 - Error handling for edge cases
+- Session persistence validated
+- Filter state management tested
 
 ## 🤝 Contributing
 
@@ -280,7 +381,7 @@ autoflake --remove-all-unused-imports --in-place -r .
 
 5. Test your changes:
 ```bash
-streamlit run app.py
+streamlit run main.py
 ```
 
 6. Submit a pull request
@@ -292,11 +393,30 @@ streamlit run app.py
 - Keep functions focused and under 50 lines
 - Use the existing factory patterns for UI components
 
+## 🆕 What's New
+
+### v2.1.0 (Latest)
+- ✨ **Session Import/Export**: Save and restore analysis configurations
+- 🏗️ **Centralized Filter System**: Unified filter management across modules
+- 🔧 **Type-Safe Configuration**: Dataclass-based config with validation
+- 📦 **Base Classes**: Shared patterns eliminate code duplication
+- 🎯 **Enhanced Session Management**: Better state isolation and validation
+- 🔍 **Smart Import Validation**: Compatibility checking for imported sessions
+
+### v2.0.0
+- 🎨 **Enhanced UI System**: Hierarchical titles with gradient backgrounds
+- 🔄 **Duplicate Detection**: Automatic EnrollmentID duplicate handling
+- ✅ **PEP8 Compliance**: Black formatting with 79-character lines
+- 📋 **Import Organization**: Consistent import ordering with isort
+- 🧹 **Code Cleanup**: Removed dead code and unused imports
+- 🎭 **Theme Consistency**: Unified color system throughout
+
 ## 🐛 Known Issues & Limitations
 
-- Large files (>100MB) may require increased memory
-- Some date formats may need manual specification
-- Network visualizations limited to top pathways for performance
+- Large files (>100MB) may require increased memory allocation
+- Some uncommon date formats may need manual specification
+- Network visualizations limited to top pathways for performance optimization
+- Session files are configuration-only (data must be re-uploaded)
 
 ## 📧 Support
 
@@ -318,8 +438,9 @@ For issues, questions, or suggestions:
 
 ---
 
-**Version**: 2.0.0  
-**Last Updated**: August 2025
-**Status**: Production Ready  
-**Python**: 3.8+ Required  
-**Streamlit**: 1.28+ Required
+**Version**: 2.1.0
+**Last Updated**: Oct 2025
+**Status**: Production Ready
+**Python**: 3.8+ Required
+**Streamlit**: 1.40+ Required
+**Architecture**: Modular with centralized session & filter management

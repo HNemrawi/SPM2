@@ -2,118 +2,17 @@
 # HMIS Data Analysis Suite — Professional Enterprise Theme
 
 [theme]
-# ============ Core Theme Settings ============
+# Valid Streamlit theme settings only
 base = "light"
 primaryColor = "#00629b"  # Deep professional blue
-
-# ============ Background Colors ============
-backgroundColor = "#FFFFFF"  # Clean white background
+backgroundColor = "#FFFFFF"  # Clean white background  
 secondaryBackgroundColor = "#F8FAFC"  # Subtle gray for contrast areas
-
-# ============ Text Colors ============
 textColor = "#1E293B"  # Dark slate for primary text
-linkColor = "#2563EB"  # Bright blue for links
-linkUnderline = false  # Cleaner look without underlines
-codeBackgroundColor = "#F1F5F9"  # Light gray for code blocks
-
-# ============ Typography ============
-font = "Inter"  # Modern, professional font
-baseFontSize = 16
-baseFontWeight = 400
-
-# Heading Configuration
-headingFont = "Inter"
-headingFontSizes = [
-  "2.5rem",   # h1 - Main titles
-  "2rem",     # h2 - Section headers
-  "1.75rem",  # h3 - Subsections
-  "1.5rem",   # h4 - Card titles
-  "1.25rem",  # h5 - Smaller headers
-  "1.125rem"  # h6 - Minor headers
-]
-headingFontWeights = [700, 600, 600, 600, 500, 500]
-
-# Code Typography
-codeFont = "'SF Mono', Monaco, 'Cascadia Code', 'Roboto Mono', Consolas, monospace"
-codeFontSize = "0.875rem"
-codeFontWeight = 400
-
-# ============ Shape & Borders ============
-baseRadius = "0.75rem"  # More rounded for modern look
-buttonRadius = "0.5rem"  # Slightly rounded buttons
-borderColor = "#E2E8F0"  # Soft border color
-dataframeBorderColor = "#CBD5E1"
-dataframeHeaderBackgroundColor = "#F8FAFC"
-showWidgetBorder = false
-showSidebarBorder = false
-
-# ============ Chart Colors ============
-# Professional color palette optimized for data visualization
-chartCategoricalColors = [
-  "#1E40AF",  # Deep Blue (Primary)
-  "#059669",  # Emerald Green (Success)
-  "#DC2626",  # Red (Danger/Warning)
-  "#7C3AED",  # Purple (Accent)
-  "#EA580C",  # Orange (Highlight)
-  "#0891B2",  # Cyan (Info)
-  "#DB2777",  # Pink (Alternative)
-  "#CA8A04",  # Yellow (Caution)
-  "#64748B",  # Slate (Neutral)
-  "#065F46"   # Dark Green (Secondary)
-]
-
-# Sequential color gradient for continuous data
-chartSequentialColors = [
-  "#EFF6FF",  # Lightest blue
-  "#DBEAFE",
-  "#BFDBFE",
-  "#93C5FD",
-  "#60A5FA",
-  "#3B82F6",
-  "#2563EB",
-  "#1D4ED8",
-  "#1E40AF",
-  "#1E3A8A"   # Darkest blue
-]
-
-# ============ Sidebar Theme ============
-[theme.sidebar]
-primaryColor = "#00629b"
-backgroundColor = "#F1F5F9"  # Light gray background
-secondaryBackgroundColor = "#E2E8F0"  # Slightly darker for contrast
-textColor = "#1E293B"
-linkColor = "#2563EB"
-linkUnderline = false
-codeBackgroundColor = "#E2E8F0"
-
-# Sidebar Typography
-font = "Inter"
-headingFont = "Inter"
-headingFontSizes = [
-  "1.5rem",   # h1 in sidebar
-  "1.25rem",  # h2
-  "1.125rem", # h3
-  "1rem",     # h4
-  "0.875rem", # h5
-  "0.8125rem" # h6
-]
-headingFontWeights = [700, 600, 600, 500, 500, 500]
-
-codeFont = "'SF Mono', Monaco, monospace"
-codeFontSize = "0.8125rem"
-
-# Sidebar Shape & Borders
-baseRadius = "0.75rem"
-buttonRadius = "0.5rem"
-borderColor = "#CBD5E1"
-dataframeBorderColor = "#CBD5E1"
-dataframeHeaderBackgroundColor = "#E2E8F0"
-showWidgetBorder = false
 
 # ============ Application Settings ============
 [client]
 showSidebarNavigation = true
-toolbarMode = "developer"  # Always show settings menu and theme selector
+toolbarMode = "minimal"
 
 [runner]
 fastReruns = true

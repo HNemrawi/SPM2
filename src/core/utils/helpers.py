@@ -20,7 +20,11 @@ import pandas as pd
 import streamlit as st
 
 from src.core.constants import COLUMNS_TO_REMOVE, COLUMNS_TO_RENAME
-from src.core.session.manager import StateManager
+from src.core.session import (
+    ModuleType,
+    get_dashboard_state,
+    get_session_manager,
+)
 
 # Type definitions
 T = TypeVar("T")
@@ -30,7 +34,8 @@ DateLike = Union[pd.Timestamp, datetime, str]
 class DataFrameFilter(Protocol):
     """Protocol for dataframe filter functions"""
 
-    def __call__(self, df: pd.DataFrame, **kwargs) -> pd.DataFrame: ...
+    def __call__(self, df: pd.DataFrame, **kwargs) -> pd.DataFrame:
+        ...
 
 
 # ==================== DATA CONVERSION UTILITIES ====================
@@ -166,10 +171,25 @@ def create_multiselect_filter(
     all_option = ["ALL"]
     choices = all_option + unique_options
 
+    # Get module state for enhanced session management
+    module_state = None
+    if module:
+        session_manager = get_session_manager()
+        if module == "dashboard":
+            module_state = get_dashboard_state()
+        elif module == "spm2":
+            module_state = session_manager.get_module_state(ModuleType.SPM2)
+        elif module == "inbound":
+            module_state = session_manager.get_module_state(ModuleType.INBOUND)
+        elif module == "outbound":
+            module_state = session_manager.get_module_state(
+                ModuleType.OUTBOUND
+            )
+
     # Determine defaults - check for saved state first if module provided
-    if module and key:
-        # Check for saved widget state
-        saved_state = StateManager.get_widget_state(module, key, None)
+    if module_state and key:
+        # Check for saved widget state using enhanced session system
+        saved_state = module_state.get_widget_state(key, None)
         if saved_state is not None:
             default_list = [d for d in saved_state if d in choices]
             if not default_list:
@@ -191,14 +211,15 @@ def create_multiselect_filter(
             if not default_list:
                 default_list = all_option
 
-    # Create callback that saves widget state
+    # Create callback that saves widget state using enhanced session system
     def _on_change_with_persistence():
-        if module and key and key in st.session_state:
-            # Save current selection to StateManager
-            StateManager.save_widget_state(module, key, st.session_state[key])
-
-        # Call original callback if provided
-        if on_change:
+        if module_state and key and key in st.session_state:
+            # Save current selection using enhanced session system
+            module_state.set_widget_state(key, st.session_state[key])
+            # Check if value actually changed before marking dirty
+            module_state.check_and_mark_dirty(key, st.session_state[key])
+        elif on_change:
+            # Call original callback if no module state
             on_change()
 
     # Create widget

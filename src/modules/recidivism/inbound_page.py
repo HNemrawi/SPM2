@@ -11,12 +11,15 @@ import pandas as pd
 import streamlit as st
 
 from config.app_config import config
-from src.core.session.manager import (
-    StateManager,
-    check_data_available,
+from src.core.session import (
+    ModuleType,
     get_analysis_result,
+    get_inbound_state,
+    get_session_manager,
     set_analysis_result,
 )
+
+# Widget persistence now handled by enhanced session system
 from src.core.utils.helpers import (
     check_date_range_validity,
     create_multiselect_filter,
@@ -33,14 +36,14 @@ from src.modules.recidivism.inbound_viz import (
     plot_flow_sankey_ra,
     plot_time_to_entry_box,
 )
-from src.ui.factories.components import ui
-from src.ui.factories.html import html_factory
-from src.ui.layouts.templates import ABOUT_INBOUND_CONTENT
-from src.ui.layouts.widgets import (
+from src.ui.factories.components import (
     render_about_section,
     render_dataframe_with_style,
     render_download_button,
+    ui,
 )
+from src.ui.factories.html import html_factory
+from src.ui.layouts.templates import ABOUT_INBOUND_CONTENT
 from src.ui.themes.styles import (
     NeutralColors,
     apply_chart_theme,
@@ -52,8 +55,10 @@ from src.ui.themes.styles import (
 # CONSTANTS
 # ============================================================================
 
-# Module identifier for state management
-INBOUND_MODULE = StateManager.RECIDIVISM_INBOUND_PREFIX
+# Enhanced session management
+session_manager = get_session_manager()
+inbound_state = get_inbound_state()
+INBOUND_MODULE = ModuleType.INBOUND
 
 # ============================================================================
 # CONFIGURATION FUNCTIONS
@@ -61,7 +66,8 @@ INBOUND_MODULE = StateManager.RECIDIVISM_INBOUND_PREFIX
 
 
 def _set_dirty_flag():
-    st.session_state.inbound_dirty = True
+    # Deprecated - use check_and_mark_dirty for value-aware dirty checking
+    inbound_state.mark_dirty()
 
 
 def setup_date_config(
@@ -74,14 +80,31 @@ def setup_date_config(
         default_end = datetime(2025, 1, 31)
 
         try:
+            # Get saved date range from enhanced session system
+            saved_dates = inbound_state.get_widget_state("date_range", None)
+            if saved_dates and len(saved_dates) == 2:
+                default_start = saved_dates[0]
+                default_end = saved_dates[1]
+
+            def _save_dates():
+                # The date_range_input function will trigger this callback when dates change
+                # We need to save the current dates to enhanced session system
+                _set_dirty_flag()
+
             report_start, report_end = ui.date_range_input(
                 label="Entry Date Range",
                 default_start=default_start,
                 default_end=default_end,
                 help_text="Analysis period for new entries",
                 info_message="The selected end date will be included in the analysis period.",
-                on_change_callback=_set_dirty_flag,
+                on_change_callback=_save_dates,
             )
+
+            # Save the selected dates to enhanced session system after selection
+            if report_start and report_end:
+                inbound_state.set_widget_state(
+                    "date_range", [report_start, report_end]
+                )
 
             # Return None values if date input failed
             if report_start is None or report_end is None:
@@ -93,12 +116,21 @@ def setup_date_config(
 
         st.html(html_factory.divider("gradient"))
 
+        # Get saved lookback period from enhanced session system
+        saved_lookback = inbound_state.get_widget_state("days_lookback", 730)
+
+        def _save_lookback():
+            value = st.session_state.get("inbound_days_lookback", 730)
+            inbound_state.set_widget_state("days_lookback", value)
+            inbound_state.check_and_mark_dirty("days_lookback", value)
+
         days_lookback = st.number_input(
             "🔍 Days Lookback",
             min_value=1,
-            value=730,
+            value=saved_lookback,
             help="Number of days prior to entry to consider exits",
-            on_change=_set_dirty_flag,
+            key="inbound_days_lookback",
+            on_change=_save_lookback,
         )
 
         analysis_start = report_start - pd.Timedelta(days=days_lookback)
@@ -140,7 +172,7 @@ def setup_entry_filters(df: pd.DataFrame) -> Tuple[Optional[List[str]], ...]:
             default=["ALL"],
             help_text="Filter entries by CoC code",
             key="inbound_entry_cocs_filter",
-            on_change=_set_dirty_flag,
+            on_change=lambda: inbound_state.mark_dirty(),
             module=INBOUND_MODULE,
         )
 
@@ -153,7 +185,9 @@ def setup_entry_filters(df: pd.DataFrame) -> Tuple[Optional[List[str]], ...]:
             ),
             default=["ALL"],
             help_text="Filter entries by local CoC code",
-            on_change=_set_dirty_flag,
+            key="inbound_entry_local_cocs_filter",
+            on_change=lambda: inbound_state.mark_dirty(),
+            module=INBOUND_MODULE,
         )
 
         allowed_agencies = create_multiselect_filter(
@@ -165,7 +199,9 @@ def setup_entry_filters(df: pd.DataFrame) -> Tuple[Optional[List[str]], ...]:
             ),
             default=["ALL"],
             help_text="Filter entries by agency",
-            on_change=_set_dirty_flag,
+            key="inbound_entry_agencies_filter",
+            on_change=lambda: inbound_state.mark_dirty(),
+            module=INBOUND_MODULE,
         )
 
         allowed_programs = create_multiselect_filter(
@@ -177,7 +213,9 @@ def setup_entry_filters(df: pd.DataFrame) -> Tuple[Optional[List[str]], ...]:
             ),
             default=["ALL"],
             help_text="Filter entries by program",
-            on_change=_set_dirty_flag,
+            key="inbound_entry_programs_filter",
+            on_change=lambda: inbound_state.mark_dirty(),
+            module=INBOUND_MODULE,
         )
 
         # Add SSVF RRH filter for entries
@@ -190,7 +228,9 @@ def setup_entry_filters(df: pd.DataFrame) -> Tuple[Optional[List[str]], ...]:
             ),
             default=["ALL"],
             help_text="SSVF RRH filter for entries",
-            on_change=_set_dirty_flag,
+            key="inbound_entry_ssvf_rrh_filter",
+            on_change=lambda: inbound_state.mark_dirty(),
+            module=INBOUND_MODULE,
         )
 
         # Entry Project Types filter
@@ -209,7 +249,9 @@ def setup_entry_filters(df: pd.DataFrame) -> Tuple[Optional[List[str]], ...]:
                 all_project_types,
                 default=default_projects,
                 help_text="Filter by project types for entries",
-                on_change=_set_dirty_flag,
+                key="inbound_entry_project_types_filter",
+                on_change=lambda: inbound_state.mark_dirty(),
+                module=INBOUND_MODULE,
             )
 
         return (
@@ -236,7 +278,9 @@ def setup_exit_filters(df: pd.DataFrame) -> Tuple[Optional[List[str]], ...]:
             ),
             default=["ALL"],
             help_text="Filter exits by CoC code",
-            on_change=_set_dirty_flag,
+            key="inbound_exit_cocs_filter",
+            on_change=lambda: inbound_state.mark_dirty(),
+            module=INBOUND_MODULE,
         )
 
         allowed_localcocs_exit = create_multiselect_filter(
@@ -248,7 +292,9 @@ def setup_exit_filters(df: pd.DataFrame) -> Tuple[Optional[List[str]], ...]:
             ),
             default=["ALL"],
             help_text="Filter exits by local CoC code",
-            on_change=_set_dirty_flag,
+            key="inbound_exit_local_cocs_filter",
+            on_change=lambda: inbound_state.mark_dirty(),
+            module=INBOUND_MODULE,
         )
 
         allowed_agencies_exit = create_multiselect_filter(
@@ -260,7 +306,9 @@ def setup_exit_filters(df: pd.DataFrame) -> Tuple[Optional[List[str]], ...]:
             ),
             default=["ALL"],
             help_text="Filter exits by agency",
-            on_change=_set_dirty_flag,
+            key="inbound_exit_agencies_filter",
+            on_change=lambda: inbound_state.mark_dirty(),
+            module=INBOUND_MODULE,
         )
 
         allowed_programs_exit = create_multiselect_filter(
@@ -272,7 +320,9 @@ def setup_exit_filters(df: pd.DataFrame) -> Tuple[Optional[List[str]], ...]:
             ),
             default=["ALL"],
             help_text="Filter exits by program",
-            on_change=_set_dirty_flag,
+            key="inbound_exit_programs_filter",
+            on_change=lambda: inbound_state.mark_dirty(),
+            module=INBOUND_MODULE,
         )
 
         # Add SSVF RRH filter for exits
@@ -285,7 +335,9 @@ def setup_exit_filters(df: pd.DataFrame) -> Tuple[Optional[List[str]], ...]:
             ),
             default=["ALL"],
             help_text="SSVF RRH filter for exits",
-            on_change=_set_dirty_flag,
+            key="inbound_exit_ssvf_rrh_filter",
+            on_change=lambda: inbound_state.mark_dirty(),
+            module=INBOUND_MODULE,
         )
 
         # Project Types
@@ -304,7 +356,9 @@ def setup_exit_filters(df: pd.DataFrame) -> Tuple[Optional[List[str]], ...]:
                 all_project_types,
                 default=default_projects,
                 help_text="Filter by project types for exits",
-                on_change=_set_dirty_flag,
+                key="inbound_exit_project_types_filter",
+                on_change=lambda: inbound_state.mark_dirty(),
+                module=INBOUND_MODULE,
             )
 
         # Exit Destination Category filter
@@ -315,7 +369,9 @@ def setup_exit_filters(df: pd.DataFrame) -> Tuple[Optional[List[str]], ...]:
                 sorted(df["ExitDestinationCat"].dropna().unique().tolist()),
                 default=["ALL"],
                 help_text="Filter exits by destination category (e.g., Permanent Housing Situations)",
-                on_change=_set_dirty_flag,
+                key="inbound_exit_dest_cats_filter",
+                on_change=lambda: inbound_state.mark_dirty(),
+                module=INBOUND_MODULE,
             )
 
         # Add Exit Destinations filter
@@ -326,7 +382,9 @@ def setup_exit_filters(df: pd.DataFrame) -> Tuple[Optional[List[str]], ...]:
                 sorted(df["ExitDestination"].dropna().unique().tolist()),
                 default=["ALL"],
                 help_text="Limit exits to these specific destinations",
-                on_change=_set_dirty_flag,
+                key="inbound_exit_destinations_filter",
+                on_change=lambda: inbound_state.mark_dirty(),
+                module=INBOUND_MODULE,
             )
 
         return (
@@ -349,7 +407,7 @@ def setup_exit_filters(df: pd.DataFrame) -> Tuple[Optional[List[str]], ...]:
 def run_analysis(df: pd.DataFrame, analysis_params: Dict[str, Any]) -> bool:
     """Execute the inbound recidivism analysis with specified parameters."""
     try:
-        st.session_state.inbound_dirty = False
+        inbound_state.request_analysis()
         with st.status(
             "🔍 Processing Inbound Analysis...", expanded=True
         ) as status:
@@ -419,7 +477,14 @@ def run_analysis(df: pd.DataFrame, analysis_params: Dict[str, Any]) -> bool:
 
             status.write("💾 Finalizing results...")
 
-            set_analysis_result("inbound", merged_df)
+            set_analysis_result(INBOUND_MODULE, merged_df)
+
+            # Clear analysis request and save current params as new baseline
+            inbound_state.clear_analysis_request()
+
+            # Explicitly save all current parameter values as baseline
+            inbound_state.save_params_snapshot()
+
             status.update(
                 label="✅ Inbound Analysis Complete!",
                 state="complete",
@@ -477,7 +542,7 @@ def display_time_to_entry(final_df: pd.DataFrame) -> None:
     try:
         fig = plot_time_to_entry_box(final_df)
         fig = apply_chart_theme(fig)
-        st.plotly_chart(fig, width='stretch')
+        st.plotly_chart(fig, use_container_width=True)
 
         # Display time statistics if available
         # display_time_statistics(final_df)
@@ -792,7 +857,7 @@ def display_client_flow(final_df: pd.DataFrame) -> None:
                 flow_pivot_sankey, f"{exit_flow_col} → {entry_flow_col}"
             )
             sankey_ra = apply_chart_theme(sankey_ra)
-            st.plotly_chart(sankey_ra, width='stretch')
+            st.plotly_chart(sankey_ra, use_container_width=True)
         else:
             st.info("📭 Insufficient data for flow analysis")
 
@@ -823,10 +888,17 @@ def display_data_export(final_df: pd.DataFrame) -> None:
 
 
 def inbound_recidivism_page() -> None:
-    """Render the Inbound Recidivism Analysis page with all components."""
+    """Render the Inbound Recidivism Analysis page with enhanced session management."""
+    # Initialize enhanced session management
+    inbound_state.initialize()
+
+    # Initialize parameter baseline on first load to prevent false dirty flags
+    # This ensures widgets created for the first time don't trigger "changed" state
+    if not st.session_state.get(f"{inbound_state.key_prefix}last_params"):
+        inbound_state.save_params_snapshot()
+
     # Apply custom CSS theme
     apply_custom_css()
-    st.session_state.setdefault("inbound_dirty", False)
 
     st.html(
         html_factory.title("Inbound Recidivism Analysis", level=1, icon="📈")
@@ -840,9 +912,10 @@ def inbound_recidivism_page() -> None:
         icon="📥",
     )
 
-    # Check data availability
-    df = check_data_available()
-    if df is None:
+    # Check data availability using enhanced session manager
+    df = session_manager.get_data()
+    if not session_manager.has_data():
+        st.info("📭 Please upload data in the sidebar first.")
         return
 
     # Setup sidebar configuration with themed styling
@@ -905,15 +978,15 @@ def inbound_recidivism_page() -> None:
     st.html(html_factory.divider("gradient"))
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
-        if st.session_state.get("inbound_dirty"):
+        if inbound_state.is_dirty():
             st.info("Parameters have changed. Click 'Run Analysis' to update.")
         if st.button(
-            "▶️ Run Inbound Analysis", type="primary", width='stretch'
+            "▶️ Run Inbound Analysis", type="primary", width="stretch"
         ):
             run_analysis(df, analysis_params)
 
     # Display results if analysis was successful
-    final_df = get_analysis_result("inbound")
+    final_df = get_analysis_result(INBOUND_MODULE)
     if final_df is not None and not final_df.empty:
         # Display all analysis sections with themed styling
         display_summary_metrics(final_df, allowed_exit_dest_cats)

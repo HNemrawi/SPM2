@@ -26,12 +26,11 @@ def display_spm_metrics(metrics: Dict[str, Any]) -> None:
     # Row 1: Core metrics
     ui.metric_row(
         {
-            "Number of Relevant Exits": f"{
-                metrics['Number of Relevant Exits']:,}",
-            "Exits to PH": f"{
-                metrics['Total Exits to PH']:,}",
-            "Total Returns": f"{
-                    metrics['Return']:,}",
+            "Number of Relevant Exits": (
+                f"{metrics['Number of Relevant Exits']:,}"
+            ),
+            "Exits to PH": f"{metrics['Total Exits to PH']:,}",
+            "Total Returns": f"{metrics['Return']:,}",
         },
         columns=3,
     )
@@ -39,12 +38,9 @@ def display_spm_metrics(metrics: Dict[str, Any]) -> None:
     # Row 2: Return rates
     ui.metric_row(
         {
-            "% Return": f"{
-                metrics['Return %']:.1f}%",
-            "Return → Homeless (from PH)": f"{
-                metrics['Return to Homelessness']:,            }",
-            "% Return → Homeless (from PH)": f"{
-                metrics['% Return to Homelessness']:.1f}%",
+            "% Return": f"{metrics['Return %']:.1f}%",
+            "Return → Homeless (from PH)": f"{metrics['Return to Homelessness']:,}",
+            "% Return → Homeless (from PH)": f"{metrics['% Return to Homelessness']:.1f}%",
         },
         columns=3,
     )
@@ -112,10 +108,8 @@ def display_spm_metrics_ph(metrics: Dict[str, Any]) -> None:
     # Third row - Homelessness returns
     ui.metric_row(
         {
-            "Return to Homeless (from PH)": f"{
-                metrics['Return to Homelessness']:,}",
-            "% Return to Homeless (from PH)": f"{
-                metrics['% Return to Homelessness']:.1f}%",
+            "Return to Homeless (from PH)": f"{metrics['Return to Homelessness']:,}",
+            "% Return to Homeless (from PH)": f"{metrics['% Return to Homelessness']:.1f}%",
         },
         columns=2,
     )

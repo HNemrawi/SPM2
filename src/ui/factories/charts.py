@@ -24,17 +24,17 @@ class ChartConfig:
     legend_orientation: str = "h"  # "h" or "v"
     legend_position: str = "bottom"  # "bottom", "top", "right", "left"
     margin: Dict[str, int] = field(
-        default_factory=lambda: {"l": 60, "r": 30, "t": 60, "b": 60}
+        default_factory=lambda: {"l": 60, "r": 30, "t": 50, "b": 60}
     )
     hover_mode: str = "closest"
     template: Optional[str] = None
-    width: str = 'stretch'
+    width: str = "stretch"
     animate: bool = False
 
     # Grid and axes
     show_grid: bool = True
-    grid_color: str = "rgba(0, 0, 0, 0.1)"
-    zero_line_color: str = "rgba(0, 0, 0, 0.2)"
+    grid_color: str = "rgba(0, 0, 0, 0.08)"
+    zero_line_color: str = "rgba(0, 0, 0, 0.15)"
 
     # Font settings
     font_family: Optional[str] = None
@@ -44,7 +44,7 @@ class ChartConfig:
     # Colors
     color_sequence: Optional[List[str]] = None
     paper_bgcolor: str = "rgba(0, 0, 0, 0)"
-    plot_bgcolor: str = "rgba(0, 0, 0, 0.02)"
+    plot_bgcolor: str = "rgba(0, 0, 0, 0.01)"
 
 
 class ChartFactory:
@@ -57,6 +57,8 @@ class ChartFactory:
 
     def _setup_defaults(self):
         """Setup default values from theme if not specified."""
+        if not self.config.template:
+            self.config.template = self.theme.chart.template
         if not self.config.font_family:
             self.config.font_family = (
                 self.theme.typography.font_family.replace('"', "")

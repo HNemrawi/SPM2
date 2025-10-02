@@ -13,18 +13,16 @@ import streamlit as st
 from pandas import DataFrame
 
 from src.core.data.destinations import apply_custom_ph_destinations
+from src.core.session import SessionKeys
 from src.modules.dashboard.data_utils import (
     DEMOGRAPHIC_DIMENSIONS,
+    ClientMetrics,
+    PHMetrics,
     category_counts,
-    inflow,
-    outflow,
-    ph_exit_clients,
     return_after_exit,
-    served_clients,
 )
 from src.modules.dashboard.filters import (
     get_filter_timestamp,
-    hash_data,
     init_section_state,
     invalidate_cache,
     is_cache_valid,
@@ -49,6 +47,7 @@ BREAKDOWN_SECTION_KEY = "demographic_breakdown"
 # ==============================================================================
 
 
+@st.cache_data(show_spinner=False)
 def _calculate_breakdown_data(
     df_filt: DataFrame,
     full_df: DataFrame,
@@ -59,6 +58,8 @@ def _calculate_breakdown_data(
 ) -> DataFrame:
     """
     Calculate demographic breakdown data with improved metrics.
+
+    Cached for performance with filters and dates as cache keys.
 
     Parameters:
     -----------
@@ -84,15 +85,18 @@ def _calculate_breakdown_data(
     df_filt = apply_custom_ph_destinations(df_filt, force=True)
     full_df = apply_custom_ph_destinations(full_df, force=True)
 
-    # Get client sets for different metrics
-    served_ids = served_clients(df_filt, t0, t1)
-    inflow_ids = inflow(df_filt, t0, t1)
-    outflow_ids = outflow(df_filt, t0, t1)
-    ph_ids = ph_exit_clients(df_filt, t0, t1)
+    # OPTIMIZED: Batch calculate metrics in a single pass
+    client_metrics = ClientMetrics.batch_calculate_metrics(df_filt, t0, t1)
+    ph_metrics = PHMetrics.batch_calculate_ph_metrics(df_filt, t0, t1)
 
-    # Get ALL unique clients who exited for PH exit rate calculation
+    served_ids = client_metrics["served_clients"]
+    inflow_ids = client_metrics["inflow"]
+    outflow_ids = client_metrics["outflow"]
+    ph_ids = ph_metrics["exit_clients"]
+
+    # Vectorized exit identification
     all_exits_mask = df_filt["ProjectExit"].between(t0, t1)
-    all_exit_ids = set(df_filt.loc[all_exits_mask, "ClientID"])
+    all_exit_ids = set(df_filt.loc[all_exits_mask, "ClientID"].unique())
 
     # Calculate returns using HUD-compliant logic with FULL dataset
     # First, get the PH exits subset for returns calculation
@@ -170,14 +174,12 @@ def _calculate_breakdown_data(
         returns_df["Returns Count"].fillna(0).astype(int)
     )
 
-    # Calculate Returns Rate with proper validation
-    returns_df["Returns to Homelessness Rate"] = returns_df.apply(
-        lambda row: (
-            round((row["Returns Count"] / row["PH Exit Count"]) * 100, 1)
-            if row["PH Exit Count"] > 0
-            else np.nan
-        ),
-        axis=1,
+    # Calculate Returns Rate with proper validation - OPTIMIZED
+    # Vectorized calculation: use .where() to handle division by zero
+    returns_df["Returns to Homelessness Rate"] = (
+        (returns_df["Returns Count"] / returns_df["PH Exit Count"] * 100)
+        .round(1)
+        .where(returns_df["PH Exit Count"] > 0, np.nan)
     )
 
     # Merge with main breakdown dataframe
@@ -849,7 +851,7 @@ def _create_outcome_quadrant_chart(df: DataFrame, dim_col: str) -> go.Figure:
     # Filter to groups with both metrics
     comparison_df = df.dropna(
         subset=["PH Exit Rate", "Returns to Homelessness Rate"]
-    )
+    ).copy()
 
     if comparison_df.empty:
         # Create empty figure if no comparison data
@@ -930,8 +932,10 @@ def _create_outcome_quadrant_chart(df: DataFrame, dim_col: str) -> go.Figure:
             saturation = 0.7 + (0.3 * (i % 3) / 2)
             lightness = 0.5 + (0.2 * (i % 5) / 4)
             rgb = colorsys.hls_to_rgb(hue, lightness, saturation)
-            hex_color = f"#{
-                int(rgb[0] * 255):02x}{int(rgb[1] * 255):02x}{int(rgb[2] * 255):02x}"
+            hex_color = (
+                f"#{int(rgb[0] * 255):02x}{int(rgb[1] * 255):02x}"
+                f"{int(rgb[2] * 255):02x}"
+            )
             colors.append(hex_color)
 
     # Create scatter plot with improved styling
@@ -957,15 +961,25 @@ def _create_outcome_quadrant_chart(df: DataFrame, dim_col: str) -> go.Figure:
                     line=dict(width=2, color="rgba(255, 255, 255, 0.5)"),
                     opacity=0.9,
                 ),
-                text=[
-                    f"<b>{group_name}</b><br>"
-                    f"PH Exit Rate: {getattr(row, 'PH_Exit_Rate', 0):.1f}%<br>"
-                    f"Return Rate: {getattr(row, 'Returns_to_Homelessness_Rate', 0):.1f}%<br>"
-                    f"Served: {getattr(row, 'Served', 0):,}<br>"
-                    f"PH Exits: {getattr(row, 'PH_Exits', 0):,}<br>"
-                    f"Returns: {getattr(row, 'Returns_Count', 0):,}"
-                    for row in group_data.itertuples()
-                ],
+                text=(
+                    "<b>" + str(group_name) + "</b><br>"
+                    "PH Exit Rate: "
+                    + group_data["PH Exit Rate"].round(1).astype(str)
+                    + "%<br>"
+                    "Return Rate: "
+                    + group_data["Returns to Homelessness Rate"]
+                    .round(1)
+                    .astype(str)
+                    + "%<br>"
+                    "Served: "
+                    + group_data["Served"].apply(lambda x: f"{x:,}")
+                    + "<br>"
+                    "PH Exits: "
+                    + group_data["PH Exits"].apply(lambda x: f"{x:,}")
+                    + "<br>"
+                    "Returns: "
+                    + group_data["Returns Count"].apply(lambda x: f"{x:,}")
+                ).tolist(),
                 hovertemplate="%{text}<extra></extra>",
                 hoverlabel=dict(
                     bgcolor="white",
@@ -1264,9 +1278,16 @@ def render_breakdown_section(
     full_df : DataFrame, optional
         Full DataFrame for returns analysis
     """
+    # Validate df_filt is actually a DataFrame
+    if not isinstance(df_filt, DataFrame):
+        st.error(
+            f"Error: Expected DataFrame but got {type(df_filt).__name__}. Please rerun the analysis."
+        )
+        return
+
     # Ensure we have the full dataset for returns
     if full_df is None:
-        full_df = st.session_state.get("df")
+        full_df = st.session_state.get(SessionKeys.DF)
         if full_df is None:
             st.error(
                 "Original dataset not found. Returns analysis requires full data."
@@ -1294,7 +1315,7 @@ def render_breakdown_section(
             )
         )
     with col_info:
-        with st.popover("ℹ️ Help", width='stretch'):
+        with st.popover("ℹ️ Help", width="stretch"):
             st.markdown(
                 """
             ### Understanding Demographic Breakdowns
@@ -1360,8 +1381,8 @@ def render_breakdown_section(
             )
 
     # Get time boundaries
-    t0 = st.session_state.get("t0")
-    t1 = st.session_state.get("t1")
+    t0 = st.session_state.get(SessionKeys.DATE_START)
+    t1 = st.session_state.get(SessionKeys.DATE_END)
 
     if not all([t0, t1]):
         st.warning(
@@ -1370,7 +1391,7 @@ def render_breakdown_section(
         return
 
     # Check for active filters warning
-    active_filters = st.session_state.get("filters", {})
+    active_filters = st.session_state.get(SessionKeys.FILTERS, {})
     if any(active_filters.values()):
         filter_warning_html = f"""
         <div style="background-color: rgba(255,165,0,0.1); border: 2px solid {WARNING_COLOR}
@@ -1387,47 +1408,45 @@ def render_breakdown_section(
     col1, col2, col3 = st.columns([3, 2, 2])
 
     with col1:
-        # Choose breakdown dimension
-        key_suffix = hash_data(filter_ts)
+        # Choose breakdown dimension with stable key
         dim_label = st.selectbox(
             "📊 Select dimension to analyze",
             [lbl for lbl, _ in DEMOGRAPHIC_DIMENSIONS],
-            key=f"breakdown_dim_{key_suffix}",
+            key="breakdown_dim_stable",
             help="Choose how to segment your data",
         )
         dim_col = dict(DEMOGRAPHIC_DIMENSIONS)[dim_label]
 
     with col2:
         # Get return window from centralized filter state
-        filter_state = st.session_state.get("state_filter_form", {})
+        filter_state = st.session_state.get(SessionKeys.STATE_FILTER_FORM, {})
         return_window = filter_state.get("return_window", 180)
         st.info(f"Return tracking: {return_window} days")
 
     with col3:
-        # Minimum group size filter
+        # Minimum group size filter with stable key
         min_group_size = st.number_input(
             "Min group size",
             min_value=1,
             max_value=100,
             value=state.get("min_group_size", 10),
             step=5,
-            key=f"min_group_{key_suffix}",
+            key="min_group_stable",
             help="Hide groups smaller than this",
         )
 
-    # Check if any key parameters changed that require recalculation
-    params_changed = (
-        state.get("selected_dimension") != dim_label
-        or state.get("cached_return_window") != return_window
-        or state.get("min_group_size") != min_group_size
-    )
+    # Check if dimension or return window changed (requires recalc)
+    # Note: min_group_size doesn't require recalc, just filtering
+    dimension_changed = state.get("selected_dimension") != dim_label
+    return_window_changed = state.get("cached_return_window") != return_window
 
     # Update state
     state["selected_dimension"] = dim_label
     state["min_group_size"] = min_group_size
 
-    # If parameters changed, clear cache
-    if params_changed:
+    # Only clear cache if dimension or return window changed
+    # This allows changing min_group_size without full recalculation
+    if dimension_changed or return_window_changed:
         state.pop("breakdown_df", None)
 
     # Check if column exists
@@ -1447,7 +1466,7 @@ def render_breakdown_section(
             f"Filter {dim_label} groups (showing all by default)",
             options=unique_groups,
             default=unique_groups,
-            key=f"group_filter_{key_suffix}",
+            key="group_filter_stable",
             help="Select specific groups to analyze",
         )
 
@@ -1492,8 +1511,7 @@ def render_breakdown_section(
 
     if bdf_filtered.empty:
         st.info(
-            f"ℹ️ No groups meet the minimum size threshold of {
-            min_group_size}."
+            f"ℹ️ No groups meet the minimum size threshold of {min_group_size}."
         )
         st.caption(f"The largest group has {bdf['Served'].max()} clients.")
         return
@@ -1533,18 +1551,16 @@ def render_breakdown_section(
         summary_cols[4].metric("Total Returns", fmt_int(total_returns))
 
         # Volume comparison chart
-        st.html(
-            html_factory.title("Client Count by Group", level=3, icon="👥")
-        )
+        st.html(html_factory.title("Client Count by Group", level=3, icon="👥"))
         fig_counts = _create_counts_chart(bdf_filtered, dim_col)
-        st.plotly_chart(fig_counts, width='stretch')
+        st.plotly_chart(fig_counts, use_container_width=True)
 
     with tab_flow:
         st.html(html_factory.title("System Flow Analysis", level=3, icon="🔄"))
 
         # Net flow visualization
         fig_flow = _create_flow_balance_chart(bdf_filtered, dim_col)
-        st.plotly_chart(fig_flow, width='stretch')
+        st.plotly_chart(fig_flow, use_container_width=True)
 
         # Flow insights
         with st.expander("📊 Flow Insights", expanded=True):
@@ -1615,7 +1631,7 @@ def render_breakdown_section(
             fig_ph, _ = _create_rates_charts(
                 bdf_filtered, dim_col, return_window
             )
-            st.plotly_chart(fig_ph, width='stretch')
+            st.plotly_chart(fig_ph, use_container_width=True)
             st.caption(
                 "📈 Higher rates indicate better housing placement outcomes"
             )
@@ -1624,7 +1640,7 @@ def render_breakdown_section(
             _, fig_ret = _create_rates_charts(
                 bdf_filtered, dim_col, return_window
             )
-            st.plotly_chart(fig_ret, width='stretch')
+            st.plotly_chart(fig_ret, use_container_width=True)
             st.caption("📉 Lower rates indicate better housing stability")
 
         # Outcome Comparison (quadrant chart)
@@ -1640,7 +1656,7 @@ def render_breakdown_section(
         )
 
         fig_outcome = _create_outcome_quadrant_chart(bdf_filtered, dim_col)
-        st.plotly_chart(fig_outcome, width='stretch')
+        st.plotly_chart(fig_outcome, use_container_width=True)
 
         # Add interpretation help
         with st.expander("📖 Understanding the charts", expanded=False):
@@ -1709,7 +1725,7 @@ def render_breakdown_section(
             {k: v for k, v in format_dict.items() if k in export_df.columns}
         )
 
-        st.dataframe(styled_export, width='stretch', height=500)
+        st.dataframe(styled_export, width="stretch", height=500)
 
         # Download options
         col1, col2 = st.columns(2)
@@ -1719,11 +1735,11 @@ def render_breakdown_section(
             st.download_button(
                 label="📥 Download as CSV",
                 data=csv,
-                file_name=f"breakdown_{dim_col}_{
-                    t0.strftime('%Y%m%d')}_{
-                    t1.strftime('%Y%m%d')}.csv",
+                file_name=(
+                    f"breakdown_{dim_col}_{t0.strftime('%Y%m%d')}_{t1.strftime('%Y%m%d')}.csv"
+                ),
                 mime="text/csv",
-                width='stretch',
+                width="stretch",
             )
 
         with col2:
@@ -1747,8 +1763,7 @@ Filtered Out: {len(bdf) - len(export_df)} groups with < {min_group_size} clients
             st.download_button(
                 label="📝 Download Summary",
                 data=insights_text,
-                file_name=f"breakdown_summary_{dim_col}_{
-                    t0.strftime('%Y%m%d')}.txt",
+                file_name=f"breakdown_summary_{dim_col}_{t0.strftime('%Y%m%d')}.txt",
                 mime="text/plain",
-                width='stretch',
+                width="stretch",
             )

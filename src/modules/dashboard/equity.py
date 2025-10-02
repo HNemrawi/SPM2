@@ -12,6 +12,7 @@ from pandas import DataFrame, Timestamp
 from scipy import stats
 
 from src.core.data.destinations import apply_custom_ph_destinations
+from src.core.session import SessionKeys
 from src.modules.dashboard.data_utils import DEMOGRAPHIC_DIMENSIONS
 from src.modules.dashboard.filters import (
     get_filter_timestamp,
@@ -178,81 +179,90 @@ def _create_methodology_html(
 ) -> str:
     """Create methodology HTML section using UI factories."""
 
-    outcome_definitions = ""
-    if "Return" not in outcome_name:
-        content = f"""
-            <h4 style="margin-top: 0;">Permanent Housing Exits</h4>
-            <p><strong>Rate = </strong>Clients who exited to permanent housing ÷ All clients who exited × 100</p>
-            <p><strong>Goal: </strong>Higher rates are better ✅</p>
+    # Determine if this is a returns analysis
+    is_returns = "Return" in outcome_name
+
+    # Build outcome definition content
+    if is_returns:
+        outcome_content = f"""
+            <div style="background-color: rgba(255,193,7,0.15); border-left: 4px solid {WARNING_COLOR}; border-radius: 5px; padding: 15px; margin-bottom: 20px;">
+                <h4 style="margin: 0 0 10px 0; color: {WARNING_COLOR};">📊 Returns to Homelessness</h4>
+                <p style="margin: 8px 0;"><strong>Rate =</strong> Clients who returned ÷ Clients who exited to PH × 100</p>
+                <p style="margin: 8px 0;"><strong>Goal:</strong> Lower rates are better ✅</p>
+                <p style="margin: 8px 0; font-size: 14px;"><em>Note: We search the entire system for returns, not just current filtered programs.</em></p>
+            </div>
         """
-        outcome_definitions = html_factory.info_box(
-            content=content, type="success", title=None, icon="📊"
-        )
-    else:  # Returns to homelessness
-        content = f"""
-            <h4 style="margin-top: 0;">Returns to Homelessness</h4>
-            <p><strong>Tracking: </strong>Clients who returned within {return_window if return_window else 730}
-            days of housing exit</p>
-            <p><strong>Rate = </strong>Clients who returned ÷ Clients who exited to PH × 100</p>
-            <p><strong>Goal: </strong>Lower rates are better ✅</p>
-            <p style="margin-top: 10px; font-size: 14px;"><em>Note: We search the entire system for returns, not just current filtered programs.</em></p>
+    else:
+        outcome_content = f"""
+            <div style="background-color: rgba(16,185,129,0.15); border-left: 4px solid {SUCCESS_COLOR}; border-radius: 5px; padding: 15px; margin-bottom: 20px;">
+                <h4 style="margin: 0 0 10px 0; color: {SUCCESS_COLOR};">📊 Permanent Housing Exits</h4>
+                <p style="margin: 8px 0;"><strong>Rate =</strong> Clients who exited to permanent housing ÷ All clients who exited × 100</p>
+                <p style="margin: 8px 0;"><strong>Goal:</strong> Higher rates are better ✅</p>
+            </div>
         """
-        outcome_definitions = html_factory.info_box(
-            content=content, type="warning", title=None, icon="📊"
-        )
 
     return f"""
-    <div style="background-color: rgba(0,0,0,0.2); border-radius: 10px; padding: 20px;">
+    <div style="background-color: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); border-radius: 10px; padding: 25px;">
 
-        <h3 style="color: {MAIN_COLOR}; margin-top: 0;">Analysis Details</h3>
+        <h3 style="color: {MAIN_COLOR}; margin: 0 0 20px 0; display: flex; align-items: center; gap: 10px;">
+            <span>🔬</span> Analysis Details
+        </h3>
 
-        <table style="width: 100%; margin-bottom: 20px;">
-            <tr>
-                <td style="padding: 8px;"><strong>Comparing:</strong></td>
-                <td style="padding: 8px;">{equity_label}</td>
-            </tr>
-            <tr>
-                <td style="padding: 8px;"><strong>Time period:</strong></td>
-                <td style="padding: 8px;">{t0.date()} to {t1.date()}</td>
-            </tr>
-            <tr>
-                <td style="padding: 8px;"><strong>Minimum group size:</strong></td>
-                <td style="padding: 8px;">{min_pop}</td>
-            </tr>
-        </table>
+        <div style="background-color: rgba(255,255,255,0.03); border-radius: 8px; padding: 15px; margin-bottom: 20px;">
+            <table style="width: 100%; border-collapse: collapse;">
+                <tr style="border-bottom: 1px solid rgba(255,255,255,0.1);">
+                    <td style="padding: 10px 15px; width: 40%;"><strong>Comparing:</strong></td>
+                    <td style="padding: 10px 15px; color: {MAIN_COLOR}; font-weight: 600;">{equity_label}</td>
+                </tr>
+                <tr style="border-bottom: 1px solid rgba(255,255,255,0.1);">
+                    <td style="padding: 10px 15px;"><strong>Time period:</strong></td>
+                    <td style="padding: 10px 15px;">{t0.date()} to {t1.date()}</td>
+                </tr>
+                <tr>
+                    <td style="padding: 10px 15px;"><strong>Minimum group size:</strong></td>
+                    <td style="padding: 10px 15px;">{min_pop} clients</td>
+                </tr>
+            </table>
+        </div>
 
-        {outcome_definitions}
+        {outcome_content}
 
-        <h3 style="color: {MAIN_COLOR};">How to Read Results</h3>
+        <h3 style="color: {MAIN_COLOR}; margin: 25px 0 15px 0; display: flex; align-items: center; gap: 10px;">
+            <span>📖</span> How to Read Results
+        </h3>
 
-        <div style="background-color: rgba(255,255,255,0.05); border-radius: 5px; padding: 15px; margin-bottom: 15px;">
-            <p><strong>Disparity Index (DI)</strong> - How far each group is from the best performer:</p>
-            <ul>
-                <li>1.0 = Performing as well as the best group</li>
-                <li>0.8 = 20% gap from best</li>
-                <li>0.5 = 50% gap from best</li>
+        <div style="background-color: rgba(0,98,155,0.15); border-left: 4px solid {MAIN_COLOR}; border-radius: 5px; padding: 15px; margin-bottom: 15px;">
+            <h4 style="margin: 0 0 10px 0; color: {MAIN_COLOR};">Disparity Index (DI)</h4>
+            <p style="margin: 5px 0 10px 0;">Measures how far each group is from the best performer:</p>
+            <ul style="margin: 10px 0; padding-left: 25px; line-height: 1.6;">
+                <li><strong>1.0</strong> = Performing as well as the best group</li>
+                <li><strong>0.8</strong> = 20% gap from best</li>
+                <li><strong>0.5</strong> = 50% gap from best</li>
             </ul>
-            <p style="margin-top: 10px; font-size: 14px; font-style: italic;">
-                {"For returns: Groups with the lowest rates get DI = 1.0. If any group achieves 0% returns, only they get 1.0." if "Return" in outcome_name else "For exits: Groups with the highest rates get DI = 1.0. The index shows what fraction of the best rate each group achieves."}
+            <p style="margin: 12px 0 0 0; padding-top: 10px; border-top: 1px solid rgba(255,255,255,0.1); font-size: 13px; font-style: italic;">
+                {"For returns: Groups with the lowest rates get DI = 1.0. If any group achieves 0% returns, only they receive the perfect 1.0 score." if is_returns else "For exits: Groups with the highest rates get DI = 1.0. The index shows what fraction of the best rate each group achieves."}
             </p>
         </div>
 
-        <div style="background-color: rgba(255,255,255,0.05); border-radius: 5px; padding: 15px;">
-            <p><strong>Statistical Significance (*)</strong> - Confidence that differences are real:</p>
-            <ul>
-                <li>*** = Very confident (p < 0.001)</li>
-                <li>** = Confident (p < 0.01)</li>
-                <li>* = Somewhat confident (p < 0.05)</li>
-                <li>No asterisk = Could be random chance</li>
+        <div style="background-color: rgba(139,92,246,0.15); border-left: 4px solid {NEUTRAL_COLOR}; border-radius: 5px; padding: 15px; margin-bottom: 15px;">
+            <h4 style="margin: 0 0 10px 0; color: {NEUTRAL_COLOR};">Statistical Significance (*)</h4>
+            <p style="margin: 5px 0 10px 0;">Confidence that observed differences are real, not random:</p>
+            <ul style="margin: 10px 0; padding-left: 25px; line-height: 1.6;">
+                <li><strong>***</strong> = Very confident (p < 0.001)</li>
+                <li><strong>**</strong> = Confident (p < 0.01)</li>
+                <li><strong>*</strong> = Somewhat confident (p < 0.05)</li>
+                <li><strong>No asterisk</strong> = Could be random chance</li>
             </ul>
         </div>
 
-        <h3 style="color: {WARNING_COLOR}; margin-top: 20px;">Important Notes</h3>
-        <ul>
-            <li>Shows patterns, not causes</li>
-            <li>Focus on groups with low DI AND statistical significance</li>
-            <li>Many unmeasured factors may influence outcomes</li>
-        </ul>
+        <div style="background-color: rgba(239,68,68,0.15); border-left: 4px solid {WARNING_COLOR}; border-radius: 5px; padding: 15px; margin-top: 20px;">
+            <h4 style="margin: 0 0 10px 0; color: {WARNING_COLOR};">⚠️ Important Notes</h4>
+            <ul style="margin: 10px 0; padding-left: 25px; line-height: 1.8;">
+                <li><strong>Correlation ≠ Causation:</strong> Shows patterns, not causes</li>
+                <li><strong>Focus priority:</strong> Groups with low DI <em>and</em> statistical significance</li>
+                <li><strong>Context matters:</strong> Many unmeasured factors may influence outcomes</li>
+            </ul>
+        </div>
     </div>
     """
 
@@ -496,10 +506,17 @@ def equity_analysis(
             # Add a flag to indicate this special case
             result["all_groups_perfect"] = True
         elif best_rate == 0:
-            # Some groups have 0% (perfect), others don't
+            # Some groups have 0% (perfect), others don't - OPTIMIZED
             # Groups with 0% get DI = 1.0, others get scaled down
-            result["disparity_index"] = result["outcome_rate"].apply(
-                lambda x: 1.0 if x == 0 else max(0, 1.0 - (x / worst_rate))
+            result["disparity_index"] = (
+                result["outcome_rate"]
+                .where(result["outcome_rate"] != 0, 1.0)
+                .where(
+                    result["outcome_rate"] == 0,
+                    result["outcome_rate"].apply(
+                        lambda x: max(0, 1.0 - (x / worst_rate))
+                    ),
+                )
             )
             result["all_groups_perfect"] = False
         elif worst_rate == best_rate:
@@ -507,10 +524,12 @@ def equity_analysis(
             result["disparity_index"] = 1.0
             result["all_groups_perfect"] = False
         else:
-            # Normal case: best_rate > 0, variation exists
+            # Normal case: best_rate > 0, variation exists - OPTIMIZED
             # DI = best_rate / group_rate (lower rates get higher DI)
-            result["disparity_index"] = result["outcome_rate"].apply(
-                lambda x: min(1.0, best_rate / x) if x > 0 else 1.0
+            result["disparity_index"] = (
+                (best_rate / result["outcome_rate"])
+                .clip(upper=1.0)
+                .where(result["outcome_rate"] > 0, 1.0)
             )
             result["all_groups_perfect"] = False
     else:
@@ -531,10 +550,10 @@ def equity_analysis(
             result["disparity_index"] = 0.0
             result["all_groups_perfect"] = False
         else:
-            # DI = group_rate / best_rate
-            result["disparity_index"] = result["outcome_rate"].apply(
-                lambda x: min(1.0, x / best_rate)
-            )
+            # DI = group_rate / best_rate - OPTIMIZED
+            result["disparity_index"] = (
+                result["outcome_rate"] / best_rate
+            ).clip(upper=1.0)
             result["all_groups_perfect"] = False
 
     # Step 8: Calculate potential impact
@@ -544,20 +563,15 @@ def equity_analysis(
         min_group = result.loc[result["outcome_rate"].idxmin()]
         min_rate = min_group["outcome_rate"]
 
-        # Calculate potential improvement (make it positive for display)
-        result["potential_improvement"] = result.apply(
-            lambda row: (
-                int(
-                    np.floor(
-                        (row["outcome_rate"] - min_rate)
-                        / 100
-                        * row["population"]
-                    )
-                )
-                if row["outcome_rate"] > min_rate
-                else 0
-            ),
-            axis=1,
+        # Calculate potential improvement (make it positive for display) - OPTIMIZED
+        result["potential_improvement"] = (
+            np.floor(
+                (result["outcome_rate"] - min_rate)
+                / 100
+                * result["population"]
+            )
+            .clip(lower=0)
+            .astype(int)
         )
     else:
         # For PH exits, calculate increase if all groups had highest rate
@@ -624,7 +638,7 @@ def render_equity_analysis(
 
     # Fallback for full_df
     if full_df is None:
-        full_df = st.session_state.get("df")
+        full_df = st.session_state.get(SessionKeys.DF)
         if full_df is None:
             st.error(
                 "Original dataset not found. Equity analysis requires full data."
@@ -642,12 +656,12 @@ def render_equity_analysis(
             if k not in ["last_updated"]:
                 state.pop(k, None)
 
-    # Header with help button using UI factory
-    st.html(html_factory.title("Equity Analysis", level=2, icon="⚖️"))
-
-    col_help = st.columns([11, 1])[1]
-    with col_help:
-        with st.popover("ℹ️ Help", width='stretch'):
+    # Header with help button (consistent with Summary & Demographics)
+    col_header, col_info = st.columns([6, 1])
+    with col_header:
+        st.html(html_factory.title("Equity Analysis", level=2, icon="⚖️"))
+    with col_info:
+        with st.popover("ℹ️ Help", width="stretch"):
             st.markdown(
                 """
             ### Understanding Equity Analysis
@@ -657,7 +671,7 @@ def render_equity_analysis(
             **Available Analyses:**
 
             **1. Permanent Housing Exits**
-            - **Population**: All unique clients who exited during the period
+            - **Population**: Unique clients who had at least one exit during the period
             - **Outcome**: Exited to permanent housing destination
             - **Rate**: (PH exits ÷ Total exits) × 100
             - **Goal**: Higher rates are better (more successful placements)
@@ -667,7 +681,7 @@ def render_equity_analysis(
             - **Outcome**: Returned to homelessness within tracking window (7-1095 days)
             - **Rate**: (Returns ÷ PH exits) × 100
             - **Goal**: Lower rates are better (fewer returns)
-            - **Note**: Uses HUD-compliant logic with exclusions for short PH stays
+            - **Note**: Uses HUD-compliant logic with exclusions for short PH stays (≤14 days from initial PH exit with additional 14-day exclusion window) and immediate housing (move-in date = project start)
 
             **Statistical Methods:**
             - **Chi-square test**: Used when all cells have n ≥ 5 (with Yates' correction)
@@ -813,7 +827,7 @@ def render_equity_analysis(
         d1, d2 = st.columns(2)
 
         # Get return window from centralized filter state
-        filter_state = st.session_state.get("state_filter_form", {})
+        filter_state = st.session_state.get(SessionKeys.STATE_FILTER_FORM, {})
         return_window = filter_state.get("return_window", 180)
         d1.info(f"Return tracking: {return_window} days")
 
@@ -835,12 +849,12 @@ def render_equity_analysis(
             help="Only exits from these project types will be counted",
         )
         # Get return window from centralized filter state (for consistency, even though not used for PH exits)
-        filter_state = st.session_state.get("state_filter_form", {})
+        filter_state = st.session_state.get(SessionKeys.STATE_FILTER_FORM, {})
         return_window = filter_state.get("return_window", 180)
 
     # Check date range
-    t0 = st.session_state.get("t0")
-    t1 = st.session_state.get("t1")
+    t0 = st.session_state.get(SessionKeys.DATE_START)
+    t1 = st.session_state.get(SessionKeys.DATE_END)
 
     if not (t0 and t1):
         st.warning("Please set your date range in the filter panel.")
@@ -1179,7 +1193,7 @@ def render_equity_analysis(
             )
 
         # Display the chart
-        st.plotly_chart(fig, width='stretch')
+        st.plotly_chart(fig, use_container_width=True)
 
         # Add color explanation with clear legend using UI factory
         color_guide_content = f"""
@@ -1351,7 +1365,7 @@ def render_equity_analysis(
         )
 
         # Display the chart
-        st.plotly_chart(di_fig, width='stretch')
+        st.plotly_chart(di_fig, use_container_width=True)
 
         # Color legend for disparity levels using UI factory
         disparity_legend_content = f"""
@@ -1538,7 +1552,7 @@ def render_equity_analysis(
                     "Potential Impact": "{:+,}",
                 }
             ),
-            width='stretch',
+            width="stretch",
             hide_index=True,
         )
 
@@ -1547,8 +1561,10 @@ def render_equity_analysis(
         st.download_button(
             label="📥 Download Data as CSV",
             data=csv,
-            file_name=f"equity_analysis_{equity_label}_{outcome_name}_{
-                t0.strftime('%Y%m%d')}.csv",
+            file_name=(
+                f"equity_analysis_{equity_label}_{outcome_name}_"
+                f"{t0.strftime('%Y%m%d')}.csv"
+            ),
             mime="text/csv",
         )
 

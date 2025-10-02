@@ -12,10 +12,11 @@ import streamlit as st
 
 from config.app_config import config
 from src.core.constants import EXIT_COLUMNS, RETURN_COLUMNS
-from src.core.session.manager import (
-    StateManager,
-    check_data_available,
+from src.core.session import (
+    ModuleType,
     get_analysis_result,
+    get_session_manager,
+    get_spm2_state,
     set_analysis_result,
 )
 from src.core.utils.helpers import (
@@ -34,14 +35,14 @@ from src.modules.spm2.visualizations import (
     plot_days_to_return_box,
     plot_flow_sankey,
 )
-from src.ui.factories.components import ui
-from src.ui.factories.html import html_factory
-from src.ui.layouts.templates import ABOUT_SPM2_CONTENT
-from src.ui.layouts.widgets import (
+from src.ui.factories.components import (
     render_about_section,
     render_dataframe_with_style,
     render_download_button,
+    ui,
 )
+from src.ui.factories.html import html_factory
+from src.ui.layouts.templates import ABOUT_SPM2_CONTENT
 from src.ui.themes.styles import apply_chart_theme
 from src.ui.themes.theme import theme
 
@@ -49,8 +50,10 @@ from src.ui.themes.theme import theme
 # CONSTANTS
 # ============================================================================
 
-# Module identifier for state management
-SPM2_MODULE = StateManager.SPM2_PREFIX
+# Enhanced session management
+session_manager = get_session_manager()
+spm2_state = get_spm2_state()
+SPM2_MODULE = ModuleType.SPM2
 
 # ============================================================================
 # CONFIGURATION FUNCTIONS
@@ -58,18 +61,25 @@ SPM2_MODULE = StateManager.SPM2_PREFIX
 
 
 def _set_dirty_flag():
-    st.session_state.spm2_dirty = True
+    spm2_state.mark_dirty()
 
 
 def setup_date_config(
     df: pd.DataFrame,
 ) -> Tuple[pd.Timestamp, pd.Timestamp, int, str, int]:
-    """Configure date parameters for analysis."""
+    """Configure date parameters for analysis using enhanced session management."""
     with st.sidebar.expander("📅 **Date Configuration**", expanded=True):
-        # Set default values
-        # Use reusable date range component
+        # Get saved configuration from state
+        saved_config = spm2_state.get_analysis_config()
+
         default_start = datetime(2024, 10, 1)
         default_end = datetime(2025, 9, 30)
+
+        # Use saved dates if available
+        if saved_config["reporting_period"]["start"]:
+            default_start = saved_config["reporting_period"]["start"]
+        if saved_config["reporting_period"]["end"]:
+            default_end = saved_config["reporting_period"]["end"]
 
         report_start, report_end = ui.date_range_input(
             label="SPM Reporting Period",
@@ -77,7 +87,10 @@ def setup_date_config(
             default_end=default_end,
             help_text="Primary analysis window for SPM2 metrics",
             info_message="Primary analysis window for SPM2 metrics. The selected end date will be included in the analysis period.",
-            on_change_callback=_set_dirty_flag,
+            on_change_callback=lambda: (
+                spm2_state.set_date_range(report_start, report_end),
+                spm2_state.mark_dirty(),
+            ),
         )
 
         # Return defaults if date input failed
@@ -85,23 +98,40 @@ def setup_date_config(
             report_start = pd.to_datetime(default_start)
             report_end = pd.to_datetime(default_end)
 
+        # Save to enhanced state
+        spm2_state.set_date_range(report_start, report_end)
+
         st.html(html_factory.divider())
+
+        # Get saved lookback configuration
+        saved_lookback = spm2_state.get_lookback_period()
 
         unit_choice = st.radio(
             "Select Lookback Unit",
             options=["Days", "Months"],
-            index=0,
+            index=0 if saved_lookback["unit"] == "Days" else 1,
             help="Choose whether to specify the lookback period in days or months.",
-            on_change=_set_dirty_flag,
+            on_change=lambda: spm2_state.mark_dirty(),
+            key="lookback_unit_radio",
         )
 
         if unit_choice == "Days":
             lookback_value = st.number_input(
                 "Lookback Days",
                 min_value=1,
-                value=730,
+                value=(
+                    saved_lookback["period"]
+                    if saved_lookback["unit"] == "Days"
+                    else 730
+                ),
                 help="Days prior to report start for exit identification",
-                on_change=_set_dirty_flag,
+                on_change=lambda: (
+                    spm2_state.set_lookback_period(
+                        st.session_state.get("lookback_days", 730), "Days"
+                    ),
+                    spm2_state.mark_dirty(),
+                ),
+                key="lookback_days",
             )
             exit_window_start = report_start - pd.Timedelta(
                 days=lookback_value
@@ -111,14 +141,27 @@ def setup_date_config(
             lookback_value = st.number_input(
                 "Lookback Months",
                 min_value=1,
-                value=24,
+                value=(
+                    saved_lookback["period"]
+                    if saved_lookback["unit"] == "Months"
+                    else 24
+                ),
                 help="Months prior to report start for exit identification",
-                on_change=_set_dirty_flag,
+                on_change=lambda: (
+                    spm2_state.set_lookback_period(
+                        st.session_state.get("lookback_months", 24), "Months"
+                    ),
+                    spm2_state.mark_dirty(),
+                ),
+                key="lookback_months",
             )
             exit_window_start = report_start - pd.DateOffset(
                 months=lookback_value
             )
             exit_window_end = report_end - pd.DateOffset(months=lookback_value)
+
+        # Save lookback configuration to enhanced state
+        spm2_state.set_lookback_period(lookback_value, unit_choice)
 
         # Display exit window with styled info box
         st.html(
@@ -133,10 +176,19 @@ def setup_date_config(
         return_period = st.number_input(
             "Return Period (Days)",
             min_value=1,
-            value=730,
+            value=spm2_state.get_return_period(),
             help="Max days post-exit to count as return",
-            on_change=_set_dirty_flag,
+            on_change=lambda: (
+                spm2_state.set_return_period(
+                    st.session_state.get("return_period_days", 730)
+                ),
+                spm2_state.mark_dirty(),
+            ),
+            key="return_period_days",
         )
+
+        # Save return period to enhanced state
+        spm2_state.set_return_period(return_period)
 
         # Check if analysis range is within available data range
         if df is not None and not df.empty:
@@ -172,7 +224,7 @@ def setup_global_filters(df: pd.DataFrame) -> Optional[List[str]]:
                 default=["Yes"],
                 help_text="Filter by Continuum Project participation",
                 key="spm2_continuum_filter",
-                on_change=_set_dirty_flag,
+                on_change=lambda: spm2_state.mark_dirty(),
                 module=SPM2_MODULE,
             )
 
@@ -196,7 +248,7 @@ def setup_exit_filters(df: pd.DataFrame) -> Tuple[Optional[List[str]], ...]:
             default=["ALL"],
             help_text="CoC codes for exit identification",
             key="spm2_exit_cocs_filter",
-            on_change=_set_dirty_flag,
+            on_change=lambda: spm2_state.mark_dirty(),
             module=SPM2_MODULE,
         )
 
@@ -210,7 +262,7 @@ def setup_exit_filters(df: pd.DataFrame) -> Tuple[Optional[List[str]], ...]:
             default=["ALL"],
             help_text="Local CoC codes for exits",
             key="spm2_exit_local_cocs_filter",
-            on_change=_set_dirty_flag,
+            on_change=lambda: spm2_state.mark_dirty(),
             module=SPM2_MODULE,
         )
 
@@ -224,7 +276,7 @@ def setup_exit_filters(df: pd.DataFrame) -> Tuple[Optional[List[str]], ...]:
             default=["ALL"],
             help_text="Agencies for exit identification",
             key="spm2_exit_agencies_filter",
-            on_change=_set_dirty_flag,
+            on_change=lambda: spm2_state.mark_dirty(),
             module=SPM2_MODULE,
         )
 
@@ -238,7 +290,7 @@ def setup_exit_filters(df: pd.DataFrame) -> Tuple[Optional[List[str]], ...]:
             default=["ALL"],
             help_text="Programs for exit identification",
             key="spm2_exit_programs_filter",
-            on_change=_set_dirty_flag,
+            on_change=lambda: spm2_state.mark_dirty(),
             module=SPM2_MODULE,
         )
 
@@ -252,7 +304,7 @@ def setup_exit_filters(df: pd.DataFrame) -> Tuple[Optional[List[str]], ...]:
             default=["ALL"],
             help_text="SSVF RRH filter for exits",
             key="spm2_exit_ssvf_rrh_filter",
-            on_change=_set_dirty_flag,
+            on_change=lambda: spm2_state.mark_dirty(),
             module=SPM2_MODULE,
         )
 
@@ -270,7 +322,7 @@ def setup_exit_filters(df: pd.DataFrame) -> Tuple[Optional[List[str]], ...]:
             default=default_projects,
             help_text="Project types treated as exits",
             key="spm2_project_types_exit_filter",
-            on_change=_set_dirty_flag,
+            on_change=lambda: spm2_state.mark_dirty(),
             module=SPM2_MODULE,
             allow_empty=False,
         )
@@ -283,7 +335,7 @@ def setup_exit_filters(df: pd.DataFrame) -> Tuple[Optional[List[str]], ...]:
                 default=["Permanent Housing Situations"],
                 help_text="Limit exits to these destination categories",
                 key="spm2_exit_dest_cats_filter",
-                on_change=_set_dirty_flag,
+                on_change=lambda: spm2_state.mark_dirty(),
                 module=SPM2_MODULE,
                 allow_empty=False,
             )
@@ -294,7 +346,7 @@ def setup_exit_filters(df: pd.DataFrame) -> Tuple[Optional[List[str]], ...]:
             default=["ALL"],
             help_text="Limit exits to these specific destinations",
             key="spm2_exit_destinations_filter",
-            on_change=_set_dirty_flag,
+            on_change=lambda: spm2_state.mark_dirty(),
             module=SPM2_MODULE,
         )
 
@@ -314,9 +366,7 @@ def setup_return_filters(df: pd.DataFrame) -> Tuple[Optional[List[str]], ...]:
     """Configure return-specific filters."""
     with st.sidebar.expander("↩️ **Return Filters**", expanded=False):
         st.html(
-            html_factory.title(
-                "Return Enrollment Criteria", level=4, icon="🔄"
-            )
+            html_factory.title("Return Enrollment Criteria", level=4, icon="🔄")
         )
 
         return_allowed_cocs = create_multiselect_filter(
@@ -328,7 +378,9 @@ def setup_return_filters(df: pd.DataFrame) -> Tuple[Optional[List[str]], ...]:
             ),
             default=["ALL"],
             help_text="CoC codes for return identification",
-            on_change=_set_dirty_flag,
+            key="spm2_return_cocs_filter",
+            on_change=lambda: spm2_state.mark_dirty(),
+            module=SPM2_MODULE,
         )
 
         return_allowed_local_cocs = create_multiselect_filter(
@@ -340,7 +392,9 @@ def setup_return_filters(df: pd.DataFrame) -> Tuple[Optional[List[str]], ...]:
             ),
             default=["ALL"],
             help_text="Local CoC codes for returns",
-            on_change=_set_dirty_flag,
+            key="spm2_return_local_cocs_filter",
+            on_change=lambda: spm2_state.mark_dirty(),
+            module=SPM2_MODULE,
         )
 
         return_allowed_agencies = create_multiselect_filter(
@@ -352,7 +406,9 @@ def setup_return_filters(df: pd.DataFrame) -> Tuple[Optional[List[str]], ...]:
             ),
             default=["ALL"],
             help_text="Agencies for return identification",
-            on_change=_set_dirty_flag,
+            key="spm2_return_agencies_filter",
+            on_change=lambda: spm2_state.mark_dirty(),
+            module=SPM2_MODULE,
         )
 
         return_allowed_programs = create_multiselect_filter(
@@ -364,7 +420,9 @@ def setup_return_filters(df: pd.DataFrame) -> Tuple[Optional[List[str]], ...]:
             ),
             default=["ALL"],
             help_text="Programs for return identification",
-            on_change=_set_dirty_flag,
+            key="spm2_return_programs_filter",
+            on_change=lambda: spm2_state.mark_dirty(),
+            module=SPM2_MODULE,
         )
 
         return_ssvf_rrh = create_multiselect_filter(
@@ -376,7 +434,9 @@ def setup_return_filters(df: pd.DataFrame) -> Tuple[Optional[List[str]], ...]:
             ),
             default=["ALL"],
             help_text="SSVF RRH filter for returns",
-            on_change=_set_dirty_flag,
+            key="spm2_return_ssvf_rrh_filter",
+            on_change=lambda: spm2_state.mark_dirty(),
+            module=SPM2_MODULE,
         )
 
         all_project_types = sorted(
@@ -392,7 +452,8 @@ def setup_return_filters(df: pd.DataFrame) -> Tuple[Optional[List[str]], ...]:
             all_project_types,
             default=default_projects,
             help="Project types treated as candidate returns",
-            on_change=_set_dirty_flag,
+            on_change=lambda: spm2_state.mark_dirty(),
+            key="spm2_return_projects_filter",
         )
 
     return (
@@ -412,7 +473,8 @@ def setup_comparison_filters() -> bool:
             "Compare PH/Non-PH Exits",
             value=False,
             help="Enable side-by-side PH comparison",
-            on_change=_set_dirty_flag,
+            on_change=lambda: spm2_state.mark_dirty(),
+            key="compare_ph_checkbox",
         )
 
     return compare_ph_others
@@ -424,15 +486,14 @@ def setup_comparison_filters() -> bool:
 
 
 def run_analysis(df: pd.DataFrame, analysis_params: Dict[str, Any]) -> bool:
-    """Execute the SPM2 analysis with specified parameters."""
+    """Execute the SPM2 analysis with enhanced session management."""
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
-        if st.session_state.get("spm2_dirty"):
+        if spm2_state.is_dirty():
             st.info("Parameters have changed. Click 'Run Analysis' to update.")
-        if st.button(
-            "▶️ Run SPM2 Analysis", type="primary", width='stretch'
-        ):
-            st.session_state.spm2_dirty = False
+        if st.button("▶️ Run SPM2 Analysis", type="primary", width="stretch"):
+            # Clear dirty flag and request analysis
+            spm2_state.request_analysis()
             with st.status(
                 "🔍 Processing SPM2 Analysis...", expanded=True
             ) as status:
@@ -505,14 +566,27 @@ def run_analysis(df: pd.DataFrame, analysis_params: Dict[str, Any]) -> bool:
 
                     status.write("💾 Finalizing results...")
 
-                    # Store results in session state
-                    set_analysis_result("spm2", final_df)
+                    # Store results using enhanced session management
+                    set_analysis_result(SPM2_MODULE, final_df)
+
+                    # Clear analysis request and save current params as new baseline
+                    spm2_state.clear_analysis_request()
+
+                    # Explicitly save all current parameter values as baseline
+                    spm2_state.save_params_snapshot()
+
+                    # Ensure dirty flag is cleared
+                    spm2_state.clear_dirty()
+
                     status.update(
                         label="✅ SPM2 Analysis Complete!",
                         state="complete",
                         expanded=False,
                     )
                     st.toast("🎉 SPM2 analysis successful!", icon="✅")
+
+                    # Rerun to update UI with clean dirty flag
+                    st.rerun()
 
                     return True
                 except Exception as e:
@@ -570,7 +644,7 @@ def display_days_to_return(final_df: pd.DataFrame, return_period: int) -> None:
         try:
             fig = plot_days_to_return_box(final_df, return_period)
             fig = apply_chart_theme(fig)
-            st.plotly_chart(fig, width='stretch')
+            st.plotly_chart(fig, use_container_width=True)
         except Exception as e:
             st.error(f"📉 Visualization Error: {str(e)}")
 
@@ -817,7 +891,7 @@ def display_client_flow(final_df: pd.DataFrame) -> None:
                     pivot_sankey, f"{ex_choice} → {ret_choice}"
                 )
                 sankey_fig = apply_chart_theme(sankey_fig)
-                st.plotly_chart(sankey_fig, width='stretch')
+                st.plotly_chart(sankey_fig, use_container_width=True)
             else:
                 st.info("📭 Insufficient data for flow analysis")
 
@@ -872,30 +946,30 @@ def display_ph_comparison(final_df: pd.DataFrame, return_period: int) -> None:
 
                 ui.metric_row(
                     {
-                        "<6 Month Returns": f"{
-                            ph_metrics.get(
-                                'Return < 6 Months', 0)} ({
-                            ph_metrics.get(
-                                '% Return < 6M', 0):.1f}%)",
-                        "6–12 Month Returns": f"{
-                            ph_metrics.get(
-                                'Return 6–12 Months', 0)} ({
-                                    ph_metrics.get(
-                                        '% Return 6–12M', 0):.1f}%)",
+                        "<6 Month Returns": (
+                            f"{ph_metrics.get('Return < 6 Months', 0)} "
+                            f"({ph_metrics.get('% Return < 6M', 0):.1f}%)"
+                        ),
+                        "6–12 Month Returns": (
+                            f"{ph_metrics.get('Return 6–12 Months', 0)} "
+                            f"({ph_metrics.get('% Return 6–12M', 0):.1f}%)"
+                        ),
                     },
                     columns=2,
                 )
 
                 ui.metric_row(
                     {
-                        "12–24 Month Returns": f"{ph_metrics.get('Return 12–24 Months',
-                                                                        0)} ({ph_metrics.get('% Return 12–24M',
-                                                                                             0):.1f}%)",
+                        "12–24 Month Returns": (
+                            f"{ph_metrics.get('Return 12–24 Months', 0)} "
+                            f"({ph_metrics.get('% Return 12–24M', 0):.1f}%)"
+                        ),
                         **(
                             {
-                                ">24 Month Returns": f"{ph_metrics.get('Return > 24 Months',
-                                                                          0)} ({ph_metrics.get('% Return > 24M',
-                                                                                               0):.1f}%)"
+                                ">24 Month Returns": (
+                                    f"{ph_metrics.get('Return > 24 Months', 0)} "
+                                    f"({ph_metrics.get('% Return > 24M', 0):.1f}%)"
+                                )
                             }
                             if return_period > 730
                             else {}
@@ -906,14 +980,10 @@ def display_ph_comparison(final_df: pd.DataFrame, return_period: int) -> None:
 
                 ui.metric_row(
                     {
-                        "Total Returns": f"{
-                            ph_metrics.get(
-                                'Total Return', 0)} ({
-                            ph_metrics.get(
-                                '% Return', 0):.1f}%)",
-                        "Median Return Days": f"{
-                            ph_metrics.get(
-                                'Median Days (<=period)', 0):.0f}",
+                        "Total Returns": (
+                            f"{ph_metrics.get('Total Return', 0)} ({ph_metrics.get('% Return', 0):.1f}%)"
+                        ),
+                        "Median Return Days": f"{ph_metrics.get('Median Days (<=period)', 0):.0f}",
                     },
                     columns=2,
                 )
@@ -921,14 +991,7 @@ def display_ph_comparison(final_df: pd.DataFrame, return_period: int) -> None:
                 # Percentiles in info box
                 st.html(
                     html_factory.info_box(
-                        f"<strong>Percentiles:</strong> 25th: {
-                            ph_metrics.get(
-                                'DaysToReturn 25th Pctl',
-                                0):.0f} | "
-                        f"75th: {
-                            ph_metrics.get(
-                                'DaysToReturn 75th Pctl',
-                                0):.0f}",
+                        f"<strong>Percentiles:</strong> 25th: {ph_metrics.get('DaysToReturn 25th Pctl', 0):.0f} | 75th: {ph_metrics.get('DaysToReturn 75th Pctl', 0):.0f}",
                         type="success",
                     )
                 )
@@ -964,30 +1027,28 @@ def display_ph_comparison(final_df: pd.DataFrame, return_period: int) -> None:
 
                 ui.metric_row(
                     {
-                        "<6 Month Returns": f"{
-                            nonph_metrics.get(
-                                'Return < 6 Months', 0)} ({
-                            nonph_metrics.get(
-                                '% Return < 6M', 0):.1f}%)",
-                        "6–12 Month Returns": f"{
-                            nonph_metrics.get(
-                                'Return 6–12 Months', 0)} ({
-                                    nonph_metrics.get(
-                                        '% Return 6–12M', 0):.1f}%)",
+                        "<6 Month Returns": (
+                            f"{nonph_metrics.get('Return < 6 Months', 0)} ({nonph_metrics.get('% Return < 6M', 0):.1f}%)"
+                        ),
+                        "6–12 Month Returns": (
+                            f"{nonph_metrics.get('Return 6–12 Months', 0)} ({nonph_metrics.get('% Return 6–12M', 0):.1f}%)"
+                        ),
                     },
                     columns=2,
                 )
 
                 ui.metric_row(
                     {
-                        "12–24 Month Returns": f"{nonph_metrics.get('Return 12–24 Months',
-                                                                           0)} ({nonph_metrics.get('% Return 12–24M',
-                                                                                                   0):.1f}%)",
+                        "12–24 Month Returns": (
+                            f"{nonph_metrics.get('Return 12–24 Months', 0)} "
+                            f"({nonph_metrics.get('% Return 12–24M', 0):.1f}%)"
+                        ),
                         **(
                             {
-                                ">24 Month Returns": f"{nonph_metrics.get('Return > 24 Months',
-                                                                             0)} ({ph_metrics.get('% Return > 24M',
-                                                                                                  0):.1f}%)"
+                                ">24 Month Returns": (
+                                    f"{nonph_metrics.get('Return > 24 Months', 0)} "
+                                    f"({ph_metrics.get('% Return > 24M', 0):.1f}%)"
+                                )
                             }
                             if return_period > 730
                             else {}
@@ -998,14 +1059,13 @@ def display_ph_comparison(final_df: pd.DataFrame, return_period: int) -> None:
 
                 ui.metric_row(
                     {
-                        "Total Returns": f"{
-                            nonph_metrics.get(
-                                'Total Return', 0)} ({
-                            nonph_metrics.get(
-                                '% Return', 0):.1f}%)",
-                        "Median Return Days": f"{
-                            nonph_metrics.get(
-                                'Median Days (<=period)', 0):.0f}",
+                        "Total Returns": (
+                            f"{nonph_metrics.get('Total Return', 0)} "
+                            f"({nonph_metrics.get('% Return', 0):.1f}%)"
+                        ),
+                        "Median Return Days": (
+                            f"{nonph_metrics.get('Median Days (<=period)', 0):.0f}"
+                        ),
                     },
                     columns=2,
                 )
@@ -1013,14 +1073,7 @@ def display_ph_comparison(final_df: pd.DataFrame, return_period: int) -> None:
                 # Percentiles in info box
                 st.html(
                     html_factory.info_box(
-                        f"<strong>Percentiles:</strong> 25th: {
-                            nonph_metrics.get(
-                                'DaysToReturn 25th Pctl',
-                                0):.0f} | "
-                        f"75th: {
-                            nonph_metrics.get(
-                                'DaysToReturn 75th Pctl',
-                                0):.0f}",
+                        f"<strong>Percentiles:</strong> 25th: {nonph_metrics.get('DaysToReturn 25th Pctl', 0):.0f} | 75th: {nonph_metrics.get('DaysToReturn 75th Pctl', 0):.0f}",
                         type="warning",
                     )
                 )
@@ -1052,10 +1105,9 @@ def display_data_export(final_df: pd.DataFrame) -> None:
 
 
 def spm2_page() -> None:
-    """Render the SPM2 Analysis page with all components."""
-    # Apply custom CSS theme
-    # Theme is now applied automatically
-    st.session_state.setdefault("spm2_dirty", False)
+    """Render the SPM2 Analysis page with enhanced session management."""
+    # Initialize enhanced session management
+    spm2_state.initialize()
 
     st.html(html_factory.title("SPM2 Analysis", level=1, icon="📊"))
 
@@ -1067,15 +1119,19 @@ def spm2_page() -> None:
         icon="📊",
     )
 
-    # Check for data
-    df = check_data_available()
-    if df is None:
+    # Check for data using enhanced session manager
+    df = session_manager.get_data()
+    if not session_manager.has_data():
+        st.info("📭 Please upload data in the sidebar first.")
         return
 
     # Sidebar configuration with themed styling
     st.sidebar.html('<div class="sidebar-content">')
     st.sidebar.header("⚙️ Analysis Parameters")
     st.sidebar.html(html_factory.divider())
+
+    # Start initialization phase to prevent dirty flagging during setup
+    spm2_state.start_initialization()
 
     # Setup all filter parameters
     (
@@ -1110,6 +1166,10 @@ def spm2_page() -> None:
     ) = return_filters
 
     compare_ph_others = setup_comparison_filters()
+
+    # End initialization phase and save baseline snapshot
+    spm2_state.end_initialization()
+
     st.sidebar.html("</div>")
 
     # Prepare analysis parameters
@@ -1141,7 +1201,7 @@ def spm2_page() -> None:
     run_analysis(df, analysis_params)
 
     # Display results if analysis was successful
-    final_df = get_analysis_result("spm2")
+    final_df = get_analysis_result(SPM2_MODULE)
     if final_df is not None and not final_df.empty:
         # Display all analysis sections with themed styling
         display_summary_metrics(

@@ -15,8 +15,6 @@ data:
   # Supported file types
   supported_formats:
     - csv
-    - xlsx
-    - xls
   
   # Date format for parsing
   date_format: "%Y-%m-%d"
@@ -82,5 +80,5 @@ ui:
   
   # Export options
   enable_csv_export: true
-  enable_excel_export: true
+  enable_excel_export: false
   enable_pdf_export: false

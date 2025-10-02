@@ -63,8 +63,16 @@ def get_last_exit_record(
         All exit columns prefixed with "Exit_", plus "ReturnCategory".
     """
     try:
-        client_id = row["ClientID"]
-        entry_date = row["ProjectStart"]
+        # Safely get values with defaults
+        client_id = row.get("ClientID")
+        entry_date = row.get("ProjectStart")
+
+        if client_id is None or entry_date is None:
+            # Return "New" for missing data
+            data = {f"Exit_{col}": None for col in exits.columns}
+            data["ReturnCategory"] = "New"
+            return pd.Series(data)
+
         window_start = entry_date - pd.Timedelta(days=lookback_days)
 
         candidates = exits[
@@ -95,11 +103,9 @@ def get_last_exit_record(
         return exit_series
 
     except Exception as e:
+        client_id = row.get("ClientID", "unknown")
         raise RuntimeError(
-            f"Error in get_last_exit_record for ClientID={
-                row.get(
-                    'ClientID',
-                    'unknown')}: {e}"
+            f"Error in get_last_exit_record for ClientID={client_id}: {e}"
         )
 
 
@@ -174,14 +180,30 @@ def run_return_analysis(
         One row per entry, with Enter_*/Exit_* fields, ReturnCategory, and days_since_last_exit.
     """
     try:
-        # Entry filtering
-        raw = df.copy()
-        if allowed_cocs and "ProgramSetupCoC" in raw:
-            raw = raw[raw["ProgramSetupCoC"].isin(allowed_cocs)]
-        if allowed_localcocs and "LocalCoCCode" in raw:
-            raw = raw[raw["LocalCoCCode"].isin(allowed_localcocs)]
-        if allowed_programs and "ProgramName" in raw:
-            raw = raw[raw["ProgramName"].isin(allowed_programs)]
+        # Validate required columns exist
+        required_columns = ["ClientID", "ProjectStart", "ProjectExit"]
+        missing_columns = [
+            col for col in required_columns if col not in df.columns
+        ]
+        if missing_columns:
+            raise ValueError(f"Missing required columns: {missing_columns}")
+
+        # Vectorized entry filtering - build composite mask
+        raw = df
+        mask = pd.Series(True, index=df.index)
+
+        if allowed_cocs and "ProgramSetupCoC" in df.columns:
+            mask &= df["ProgramSetupCoC"].isin(allowed_cocs)
+        if allowed_localcocs and "LocalCoCCode" in df.columns:
+            mask &= df["LocalCoCCode"].isin(allowed_localcocs)
+        if allowed_programs and "ProgramName" in df.columns:
+            mask &= df["ProgramName"].isin(allowed_programs)
+
+        # Apply all filters at once if any were specified
+        if not mask.all():
+            raw = df[mask].copy()
+        else:
+            raw = df.copy()
         if allowed_agencies and "AgencyName" in raw:
             raw = raw[raw["AgencyName"].isin(allowed_agencies)]
         if entry_project_types and "ProjectTypeCode" in raw:
@@ -373,15 +395,15 @@ def return_breakdown_analysis(
         )
 
         row_data["Total Entries"] = total
-        row_data["New (%)"] = (
-            f"{new_count} ({(new_count / total * 100 if total else 0):.1f}%)"
-        )
-        row_data["Returning (%)"] = (
-            f"{ret} ({(ret / total * 100 if total else 0):.1f}%)"
-        )
-        row_data["Returning From Housing (%)"] = (
-            f"{ret_housing} ({(ret_housing / total * 100 if total else 0):.1f}%)"
-        )
+        row_data[
+            "New (%)"
+        ] = f"{new_count} ({(new_count / total * 100 if total else 0):.1f}%)"
+        row_data[
+            "Returning (%)"
+        ] = f"{ret} ({(ret / total * 100 if total else 0):.1f}%)"
+        row_data[
+            "Returning From Housing (%)"
+        ] = f"{ret_housing} ({(ret_housing / total * 100 if total else 0):.1f}%)"
         row_data["Median Days"] = f"{median_days:.1f}"
         row_data["Average Days"] = f"{avg_days:.1f}"
         rows.append(row_data)

@@ -29,17 +29,15 @@ def display_return_metrics_cards(metrics: Dict[str, Any]):
     # Use component factory for metric display
     ui.metric_row(
         {
-            "Total Entries": f"{
-                metrics['Total Entries']:,}",
-            "New Clients": f"{
-                metrics['New']:,} ({
-                    metrics['New (%)']:.1f}%)",
-            "Returning Clients": f"{
-                        metrics['Returning']:,} ({
-                            metrics['Returning (%)']:.1f}%)",
-            "Returns From Housing": f"{
-                                metrics['Returning From Housing']:,} ({
-                                    metrics['Returning From Housing (%)']:.1f}%)",
+            "Total Entries": f"{metrics['Total Entries']:,}",
+            "New Clients": (f"{metrics['New']:,} ({metrics['New (%)']:.1f}%)"),
+            "Returning Clients": (
+                f"{metrics['Returning']:,} ({metrics['Returning (%)']:.1f}%)"
+            ),
+            "Returns From Housing": (
+                f"{metrics['Returning From Housing']:,} "
+                f"({metrics['Returning From Housing (%)']:.1f}%)"
+            ),
         },
         columns=4,
     )

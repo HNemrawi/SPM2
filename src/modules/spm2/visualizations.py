@@ -401,15 +401,15 @@ def display_spm_metrics(
     # First row - Main metrics
     main_metrics = {}
     if show_total_exits:
-        main_metrics["Total Exits"] = (
-            f"{metrics['Number of Relevant Exits']:,}"
-        )
-    main_metrics["PH Exits"] = (
-        f"{metrics['PH Exits']:,} ({metrics['% PH Exits']:.1f}%)"
-    )
-    main_metrics["Total Returns"] = (
-        f"{metrics['Total Return']:,} ({metrics['% Return']:.1f}%)"
-    )
+        main_metrics[
+            "Total Exits"
+        ] = f"{metrics['Number of Relevant Exits']:,}"
+    main_metrics[
+        "PH Exits"
+    ] = f"{metrics['PH Exits']:,} ({metrics['% PH Exits']:.1f}%)"
+    main_metrics[
+        "Total Returns"
+    ] = f"{metrics['Total Return']:,} ({metrics['% Return']:.1f}%)"
 
     ui.metric_row(main_metrics, columns=len(main_metrics))
 
@@ -423,9 +423,8 @@ def display_spm_metrics(
     # Add >24 months if applicable
     if metrics["Return > 24 Months"] is not None:
         period_metrics["Return >24M"] = (
-            f"{
-            metrics['Return > 24 Months']:,} ({
-            metrics['% Return > 24M']:.1f}%)"
+            f"{metrics['Return > 24 Months']:,} "
+            f"({metrics['% Return > 24M']:.1f}%)"
         )
     else:
         period_metrics["Return >24M"] = "N/A"

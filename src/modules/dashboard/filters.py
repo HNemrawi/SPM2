@@ -9,7 +9,12 @@ import streamlit as st
 from pandas import DataFrame
 
 from src.core.data.destinations import apply_custom_ph_destinations
-from src.core.session.manager import StateManager
+from src.core.session import (
+    ModuleType,
+    SessionKeys,
+    get_dashboard_state,
+    get_session_manager,
+)
 from src.core.utils.helpers import (
     check_date_range_validity,
     create_multiselect_filter,
@@ -20,7 +25,8 @@ from src.ui.factories.html import html_factory
 # ==================== CONSTANTS ====================
 
 # Module identifier for state management
-DASHBOARD_MODULE = StateManager.DASHBOARD_PREFIX
+DASHBOARD_MODULE = ModuleType.DASHBOARD
+dashboard_state = get_dashboard_state()
 
 # Default date ranges
 DEFAULT_CURRENT_START = date(2024, 10, 1)
@@ -101,16 +107,16 @@ def init_section_state(
     # Special handling for filter form state - restore PH destinations
     if key == "filter_form" and "selected_ph_destinations" in section_state:
         if "selected_ph_destinations" not in st.session_state:
-            st.session_state["selected_ph_destinations"] = section_state[
-                "selected_ph_destinations"
-            ]
+            st.session_state[
+                SessionKeys.SELECTED_PH_DESTINATIONS
+            ] = section_state["selected_ph_destinations"]
 
     return section_state
 
 
 def get_filter_timestamp() -> str:
     """Get the current filter change timestamp from session state."""
-    return st.session_state.get("last_filter_change", "")
+    return st.session_state.get(SessionKeys.LAST_FILTER_CHANGE, "")
 
 
 def is_cache_valid(
@@ -338,16 +344,8 @@ def render_ph_destination_selector(df: DataFrame) -> None:
 
     # Initialize session state ONLY if it doesn't exist
     if "selected_ph_destinations" not in st.session_state:
-        st.session_state["selected_ph_destinations"] = set(
+        st.session_state[SessionKeys.SELECTED_PH_DESTINATIONS] = set(
             original_ph_destinations
-        )
-
-    # IMPORTANT: Check if we have a pending update from form submission
-    # This ensures the multiselect reflects the most recent selection
-    if "ph_destination_selector" in st.session_state:
-        # Update the stored selections with the multiselect value
-        st.session_state["selected_ph_destinations"] = set(
-            st.session_state["ph_destination_selector"]
         )
 
     # Get current selections for default, ensuring they exist in options
@@ -359,6 +357,7 @@ def render_ph_destination_selector(df: DataFrame) -> None:
     ]
 
     # Destination selector WITHOUT callback (forms don't allow callbacks)
+    # The widget's value becomes the source of truth after user interaction
     selected = st.multiselect(
         "Select destinations to count as Permanent Housing:",
         options=all_destinations,
@@ -366,6 +365,9 @@ def render_ph_destination_selector(df: DataFrame) -> None:
         key="ph_destination_selector",
         help="Choose which exit destinations should be considered permanent housing",
     )
+
+    # Update stored value from widget (after user interaction or on first render)
+    st.session_state[SessionKeys.SELECTED_PH_DESTINATIONS] = set(selected)
 
     # Show count and status
     num_selected = len(selected)
@@ -377,13 +379,15 @@ def render_ph_destination_selector(df: DataFrame) -> None:
         original_ph_destinations
     ):
         st.info(
-            f"✅ Using default PH destinations ({
-            num_selected} of {total_destinations} total)"
+            f"✅ Using default PH destinations "
+            f"({num_selected} of {total_destinations} total)"
         )
     else:
         st.info(
-            f"🎯 Custom PH destinations active ({num_selected} of {total_destinations} total)\n\n"
-            f"💡 To reset: Clear all selections and re-select the original {num_original} destinations"
+            f"🎯 Custom PH destinations active "
+            f"({num_selected} of {total_destinations} total)\n\n"
+            f"💡 To reset: Clear all selections and re-select the "
+            f"original {num_original} destinations"
         )
 
 
@@ -414,7 +418,7 @@ def render_ph_destination_selector_immediate(df: DataFrame) -> None:
 
     # Initialize session state ONLY if it doesn't exist
     if "selected_ph_destinations" not in st.session_state:
-        st.session_state["selected_ph_destinations"] = set(
+        st.session_state[SessionKeys.SELECTED_PH_DESTINATIONS] = set(
             original_ph_destinations
         )
 
@@ -433,7 +437,7 @@ def render_ph_destination_selector_immediate(df: DataFrame) -> None:
         default=valid_selections,
         key="ph_destination_selector_widget",
         help="Choose which exit destinations should be considered permanent housing",
-        on_change=lambda: _apply_filters_immediate(df),
+        on_change=lambda: _update_filter_state("ph_destinations"),
     )
 
     # Show count and status
@@ -446,8 +450,7 @@ def render_ph_destination_selector_immediate(df: DataFrame) -> None:
         original_ph_destinations
     ):
         st.info(
-            f"✅ Using default PH destinations ({
-            num_selected} of {total_destinations} total)"
+            f"✅ Using default PH destinations ({num_selected} of {total_destinations} total)"
         )
     else:
         st.info(
@@ -600,25 +603,107 @@ def _validate_filter_selections(
 # ==================== MAIN FILTER FORM ====================
 
 
-def _set_dashboard_dirty_flag() -> None:
-    """Set dirty flag to indicate dashboard filters have changed."""
-    st.session_state.dashboard_dirty = True
-    st.session_state["last_filter_change"] = datetime.now().isoformat()
+def _get_current_module_prefix() -> str:
+    """Get the module prefix for the currently selected module."""
+    current_module = st.session_state.get(
+        "selected_module", "General Analysis"
+    )
 
-    # Save date range to persistent state if available
-    if "date_range_widget" in st.session_state:
-        date_range = st.session_state["date_range_widget"]
-        if isinstance(date_range, (tuple, list)) and len(date_range) == 2:
-            StateManager.save_widget_state(
-                DASHBOARD_MODULE, "date_range", date_range
-            )
+    # Map module names to module prefixes
+    module_mapping = {
+        "General Dashboard": "dashboard",
+        "System Performance Measure 2": "spm2",
+        "Inbound Recidivism": "inbound",
+        "Outbound Recidivism": "outbound",
+    }
+
+    return module_mapping.get(current_module, "dashboard")
+
+
+def _update_filter_state(filter_type: str = "general") -> None:
+    """Streamlined single filter update function using enhanced session system."""
+    try:
+        # Use single filters dictionary for all filter state
+        if "filters" not in st.session_state:
+            st.session_state[SessionKeys.FILTERS] = {}
+
+        filters = st.session_state[SessionKeys.FILTERS]
+
+        # Update based on filter type
+        if filter_type == "ph_destinations":
+            if "ph_destination_selector_widget" in st.session_state:
+                ph_dest = set(
+                    st.session_state["ph_destination_selector_widget"]
+                )
+                filters["selected_ph_destinations"] = ph_dest
+                # Also update the main session state key for consistency
+                st.session_state[
+                    SessionKeys.SELECTED_PH_DESTINATIONS
+                ] = ph_dest
+        else:
+            # Update general filters
+            for category_name, category_filters in FILTER_CATEGORIES.items():
+                for label, col in category_filters.items():
+                    widget_key = f"filter_{col}_widget"
+                    if widget_key in st.session_state:
+                        pick = st.session_state[widget_key]
+                        filters[col] = [] if "ALL" in pick else pick
+
+        # Set timestamp using enhanced session system
+        st.session_state[
+            SessionKeys.LAST_FILTER_CHANGE
+        ] = datetime.now().isoformat()
+
+        # Generate a hash of current filter state to compare with last known state
+        import json
+
+        filter_hash = hashlib.md5(
+            json.dumps(filters, sort_keys=True, default=str).encode()
+        ).hexdigest()
+
+        # Only set dirty flag if filters actually changed
+        current_module_prefix = _get_current_module_prefix()
+        if current_module_prefix == DASHBOARD_MODULE:
+            dashboard_state.check_and_mark_dirty("filter_state", filter_hash)
+        else:
+            # For other modules, get their state and check with value-aware dirty checking
+            session_manager = get_session_manager()
+            if current_module_prefix == "spm2":
+                spm2_state = session_manager.get_module_state(ModuleType.SPM2)
+                if spm2_state:
+                    spm2_state.check_and_mark_dirty(
+                        "filter_state", filter_hash
+                    )
+            elif current_module_prefix == "inbound":
+                inbound_state = session_manager.get_module_state(
+                    ModuleType.INBOUND
+                )
+                if inbound_state:
+                    inbound_state.check_and_mark_dirty(
+                        "filter_state", filter_hash
+                    )
+            elif current_module_prefix == "outbound":
+                outbound_state = session_manager.get_module_state(
+                    ModuleType.OUTBOUND
+                )
+                if outbound_state:
+                    outbound_state.check_and_mark_dirty(
+                        "filter_state", filter_hash
+                    )
+
+    except Exception as err:
+        st.error(f"Failed to update filter state: {err}")
+
+
+# Deprecated function removed - was causing false "Parameters Changed" warnings
+# Dirty checking is now handled only when Apply button is clicked
 
 
 def _apply_filters_immediate(df: DataFrame) -> None:
-    """Apply filters immediately when changed (single-click pattern)."""
+    """Apply filters immediately when changed (optimized single-click pattern)."""
     try:
-        # Get current state
-        state = init_section_state(FILTER_FORM_KEY)
+        # Batch all filter updates together
+        filter_updates = {}
 
         # Get filter selections from session state widgets
         selections = {}
@@ -632,24 +717,31 @@ def _apply_filters_immediate(df: DataFrame) -> None:
                     pick = st.session_state[widget_key]
                     selections[col] = [] if "ALL" in pick else pick
 
-        # Update session state with new filters
-        st.session_state["filters"] = selections
-
         # Handle PH destination selections
+        selected_ph_destinations = None
         if "ph_destination_selector_widget" in st.session_state:
             selected_ph_destinations = set(
                 st.session_state["ph_destination_selector_widget"]
             )
-            st.session_state["selected_ph_destinations"] = (
-                selected_ph_destinations
-            )
-            state["selected_ph_destinations"] = selected_ph_destinations
 
-        # Persist selections in state
-        for col, values in selections.items():
-            state[f"filter_{col}"] = values if values else ["ALL"]
+        # Batch update session state to avoid multiple triggers
+        filter_updates.update(
+            {
+                "filters": selections,
+                "last_filter_change": datetime.now().isoformat(),
+            }
+        )
 
-        _set_dashboard_dirty_flag()
+        if selected_ph_destinations is not None:
+            filter_updates[
+                "selected_ph_destinations"
+            ] = selected_ph_destinations
+
+        # Apply all updates at once to minimize session state changes
+        st.session_state.update(filter_updates)
+
+        # Use enhanced session system for consistent dirty flag handling with debouncing
+        dashboard_state.mark_dirty(debounce=True)
 
     except Exception as err:
         st.error(f"Failed to apply filters: {err}")
@@ -672,10 +764,8 @@ def render_filter_form(df: DataFrame) -> bool:
     # Retrieve or initialize per-section state
     state = init_section_state(FILTER_FORM_KEY)
 
-    # Load saved date ranges from StateManager, fallback to section state
-    saved_dates = StateManager.get_widget_state(
-        DASHBOARD_MODULE, "date_range", None
-    )
+    # Load saved date ranges from enhanced session system, fallback to section state
+    saved_dates = dashboard_state.get_widget_state("date_range", None)
     if saved_dates:
         win_start_default = saved_dates[0]
         win_end_default = saved_dates[1]
@@ -701,7 +791,6 @@ def render_filter_form(df: DataFrame) -> bool:
             value=state.get("custom_prev", False),
             key=CUSTOM_PREV_CHECKBOX_KEY,
             help="Enable custom comparison window instead of auto-generated",
-            on_change=_set_dashboard_dirty_flag,
         )
 
     # Store checkbox state immediately
@@ -724,7 +813,6 @@ def render_filter_form(df: DataFrame) -> bool:
         value=(win_start_default, win_end_default),
         help="Primary analysis reporting period (inclusive)",
         key="date_range_widget",
-        on_change=_set_dashboard_dirty_flag,
     )
 
     # Handle incomplete date selection
@@ -799,7 +887,6 @@ def render_filter_form(df: DataFrame) -> bool:
             value=(prev_start_default, prev_end_default),
             help="Comparison period for change metrics",
             key="prev_date_range_widget",
-            on_change=_set_dashboard_dirty_flag,
         )
 
         # Handle incomplete date selection for previous period
@@ -858,7 +945,6 @@ def render_filter_form(df: DataFrame) -> bool:
         step=30,
         key="return_window_widget",
         help="Number of days after PH exit to track returns to homelessness",
-        on_change=_set_dashboard_dirty_flag,
     )
 
     # Store return window in state
@@ -867,9 +953,7 @@ def render_filter_form(df: DataFrame) -> bool:
     st.sidebar.markdown("---")
 
     # ===== Filters Section =====
-    st.sidebar.html(
-        html_factory.title(text="Data Filters", level=3, icon="🔍")
-    )
+    st.sidebar.html(html_factory.title(text="Data Filters", level=3, icon="🔍"))
 
     # Organize filters by category with immediate callbacks
     for category_name, category_filters in FILTER_CATEGORIES.items():
@@ -889,7 +973,7 @@ def render_filter_form(df: DataFrame) -> bool:
                     default=default_sel,
                     help_text=f"Filter by {label}. Select 'ALL' for no filter.",
                     key=widget_key,
-                    on_change=lambda df=df: _apply_filters_immediate(df),
+                    on_change=lambda: _update_filter_state("general"),
                     module=DASHBOARD_MODULE,
                 )
 
@@ -918,29 +1002,71 @@ def render_filter_form(df: DataFrame) -> bool:
             state.pop("custom_prev_end", None)
 
         # Update session state with date changes
-        st.session_state["t0"] = pd.Timestamp(win_start)
-        st.session_state["t1"] = pd.Timestamp(win_end)
-        st.session_state["prev_start"] = pd.Timestamp(prev_start)
-        st.session_state["prev_end"] = pd.Timestamp(prev_end)
-        st.session_state["last_filter_change"] = datetime.now().isoformat()
+        st.session_state[SessionKeys.DATE_START] = pd.Timestamp(win_start)
+        st.session_state[SessionKeys.DATE_END] = pd.Timestamp(win_end)
+        st.session_state[SessionKeys.PREV_START] = pd.Timestamp(prev_start)
+        st.session_state[SessionKeys.PREV_END] = pd.Timestamp(prev_end)
+        st.session_state[
+            SessionKeys.LAST_FILTER_CHANGE
+        ] = datetime.now().isoformat()
 
     # Show analysis button for explicit triggering (consistent with other
     # modules)
     if st.sidebar.button(
         "▶️ Run Dashboard Analysis",
         type="primary",
-        width='stretch',
+        width="stretch",
         help="Run analysis with current filters and date ranges",
     ):
-        st.session_state.dashboard_analysis_requested = True
+        dashboard_state.request_analysis()
         st.sidebar.success("✅ Analysis ready to run!")
         return True
 
     # Check if dirty flag indicates filters changed
-    return st.session_state.get("dashboard_dirty", False)
+    return st.session_state.get(SessionKeys.DASHBOARD_DIRTY, False)
 
 
 # ==================== FILTER APPLICATION ====================
+
+
+@st.cache_data(show_spinner=False)
+def _apply_filters_cached(df: DataFrame, filter_tuple: tuple) -> DataFrame:
+    """
+    Cached filter application for performance.
+    OPTIMIZED: Uses combined mask to avoid repeated DataFrame copies.
+
+    Parameters:
+        df: The dataframe to filter
+        filter_tuple: Tuple of (column, values) tuples for filtering
+
+    Returns:
+        The filtered dataframe
+    """
+    if not filter_tuple:
+        return df
+
+    # OPTIMIZED: Build a combined mask instead of copying df repeatedly
+    import pandas as pd
+
+    combined_mask = pd.Series(True, index=df.index)
+
+    # Apply each filter to the mask
+    for col, vals in filter_tuple:
+        if vals and col in df.columns:
+            # Convert to list if single value
+            val_list = (
+                [vals] if not isinstance(vals, (list, tuple)) else list(vals)
+            )
+
+            # Use pre-converted string column if available for performance
+            str_col = col + "_str"
+            if str_col in df.columns:
+                combined_mask &= df[str_col].isin(val_list)
+            else:
+                # Fallback to on-the-fly conversion
+                combined_mask &= df[col].astype(str).isin(val_list)
+
+    return df[combined_mask]
 
 
 def apply_filters(df: DataFrame) -> DataFrame:
@@ -956,18 +1082,24 @@ def apply_filters(df: DataFrame) -> DataFrame:
     # First apply custom PH destinations if configured
     df = apply_custom_ph_destinations(df, force=True)
 
-    selections = st.session_state.get("filters", {})
+    # Get current filter selections from session
+    selections = st.session_state.get(SessionKeys.FILTERS, {})
+
     if not selections:
         return df
 
-    df_filt = df.copy()
+    # Convert selections dict to hashable tuple for caching
+    filter_tuple = tuple(
+        sorted(
+            (k, tuple(v) if isinstance(v, (list, set)) else v)
+            for k, v in selections.items()
+        )
+    )
 
-    # Apply each filter
-    for col, vals in selections.items():
-        if vals and col in df_filt.columns:
-            df_filt = df_filt[df_filt[col].astype(str).isin(vals)]
+    # Use cached version for actual filtering
+    df_filt = _apply_filters_cached(df, filter_tuple)
 
-    # Log filtering results
+    # Log filtering results (outside cache for UI feedback)
     original_rows = len(df)
     filtered_rows = len(df_filt)
     reduction_pct = (
@@ -1011,10 +1143,19 @@ def show_date_range_warning(df: DataFrame) -> None:
 
         # Check each boundary
         boundaries = [
-            (st.session_state.get("t0"), "Current window start"),
-            (st.session_state.get("t1"), "Current window end"),
-            (st.session_state.get("prev_start"), "Previous window start"),
-            (st.session_state.get("prev_end"), "Previous window end"),
+            (
+                st.session_state.get(SessionKeys.DATE_START),
+                "Current window start",
+            ),
+            (st.session_state.get(SessionKeys.DATE_END), "Current window end"),
+            (
+                st.session_state.get(SessionKeys.PREV_START),
+                "Previous window start",
+            ),
+            (
+                st.session_state.get(SessionKeys.PREV_END),
+                "Previous window end",
+            ),
         ]
 
         for boundary, label in boundaries:
@@ -1140,12 +1281,12 @@ def get_active_filters() -> Dict[str, Any]:
     return {
         "date_range": {
             "current": (
-                st.session_state.get("t0"),
-                st.session_state.get("t1"),
+                st.session_state.get(SessionKeys.DATE_START),
+                st.session_state.get(SessionKeys.DATE_END),
             ),
             "previous": (
-                st.session_state.get("prev_start"),
-                st.session_state.get("prev_end"),
+                st.session_state.get(SessionKeys.PREV_START),
+                st.session_state.get(SessionKeys.PREV_END),
             ),
         },
         "filters": active_filters,
@@ -1163,10 +1304,12 @@ def reset_filters() -> None:
 
     # Clear session state filters
     if "filters" in st.session_state:
-        del st.session_state["filters"]
+        del st.session_state[SessionKeys.FILTERS]
 
     # Update timestamp
-    st.session_state["last_filter_change"] = datetime.now().isoformat()
+    st.session_state[
+        SessionKeys.LAST_FILTER_CHANGE
+    ] = datetime.now().isoformat()
 
 
 # ==================== EXPORT PUBLIC API ====================

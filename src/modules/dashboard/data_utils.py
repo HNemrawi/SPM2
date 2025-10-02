@@ -1,12 +1,5 @@
 """
 Data processing utilities for HMIS dashboard.
-
-This module provides core data processing functions for the HMIS dashboard including:
-- Client and household metrics calculation
-- Demographic analysis utilities
-- Time series data processing
-- Return to homelessness tracking
-- Data validation and caching
 """
 
 from typing import Any, Callable, Dict, List, Set, Tuple, Union
@@ -202,6 +195,75 @@ class ClientMetrics:
 
     @staticmethod
     @st.cache_data(show_spinner=False)
+    def batch_calculate_metrics(
+        df: DataFrame, start_date: Timestamp, end_date: Timestamp
+    ) -> Dict[str, Union[Set[int], int]]:
+        """
+        Calculate multiple client metrics in a single pass for efficiency.
+
+        Args:
+            df: DataFrame of client enrollments
+            start_date: Start of period
+            end_date: End of period
+
+        Returns:
+            Dictionary containing:
+            - served_clients: Set[int]
+            - households_served: int
+            - inflow: Set[int]
+            - outflow: Set[int]
+            - active_before_ids: Set[int] (helper for inflow)
+            - still_active_ids: Set[int] (helper for outflow)
+        """
+        validate_columns(df, REQUIRED_BASE_COLS)
+
+        # Pre-compute masks once
+        active_mask = (
+            (df["ProjectExit"] >= start_date) | df["ProjectExit"].isna()
+        ) & (df["ProjectStart"] <= end_date)
+
+        # Served clients
+        served = set(df.loc[active_mask, "ClientID"].unique())
+
+        # Households served (if column exists)
+        households = 0
+        if "IsHeadOfHousehold" in df.columns:
+            hoh_mask = active_mask & (
+                df["IsHeadOfHousehold"].astype(str).str.strip().str.lower()
+                == "yes"
+            )
+            households = df.loc[hoh_mask, "ClientID"].nunique()
+
+        # Inflow calculation
+        entries_mask = df["ProjectStart"].between(start_date, end_date)
+        entry_ids = set(df.loc[entries_mask, "ClientID"])
+        day_before = start_date - pd.Timedelta(days=1)
+        active_before_mask = (
+            (df["ProjectExit"] >= day_before) | df["ProjectExit"].isna()
+        ) & (df["ProjectStart"] <= day_before)
+        active_before_ids = set(df.loc[active_before_mask, "ClientID"])
+        inflow_ids = entry_ids - active_before_ids
+
+        # Outflow calculation
+        exits_mask = df["ProjectExit"].between(start_date, end_date)
+        exit_ids = set(df.loc[exits_mask, "ClientID"])
+        active_on_end_mask = (
+            (df["ProjectExit"] > end_date) | df["ProjectExit"].isna()
+        ) & (df["ProjectStart"] <= end_date)
+        still_active_ids = set(df.loc[active_on_end_mask, "ClientID"])
+        outflow_ids = exit_ids - still_active_ids
+
+        return {
+            "served_clients": served,
+            "households_served": households,
+            "inflow": inflow_ids,
+            "outflow": outflow_ids,
+            "active_before_ids": active_before_ids,
+            "still_active_ids": still_active_ids,
+        }
+
+    @staticmethod
+    @st.cache_data(show_spinner=False)
     def served_clients(
         df: DataFrame, start_date: Timestamp, end_date: Timestamp
     ) -> Set[int]:
@@ -337,6 +399,51 @@ class PHMetrics:
 
     @staticmethod
     @st.cache_data(show_spinner=False)
+    def batch_calculate_ph_metrics(
+        df: DataFrame, start_date: Timestamp, end_date: Timestamp
+    ) -> Dict[str, Union[Set[int], float, int]]:
+        """
+        Calculate PH exit metrics in a single pass for efficiency.
+
+        Args:
+            df: DataFrame of client enrollments
+            start_date: Start of period
+            end_date: End of period
+
+        Returns:
+            Dictionary containing:
+            - exit_clients: Set[int]
+            - exit_count: int
+            - total_exits: int
+            - exit_rate: float
+        """
+        validate_columns(df, ["ClientID", "ProjectExit", "ExitDestinationCat"])
+
+        # All exits during the period (single mask)
+        all_exits_mask = df["ProjectExit"].between(start_date, end_date)
+        total_exits = df.loc[all_exits_mask, "ClientID"].nunique()
+
+        # PH exits during the period
+        ph_exits_mask = (
+            df["ExitDestinationCat"] == "Permanent Housing Situations"
+        ) & all_exits_mask
+        ph_exit_clients = set(
+            df.loc[ph_exits_mask, "ClientID"].dropna().unique()
+        )
+        ph_exit_count = len(ph_exit_clients)
+
+        # Calculate rate
+        exit_rate = safe_divide(ph_exit_count, total_exits, multiplier=100)
+
+        return {
+            "exit_clients": ph_exit_clients,
+            "exit_count": ph_exit_count,
+            "total_exits": total_exits,
+            "exit_rate": exit_rate,
+        }
+
+    @staticmethod
+    @st.cache_data(show_spinner=False)
     def exit_clients(
         df: DataFrame, start_date: Timestamp, end_date: Timestamp
     ) -> Set[int]:
@@ -453,6 +560,7 @@ class ReturnToHomelessness:
         """
         Identify clients who exited to PH and returned to homelessness
         within the specified window using HUD-compliant logic.
+        Vectorized for performance.
 
         Args:
             df_filtered: Filtered dataset for PH exits in reporting period
@@ -490,30 +598,81 @@ class ReturnToHomelessness:
         if ph_exits.empty:
             return set()
 
-        # Check each client for returns
-        exited_clients = set(ph_exits["ClientID"])
-        returners = set()
+        # Vectorized approach: merge exits with all enrollments
+        ph_exits_sorted = ph_exits.sort_values(
+            ["ClientID", "ProjectExit"]
+        ).reset_index(drop=True)
 
-        for client_id in exited_clients:
-            client_enrollments = full_df[
-                full_df["ClientID"] == client_id
-            ].copy()
-            client_exits = ph_exits[
-                ph_exits["ClientID"] == client_id
-            ].sort_values("ProjectExit")
+        # Create window end for vectorized comparison
+        ph_exits_sorted["WindowEnd"] = ph_exits_sorted[
+            "ProjectExit"
+        ] + pd.Timedelta(days=return_window_days)
 
-            # Check each qualifying exit
-            for _, exit_row in client_exits.iterrows():
-                if ReturnToHomelessness._check_return(
-                    client_enrollments,
-                    exit_row["ProjectExit"],
-                    exit_row.get("EnrollmentID", -1),
-                    return_window_days,
-                ):
-                    returners.add(client_id)
-                    break
+        # Filter full_df to homeless projects only
+        homeless_enrollments = full_df[
+            ~full_df["ProjectTypeCode"].isin(NON_HOMELESS_PROJECTS)
+        ].copy()
 
-        return returners
+        # Merge on ClientID to get all potential returns
+        merged = pd.merge(
+            ph_exits_sorted[
+                ["ClientID", "ProjectExit", "WindowEnd", "EnrollmentID"]
+            ],
+            homeless_enrollments[
+                [
+                    "ClientID",
+                    "ProjectStart",
+                    "ProjectTypeCode",
+                    "HouseholdMoveInDate",
+                    "EnrollmentID",
+                    "ProjectExit",
+                ]
+            ],
+            on="ClientID",
+            suffixes=("_exit", "_return"),
+        )
+
+        if merged.empty:
+            return set()
+
+        # Vectorized filtering for potential returns
+        potential_returns = merged[
+            # ProjectStart after exit
+            (merged["ProjectStart"] > merged["ProjectExit_exit"])
+            # Within window
+            & (merged["ProjectStart"] <= merged["WindowEnd"])
+            # Different enrollment
+            & (merged["EnrollmentID_exit"] != merged["EnrollmentID_return"])
+        ].copy()
+
+        if potential_returns.empty:
+            return set()
+
+        # Check PH-specific rules vectorized
+        is_ph = potential_returns["ProjectTypeCode"].isin(PH_PROJECTS)
+        gap_days = (
+            potential_returns["ProjectStart"]
+            - potential_returns["ProjectExit_exit"]
+        ).dt.days
+
+        # Immediate housing check (move-in = start)
+        immediate_housing = (
+            potential_returns["HouseholdMoveInDate"].notna()
+        ) & (
+            potential_returns["ProjectStart"]
+            == potential_returns["HouseholdMoveInDate"]
+        )
+
+        # Short stay check (gap <= 14 days for PH)
+        short_stay = gap_days <= 14
+
+        # Valid returns: Non-PH OR (PH without immediate housing and not
+        # short stay)
+        valid_returns = (~is_ph) | (is_ph & ~immediate_housing & ~short_stay)
+
+        returners_df = potential_returns[valid_returns]
+
+        return set(returners_df["ClientID"].unique())
 
     @staticmethod
     def _check_return(
@@ -736,7 +895,9 @@ class TimeSeriesAnalysis:
         results = []
 
         # Calculate for each group
-        for group_value, group_df in df.groupby(group_column, dropna=True):
+        for group_value, group_df in df.groupby(
+            group_column, dropna=True, observed=False
+        ):
             for period in periods:
                 period_start = period.start_time
                 period_end = period.end_time

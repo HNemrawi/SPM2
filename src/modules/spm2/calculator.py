@@ -39,11 +39,15 @@ def _find_earliest_return(
     if client_df.empty or "ProjectStart" not in client_df.columns:
         return None
 
-    client_df = (
-        client_df.dropna(subset=["ProjectStart"])
-        .copy()
-        .sort_values(["ProjectStart", "EnrollmentID"])
+    # OPTIMIZED: Pre-filter and sort data
+    client_df = client_df.dropna(subset=["ProjectStart"]).sort_values(
+        ["ProjectStart", "EnrollmentID"]
     )
+
+    # Pre-filter to reduce iteration: exclude the exit enrollment upfront
+    if exit_enrollment_id is not None and "EnrollmentID" in client_df.columns:
+        client_df = client_df[client_df["EnrollmentID"] != exit_enrollment_id]
+
     exclusion_windows = []
 
     def add_or_extend_window(
@@ -65,11 +69,7 @@ def _find_earliest_return(
         return updated_windows
 
     for row in client_df.itertuples(index=False):
-        if (
-            getattr(row, "EnrollmentID", None) is not None
-            and row.EnrollmentID == exit_enrollment_id
-        ):
-            continue
+        # OPTIMIZED: exit_enrollment_id check moved to pre-filter above
         if row.ProjectStart < earliest_exit:
             if row.ProjectTypeCode in PH_PROJECTS:
                 if (
@@ -232,7 +232,7 @@ def _identify_exit_enrollments(
     allowed_exit_dest_cats: Optional[List[str]],
     allowed_exit_destinations: Optional[List[str]],
 ) -> pd.DataFrame:
-    """Identify valid exit enrollments within the analysis window.
+    """Identify valid exit enrollments within the analysis window - optimized.
 
     Returns:
         DataFrame of valid exit enrollments
@@ -245,13 +245,14 @@ def _identify_exit_enrollments(
         exit_min = report_start - pd.DateOffset(months=lookback_value)
         exit_max = report_end - pd.DateOffset(months=lookback_value)
 
-    # Filter for valid exits
-    df_exits = df_exit_base.dropna(subset=["ProjectExit"]).copy()
-    df_exits = df_exits[df_exits["ProjectTypeCode"].isin(exiting_projects)]
-    df_exits = df_exits[
-        (df_exits["ProjectExit"] >= exit_min)
-        & (df_exits["ProjectExit"] <= exit_max)
-    ]
+    # Vectorized filtering - combine all conditions at once
+    mask = (
+        df_exit_base["ProjectExit"].notna()
+        & df_exit_base["ProjectTypeCode"].isin(exiting_projects)
+        & (df_exit_base["ProjectExit"] >= exit_min)
+        & (df_exit_base["ProjectExit"] <= exit_max)
+    )
+    df_exits = df_exit_base[mask].copy()
 
     # Apply exit destination filters
     if allowed_exit_dest_cats and "ExitDestinationCat" in df_exits.columns:
@@ -288,22 +289,36 @@ def _process_client_exits_and_returns(
     Returns:
         List of dictionaries containing exit and return information
     """
-    # Prepare return data for scanning
+    # Prepare return data for scanning - optimized
     df_for_scan = df_return_base[df_return_base.columns.tolist()].copy()
     df_for_scan = df_for_scan[
         df_for_scan["ProjectTypeCode"].isin(return_projects)
     ]
-    grouped_returns = df_for_scan.groupby("ClientID")
+
+    # Pre-sort for better performance
+    df_exits = df_exits.sort_values(
+        ["ClientID", "ProjectExit", "EnrollmentID"]
+    )
+    df_for_scan = df_for_scan.sort_values(
+        ["ClientID", "ProjectStart", "EnrollmentID"]
+    )
+
+    # Group operations - using sort=False for performance
+    grouped_returns = df_for_scan.groupby("ClientID", sort=False)
+    grouped_exits = df_exits.groupby("ClientID", sort=False)
 
     exit_rows = []
-    for cid, group_ex in df_exits.groupby("ClientID"):
-        group_ex = group_ex.sort_values(["ProjectExit", "EnrollmentID"])
+
+    # Process each client's exits
+    for cid, group_ex in grouped_exits:
+        # Get returns for this client if they exist
         group_ret = (
             grouped_returns.get_group(cid)
             if cid in grouped_returns.groups
             else pd.DataFrame()
         )
 
+        # Process each exit for this client
         for row in group_ex.itertuples(index=False):
             row_dict = _process_single_exit(
                 row,
@@ -398,10 +413,11 @@ def _add_derived_fields(final_df: pd.DataFrame) -> pd.DataFrame:
     Returns:
         DataFrame with derived fields added
     """
-    # Add PH Exit flag
+    # Add PH Exit flag - OPTIMIZED
     if "Exit_ExitDestinationCat" in final_df.columns:
-        final_df["PH_Exit"] = final_df["Exit_ExitDestinationCat"].apply(
-            lambda x: x == "Permanent Housing Situations"
+        final_df["PH_Exit"] = (
+            final_df["Exit_ExitDestinationCat"]
+            == "Permanent Housing Situations"
         )
     else:
         final_df["PH_Exit"] = False
@@ -416,24 +432,25 @@ def _add_derived_fields(final_df: pd.DataFrame) -> pd.DataFrame:
         ).dt.days
         age_years = age_days / 365.25
 
-        def age_range(age):
-            if pd.isna(age):
-                return "Unknown"
-            if age < 18:
-                return "0 to 17"
-            elif age < 25:
-                return "18 to 24"
-            elif age < 35:
-                return "25 to 34"
-            elif age < 45:
-                return "35 to 44"
-            elif age < 55:
-                return "45 to 54"
-            elif age < 65:
-                return "55 to 64"
-            return "65 or Above"
-
-        final_df["AgeAtExitRange"] = age_years.apply(age_range)
+        # OPTIMIZED: Vectorized age range assignment using pd.cut
+        final_df["AgeAtExitRange"] = (
+            pd.cut(
+                age_years,
+                bins=[-float("inf"), 18, 25, 35, 45, 55, 65, float("inf")],
+                labels=[
+                    "0 to 17",
+                    "18 to 24",
+                    "25 to 34",
+                    "35 to 44",
+                    "45 to 54",
+                    "55 to 64",
+                    "65 or Above",
+                ],
+                right=False,
+            )
+            .astype(str)
+            .replace("nan", "Unknown")
+        )
     else:
         final_df["AgeAtExitRange"] = "Unknown"
 

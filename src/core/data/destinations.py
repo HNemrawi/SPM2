@@ -1,17 +1,10 @@
-"""
-Permanent Housing Destinations Customization
-"""
+"""Permanent housing destination customization for General Dashboard."""
 
 import pandas as pd
 import streamlit as st
 
 
 def should_apply_custom_destinations() -> bool:
-    """
-    Check if custom destinations should be applied based on current
-    analysis module.
-    """
-    # Only apply in General Analysis module
     selected_module = st.session_state.get("selected_module", "")
     return "General Comprehensive Dashboard" in selected_module
 
@@ -19,17 +12,6 @@ def should_apply_custom_destinations() -> bool:
 def apply_custom_ph_destinations(
     df: pd.DataFrame, force: bool = False
 ) -> pd.DataFrame:
-    """
-    Apply custom PH destination selections if user has configured them.
-    This modifies ExitDestinationCat based on user selections.
-    This function is idempotent - can be called multiple times safely.
-
-    Parameters:
-        df: DataFrame to process
-        force: If True, apply regardless of module (for explicit
-               General Analysis calls)
-    """
-    # Check if we should apply custom destinations
     if not force and not should_apply_custom_destinations():
         return df
 
@@ -39,25 +21,18 @@ def apply_custom_ph_destinations(
     ):
         return df
 
-    # Check if we need to do anything
     if "selected_ph_destinations" not in st.session_state:
-        # No custom selections, return as-is if no custom flag
         if "_custom_ph_destinations" not in df.columns:
             return df
         elif not df["_custom_ph_destinations"].any():
             return df
 
-    # Only create copy if we need to modify
     df = df.copy()
 
-    # If we have an original category backup, restore it first
     if "ExitDestinationCat_Original" in df.columns:
         df["ExitDestinationCat"] = df["ExitDestinationCat_Original"].copy()
     else:
-        # First time - backup the original categories
         df["ExitDestinationCat_Original"] = df["ExitDestinationCat"].copy()
-
-    # Check if user has custom selections in session state
     if "selected_ph_destinations" in st.session_state:
         selected_destinations = st.session_state.get(
             "selected_ph_destinations", set()
@@ -73,9 +48,9 @@ def apply_custom_ph_destinations(
         if selected_destinations != st.session_state.get(
             "selected_ph_destinations", set()
         ):
-            st.session_state["selected_ph_destinations"] = (
-                selected_destinations
-            )
+            st.session_state[
+                "selected_ph_destinations"
+            ] = selected_destinations
 
         # Get original PH destinations for comparison
         ph_mask = (
@@ -99,9 +74,9 @@ def apply_custom_ph_destinations(
             ) & (~df["ExitDestination"].isin(selected_destinations))
 
             # Update categories
-            df.loc[mask_should_be_ph, "ExitDestinationCat"] = (
-                "Permanent Housing Situations"
-            )
+            df.loc[
+                mask_should_be_ph, "ExitDestinationCat"
+            ] = "Permanent Housing Situations"
             df.loc[mask_was_ph_not_selected, "ExitDestinationCat"] = "Other"
 
             # Add a flag to indicate custom destinations are in use

@@ -8,18 +8,17 @@ import streamlit as st
 from pandas import DataFrame, Timestamp
 
 from src.core.data.destinations import apply_custom_ph_destinations
+from src.core.session import SessionKeys
 
 # Import data utilities
 from src.modules.dashboard.data_utils import (
+    ClientMetrics,
+    PHMetrics,
     calc_delta,
     households_served,
-    inflow,
-    outflow,
     period_comparison,
-    ph_exit_clients,
     ph_exit_rate,
     return_after_exit,
-    served_clients,
 )
 
 # Import filter utilities
@@ -38,15 +37,15 @@ HELP_TEXTS = {
     "Households Served": "Total households (heads of household) active during the period",
     "Clients Served": "Unique clients with an active enrollment during the period",
     "Inflow": {
-        True: "Clients entering filtered programs who weren't in any FILTERED programs the day before",
-        False: "Clients entering the system who weren't in any programs the day before",
+        True: "Clients entering filtered programs during the period who weren't in any FILTERED programs the day before period start",
+        False: "Clients entering programs during the period who weren't in any programs the day before period start",
     },
     "Outflow": {
         True: "Clients exiting filtered programs who aren't in any FILTERED programs at period end",
         False: "Clients leaving the system who aren't in any programs at period end",
     },
     "PH Exits": "Clients exiting to permanent housing destinations",
-    "PH Exit Rate": "Percentage of ALL exits that went to permanent housing",
+    "PH Exit Rate": "Percentage of unique clients who exited that went to permanent housing",
     "Returns to Homelessness": "PH exits who returned to ANY homeless program (tracked system-wide)",
     "Return Rate": "Percentage of PH exits who return to homelessness",
     "Net Flow": "Difference between inflow and outflow (positive = growth)",
@@ -128,11 +127,14 @@ def _get_summary_metrics(
     df_filt = apply_custom_ph_destinations(df_filt, force=True)
     full_df = apply_custom_ph_destinations(full_df, force=True)
 
-    # Current period metrics
-    served_ids = served_clients(df_filt, t0, t1)
-    inflow_ids = inflow(df_filt, t0, t1)
-    outflow_ids = outflow(df_filt, t0, t1)
-    ph_ids = ph_exit_clients(df_filt, t0, t1)
+    # OPTIMIZED: Batch calculate metrics for both periods
+    current_metrics = ClientMetrics.batch_calculate_metrics(df_filt, t0, t1)
+    current_ph = PHMetrics.batch_calculate_ph_metrics(df_filt, t0, t1)
+
+    served_ids = current_metrics["served_clients"]
+    inflow_ids = current_metrics["inflow"]
+    outflow_ids = current_metrics["outflow"]
+    ph_ids = current_ph["exit_clients"]
 
     # Get PH exits for return tracking
     ph_exits_mask = (df_filt["ProjectExit"].between(t0, t1)) & (
@@ -144,11 +146,18 @@ def _get_summary_metrics(
     # Track returns only for PH exits
     return_ids = return_after_exit(ph_exits_df, full_df, t0, t1, return_window)
 
-    # Previous period metrics
-    served_prev = served_clients(df_filt, prev_start, prev_end)
-    inflow_prev = inflow(df_filt, prev_start, prev_end)
-    outflow_prev = outflow(df_filt, prev_start, prev_end)
-    ph_prev = ph_exit_clients(df_filt, prev_start, prev_end)
+    # OPTIMIZED: Batch calculate previous period metrics
+    prev_metrics = ClientMetrics.batch_calculate_metrics(
+        df_filt, prev_start, prev_end
+    )
+    prev_ph = PHMetrics.batch_calculate_ph_metrics(
+        df_filt, prev_start, prev_end
+    )
+
+    served_prev = prev_metrics["served_clients"]
+    inflow_prev = prev_metrics["inflow"]
+    outflow_prev = prev_metrics["outflow"]
+    ph_prev = prev_ph["exit_clients"]
 
     # Get PH exits for previous period
     ph_exits_mask_prev = (
@@ -230,16 +239,15 @@ def _generate_flow_insight_html(
     if net_flow > 0:
         icon = "📈"
         status = "Growing"
-        description = f"More clients entering ({
-            inflow_count:,}) than leaving ({
-            outflow_count:,})"
+        description = (
+            f"More clients entering ({inflow_count:,}) than leaving "
+            f"({outflow_count:,})"
+        )
         insight_type = "info"
     elif net_flow < 0:
         icon = "📉"
         status = "Reducing"
-        description = f"More clients leaving ({
-            outflow_count:,}) than entering ({
-            inflow_count:,})"
+        description = f"More clients leaving ({outflow_count:,}) than entering ({inflow_count:,})"
         insight_type = "warning"
     else:
         icon = "➡️"
@@ -374,17 +382,13 @@ def _render_period_breakdown(period_comp: Dict[str, Any]) -> None:
 
     # Generate insight
     if carryover_pct > 70:
-        insight = f"High carryover rate ({
-            carryover_pct:.0f}%) indicates a stable but potentially stuck population. Consider enhanced interventions for chronic homelessness."
+        insight = f"High carryover rate ({carryover_pct:.0f}%) may indicate a stable but potentially stuck population, though appropriate levels vary by program type. Consider enhanced interventions for chronic homelessness."
         insight_type = "warning"
     elif new_pct > 50:
-        insight = f"High influx of new clients ({
-            new_pct:.0f}%) suggests growing need or improved outreach. Focus on prevention and diversion strategies."
+        insight = f"High influx of new clients ({new_pct:.0f}%) suggests growing need or improved outreach. Focus on prevention and diversion strategies."
         insight_type = "info"
     else:
-        insight = f"Balanced mix of carryover ({
-            carryover_pct:.0f}%) and new clients ({
-            new_pct:.0f}%). System shows healthy flow with room for improvement."
+        insight = f"Balanced mix of carryover ({carryover_pct:.0f}%) and new clients ({new_pct:.0f}%). System shows healthy flow with room for improvement."
         insight_type = "info"
 
     # Display insight
@@ -407,7 +411,7 @@ def render_summary_metrics(
     try:
         # Ensure we have the unfiltered dataset for returns tracking
         if full_df is None:
-            full_df = st.session_state.get("df")
+            full_df = st.session_state.get(SessionKeys.DF)
             if full_df is None:
                 st.error(
                     "Original dataset not found. Please reload your data."
@@ -427,14 +431,14 @@ def render_summary_metrics(
         with col_header:
             st.html(html_factory.title("Summary Metrics", level=2, icon="📊"))
         with col_info:
-            with st.popover("ℹ️ Help", width='stretch'):
+            with st.popover("ℹ️ Help", width="stretch"):
                 st.markdown(
                     """
                 ### Understanding Summary Metrics
 
                 **System Flow Metrics:**
-                - **Inflow**: Clients entering programs who weren't in any programs the day before the reporting period started
-                - **Outflow**: Clients exiting programs who aren't in any programs on the last day of the reporting period
+                - **Inflow**: Clients entering programs during the reporting period who weren't in any programs the day before the period started
+                - **Outflow**: Clients who exited during the period and have no active enrollments remaining on the period end date
                 - **Net Flow**: Inflow minus Outflow (positive = system growth, negative = system reduction)
 
                 **Housing Outcomes:**
@@ -442,6 +446,7 @@ def render_summary_metrics(
                 - **PH Exit Rate**: Percentage of unique clients who exited that went to permanent housing (unique PH exit clients ÷ unique clients with any exit × 100)
                 - **Returns**: Clients who exited to PH and returned to homelessness within the specified tracking window
                 - **Return Rate**: Percentage of PH exits who returned (returns ÷ PH exits × 100)
+                - **Returns Exclusions**: Short PH stays (≤14 days from initial PH exit) with an additional 14-day exclusion window, and PH entries where move-in date equals project start (immediate housing)
 
                 **Housing Outcomes Classification:**
                 - **PH Exit Rate (Housing Placement):**
@@ -499,8 +504,7 @@ def render_summary_metrics(
 
         # Show info about current return window setting
         st.info(
-            f"📅 Tracking returns for {return_window} days ({
-            return_window / 30:.1f} months) after PH exit"
+            f"📅 Tracking returns for {return_window} days ({return_window / 30:.1f} months) after PH exit"
         )
 
         # Compute metrics if needed
@@ -599,9 +603,7 @@ def render_summary_metrics(
         col1, col2 = st.columns(2)
         with col1:
             ui.info_section(
-                f"<strong>{
-                    t0.strftime('%B %d, %Y')}</strong> to <strong>{
-                    t1.strftime('%B %d, %Y')}</strong><br>({current_days} days)",
+                f"<strong>{t0.strftime('%B %d, %Y')}</strong> to <strong>{t1.strftime('%B %d, %Y')}</strong><br>({current_days} days)",
                 type="info",
                 title="Current Period",
                 expanded=True,
@@ -610,9 +612,7 @@ def render_summary_metrics(
 
         with col2:
             ui.info_section(
-                f"<strong>{
-                    prev_start.strftime('%B %d, %Y')}</strong> to <strong>{
-                    prev_end.strftime('%B %d, %Y')}</strong><br>({previous_days} days)",
+                f"<strong>{prev_start.strftime('%B %d, %Y')}</strong> to <strong>{prev_end.strftime('%B %d, %Y')}</strong><br>({previous_days} days)",
                 type="info",
                 title="Previous Period",
                 expanded=True,
@@ -815,9 +815,7 @@ def render_summary_metrics(
 
         # Period-over-Period Changes
         st.html(
-            html_factory.title(
-                "Period-over-Period Changes", level=3, icon="📈"
-            )
+            html_factory.title("Period-over-Period Changes", level=3, icon="📈")
         )
 
         # Find significant changes
