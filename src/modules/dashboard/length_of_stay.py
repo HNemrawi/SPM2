@@ -1137,18 +1137,9 @@ def render_length_of_stay(df_filt: DataFrame) -> None:
             )
         )
 
-        # Add download button for quality issues
+        # Note: Quality issues table below has built-in download capability
         if not quality_issues_df.empty:
-            csv = quality_issues_df.to_csv(index=False)
-            st.download_button(
-                label="📥 Download Data Quality Issues Report",
-                data=csv,
-                file_name=(
-                    f"los_data_quality_issues_{t0.strftime('%Y%m%d')}_{t1.strftime('%Y%m%d')}.csv"
-                ),
-                mime="text/csv",
-                help="Download the list of enrollments with data quality issues for review",
-            )
+            st.caption("💡 You can download the quality issues report using the table's download feature below")
 
     # Create tabs for different views
     tab_overview, tab_demo = ui.los_tabs()

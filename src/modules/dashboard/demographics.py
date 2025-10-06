@@ -1727,43 +1727,5 @@ def render_breakdown_section(
 
         st.dataframe(styled_export, width="stretch", height=500)
 
-        # Download options
-        col1, col2 = st.columns(2)
-
-        with col1:
-            csv = export_df.to_csv(index=False)
-            st.download_button(
-                label="📥 Download as CSV",
-                data=csv,
-                file_name=(
-                    f"breakdown_{dim_col}_{t0.strftime('%Y%m%d')}_{t1.strftime('%Y%m%d')}.csv"
-                ),
-                mime="text/csv",
-                width="stretch",
-            )
-
-        with col2:
-            # Create a simple text download of key insights
-            insights_text = f"""Demographic Breakdown Analysis
-Date Range: {t0.strftime('%Y-%m-%d')} to {t1.strftime('%Y-%m-%d')}
-Dimension: {dim_col}
-Return Window: {return_window} days
-Minimum Group Size: {min_group_size}
-
-Key Metrics:
-- Total Served: {export_df['Served'].sum():,}
-- Total PH Exits: {export_df['PH Exits'].sum():,}
-- Average PH Exit Rate: {export_df['PH Exit Rate'].mean():.1f}%
-- Average Return Rate: {export_df['Returns to Homelessness Rate'].mean():.1f}%
-
-Groups Shown: {len(export_df)} of {len(bdf)} total
-Filtered Out: {len(bdf) - len(export_df)} groups with < {min_group_size} clients
-"""
-
-            st.download_button(
-                label="📝 Download Summary",
-                data=insights_text,
-                file_name=f"breakdown_summary_{dim_col}_{t0.strftime('%Y%m%d')}.txt",
-                mime="text/plain",
-                width="stretch",
-            )
+        # Note about built-in CSV export
+        st.caption("💡 Use the download icon in the table header above to export data as CSV")

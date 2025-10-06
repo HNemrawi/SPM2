@@ -1556,17 +1556,8 @@ def render_equity_analysis(
             hide_index=True,
         )
 
-        # Download button
-        csv = display_df.to_csv(index=False)
-        st.download_button(
-            label="📥 Download Data as CSV",
-            data=csv,
-            file_name=(
-                f"equity_analysis_{equity_label}_{outcome_name}_"
-                f"{t0.strftime('%Y%m%d')}.csv"
-            ),
-            mime="text/csv",
-        )
+        # Note about built-in download
+        st.caption("💡 Use the download icon in the table header above to export data as CSV")
 
         blue_divider()
 
