@@ -29,19 +29,11 @@ from src.modules.dashboard.filters import (
 from src.modules.dashboard.length_of_stay import render_length_of_stay
 from src.modules.dashboard.summary import render_summary_metrics
 from src.modules.dashboard.trends import render_trend_explorer
-from src.ui.factories.components import (
-    Colors,
-    create_insight_container,
-)
+from src.ui.factories.components import Colors
 from src.ui.factories.components import (
     render_about_section as render_about_component,
 )
-from src.ui.factories.components import (
-    render_dataframe_with_style,
-    render_download_button,
-    styled_metric,
-    ui,
-)
+from src.ui.factories.components import render_download_button, ui
 from src.ui.factories.html import html_factory
 from src.ui.layouts.templates import ABOUT_GENERAL_ANALYSIS_CONTENT
 from src.ui.themes.styles import apply_custom_css

@@ -311,7 +311,7 @@ class HTMLFactory:
                 box-shadow: {self.theme.shadows.sm};
             """
             if self.config.include_transitions:
-                highlight_styles += f"""
+                highlight_styles += """
                     transition: all 0.2s ease;
                 """
         else:

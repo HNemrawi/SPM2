@@ -6,7 +6,7 @@ previously duplicated across different analysis modules.
 """
 
 from datetime import datetime
-from typing import Optional, Tuple
+from typing import Any, Optional, Tuple
 
 import pandas as pd
 import streamlit as st

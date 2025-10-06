@@ -967,7 +967,7 @@ def render_filter_form(df: DataFrame) -> bool:
                 widget_key = f"filter_{col}_widget"
 
                 # Create multiselect with persistent state and callback
-                selection = create_multiselect_filter(
+                create_multiselect_filter(
                     label=label,
                     options=options,
                     default=default_sel,
