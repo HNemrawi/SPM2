@@ -495,117 +495,27 @@ def general_analysis_page() -> None:
 
 
 def _render_export_section():
-    """Render the data export section with consistent styling."""
-
+    """Render the data export section - minimal processing."""
     st.html(html_factory.title("Data Export", level=2, icon="📥"))
-
-    # Create insight container for export info
-    st.html(
-        create_insight_container(
-            title="Export Your Analysis",
-            content="Download your filtered dataset.",
-            type="info",
-        )
-    )
 
     # Retrieve the filtered data
     df_filt_cached = st.session_state.get(SessionKeys.DF_FILTERED)
 
     if df_filt_cached is not None and not df_filt_cached.empty:
-        # Stats about the filtered data
-        col1, col2, col3 = st.columns(3)
+        st.info("📊 Download your filtered dataset as CSV")
 
-        with col1:
-            styled_metric(
-                label="Total Rows",
-                value=len(df_filt_cached),
-                help="Number of records in filtered dataset",
-            )
-
-        with col2:
-            styled_metric(
-                label="Total Columns",
-                value=len(df_filt_cached.columns),
-                help="Number of data fields",
-            )
-
-        with col3:
-            # Calculate data size estimate
-            size_mb = (
-                df_filt_cached.memory_usage(deep=True).sum() / 1024 / 1024
-            )
-            styled_metric(
-                label="Estimated Size",
-                value=f"{size_mb:.1f} MB",
-                help="Approximate file size",
-            )
-
-        st.html(html_factory.divider("gradient"))
-
-        # Download options in columns
-        col1, col2, col3 = st.columns([1, 1, 1])
-
-        with col1:
-            render_download_button(
-                df=df_filt_cached,
-                filename="hmis_filtered_data",
-                label="Download as CSV",
-                file_format="csv",
-                key="download_csv",
-            )
-
-        with col2:
-            render_download_button(
-                df=df_filt_cached,
-                filename="hmis_filtered_data",
-                label="Download as Excel",
-                file_format="xlsx",
-                key="download_xlsx",
-            )
-
-        with col3:
-            render_download_button(
-                df=df_filt_cached,
-                filename="hmis_filtered_data",
-                label="Download as JSON",
-                file_format="json",
-                key="download_json",
-            )
-
-        # Data preview section
-        st.html(html_factory.divider("gradient"))
-        st.html(html_factory.title("Data Preview", level=3, icon="👁️"))
-
-        # Use the styled dataframe renderer
-        render_dataframe_with_style(
-            df=df_filt_cached.head(100),
-            caption=f"Showing first 100 rows of {len(df_filt_cached):,} total rows",
-            height=400,
-            show_index=False,
+        render_download_button(
+            df=df_filt_cached,
+            filename="hmis_filtered_data",
+            label="Download CSV",
+            file_format="csv",
+            key="download_csv",
         )
 
-        # Column information expander
-        with st.expander("📋 View Column Information", expanded=False):
-            col_info = pd.DataFrame(
-                {
-                    "Column": df_filt_cached.columns,
-                    "Type": df_filt_cached.dtypes.astype(str),
-                    "Non-Null Count": df_filt_cached.count(),
-                    "Null Count": df_filt_cached.isna().sum(),
-                    "Unique Values": df_filt_cached.nunique(),
-                }
-            )
-
-            render_dataframe_with_style(
-                df=col_info, highlight_cols=["Null Count"], show_index=False
-            )
-
     else:
-        ui.info_section(
-            content="No filtered data available. Please apply filters first to export data.",
-            type="warning",
-            title="No Data to Export",
-            expanded=True,
+        st.warning(
+            "⚠️ No data available. "
+            "Please apply filters and run analysis first."
         )
 
 
