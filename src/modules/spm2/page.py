@@ -106,69 +106,72 @@ def setup_date_config(
         # Get saved lookback configuration
         saved_lookback = spm2_state.get_lookback_period()
 
-        unit_choice = st.radio(
-            "Select Lookback Unit",
-            options=["Days", "Months"],
-            index=0 if saved_lookback["unit"] == "Days" else 1,
-            help="Choose whether to specify the lookback period in days or months.",
-            on_change=lambda: spm2_state.mark_dirty(),
-            key="lookback_unit_radio",
-        )
+        # Group the unit radio + value number_input as one configuration
+        # unit (Phase 2.A4 of UI_LAYOUT_AUDIT.md): the radio's only job is
+        # to switch the unit on the number_input below it.
+        with st.container(gap="small"):
+            unit_choice = st.radio(
+                "Select Lookback Unit",
+                options=["Days", "Months"],
+                index=0 if saved_lookback["unit"] == "Days" else 1,
+                help="Choose whether to specify the lookback period in days or months.",
+                on_change=lambda: spm2_state.mark_dirty(),
+                key="lookback_unit_radio",
+            )
 
-        if unit_choice == "Days":
-            lookback_value = st.number_input(
-                "Lookback Days",
-                min_value=1,
-                value=(
-                    saved_lookback["period"]
-                    if saved_lookback["unit"] == "Days"
-                    else 730
-                ),
-                help="Days prior to report start for exit identification",
-                on_change=lambda: (
-                    spm2_state.set_lookback_period(
-                        st.session_state.get("lookback_days", 730), "Days"
+            if unit_choice == "Days":
+                lookback_value = st.number_input(
+                    "Lookback Days",
+                    min_value=1,
+                    value=(
+                        saved_lookback["period"]
+                        if saved_lookback["unit"] == "Days"
+                        else 730
                     ),
-                    spm2_state.mark_dirty(),
-                ),
-                key="lookback_days",
-            )
-            exit_window_start = report_start - pd.Timedelta(
-                days=lookback_value
-            )
-            exit_window_end = report_end - pd.Timedelta(days=lookback_value)
-        else:
-            lookback_value = st.number_input(
-                "Lookback Months",
-                min_value=1,
-                value=(
-                    saved_lookback["period"]
-                    if saved_lookback["unit"] == "Months"
-                    else 24
-                ),
-                help="Months prior to report start for exit identification",
-                on_change=lambda: (
-                    spm2_state.set_lookback_period(
-                        st.session_state.get("lookback_months", 24), "Months"
+                    help="Days prior to report start for exit identification",
+                    on_change=lambda: (
+                        spm2_state.set_lookback_period(
+                            st.session_state.get("lookback_days", 730), "Days"
+                        ),
+                        spm2_state.mark_dirty(),
                     ),
-                    spm2_state.mark_dirty(),
-                ),
-                key="lookback_months",
-            )
-            exit_window_start = report_start - pd.DateOffset(
-                months=lookback_value
-            )
-            exit_window_end = report_end - pd.DateOffset(months=lookback_value)
+                    key="lookback_days",
+                )
+                exit_window_start = report_start - pd.Timedelta(
+                    days=lookback_value
+                )
+                exit_window_end = report_end - pd.Timedelta(days=lookback_value)
+            else:
+                lookback_value = st.number_input(
+                    "Lookback Months",
+                    min_value=1,
+                    value=(
+                        saved_lookback["period"]
+                        if saved_lookback["unit"] == "Months"
+                        else 24
+                    ),
+                    help="Months prior to report start for exit identification",
+                    on_change=lambda: (
+                        spm2_state.set_lookback_period(
+                            st.session_state.get("lookback_months", 24), "Months"
+                        ),
+                        spm2_state.mark_dirty(),
+                    ),
+                    key="lookback_months",
+                )
+                exit_window_start = report_start - pd.DateOffset(
+                    months=lookback_value
+                )
+                exit_window_end = report_end - pd.DateOffset(months=lookback_value)
 
         # Save lookback configuration to enhanced state
         spm2_state.set_lookback_period(lookback_value, unit_choice)
 
         # Display exit window with styled info box
-        st.html(
-            html_factory.info_box(
-                f"Exit Window: {exit_window_start:%Y-%m-%d} to {exit_window_end:%Y-%m-%d}",
-                type="info",
-            )
+        ui.info_section(
+            f"Exit Window: {exit_window_start:%Y-%m-%d} to {exit_window_end:%Y-%m-%d}",
+            type="info",
+            expanded=True,
         )
 
         st.html(html_factory.divider())
@@ -266,6 +269,9 @@ def setup_exit_filters(df: pd.DataFrame) -> Tuple[Optional[List[str]], ...]:
             module=SPM2_MODULE,
         )
 
+        # Sub-group divider: geography vs program/destination filters
+        st.html(html_factory.divider(margin="1rem 0"))
+
         exit_allowed_agencies = create_multiselect_filter(
             "Agencies - Exit",
             (
@@ -326,6 +332,9 @@ def setup_exit_filters(df: pd.DataFrame) -> Tuple[Optional[List[str]], ...]:
             module=SPM2_MODULE,
             allow_empty=False,
         )
+
+        # Sub-group divider: program filters vs destination filters
+        st.html(html_factory.divider(margin="1rem 0"))
 
         allowed_exit_dest_cats = None
         if "ExitDestinationCat" in df.columns:
@@ -396,6 +405,9 @@ def setup_return_filters(df: pd.DataFrame) -> Tuple[Optional[List[str]], ...]:
             on_change=lambda: spm2_state.mark_dirty(),
             module=SPM2_MODULE,
         )
+
+        # Sub-group divider: geography vs program filters
+        st.html(html_factory.divider(margin="1rem 0"))
 
         return_allowed_agencies = create_multiselect_filter(
             "Agencies - Return",
@@ -614,18 +626,13 @@ def display_summary_metrics(
 
     # Add context note if needed
     if allowed_exit_dest_cats == ["Permanent Housing Situations"]:
-        st.html(
-            html_factory.info_box(
-                "Only Permanent Housing Situations is selected in the Exit Destination Categories filter.",
-                type="info",
-                icon="📌",
-            )
+        ui.info_section(
+            "Only Permanent Housing Situations is selected in the Exit Destination Categories filter.",
+            type="info",
+            icon="📌",
+            expanded=True,
         )
 
-    # Apply metric card styling
-    ui.apply_metric_card_style(
-        border_color=theme.colors.primary, box_shadow=True
-    )
 
     metrics = compute_summary_metrics(final_df, return_period)
     display_spm_metrics(metrics, return_period, show_total_exits=True)
@@ -767,15 +774,14 @@ def display_client_flow(final_df: pd.DataFrame) -> None:
 
             if exit_cols and return_cols:
                 # Dimension selectors with info box
-                st.html(
-                    html_factory.info_box(
-                        "Both the Exit and Entry Dimension filters apply to the entire flow section.",
-                        type="info",
-                        icon="📌",
-                    )
+                ui.info_section(
+                    "Both the Exit and Entry Dimension filters apply to the entire flow section.",
+                    type="info",
+                    icon="📌",
+                    expanded=True,
                 )
 
-                flow_cols = st.columns(2)
+                flow_cols = st.columns(2, gap="medium", vertical_alignment="bottom")
                 with flow_cols[0]:
                     ex_choice = st.selectbox(
                         "Exit Dimension: Rows",
@@ -859,25 +865,27 @@ def display_client_flow(final_df: pd.DataFrame) -> None:
                     )
                 )
 
-                st.html(
-                    html_factory.info_box(
-                        "Focus filters below apply only to the network visualization",
-                        type="warning",
-                        icon="🎯",
-                    )
+                ui.info_section(
+                    "Focus filters below apply only to the network visualization",
+                    type="warning",
+                    icon="🎯",
+                    expanded=True,
                 )
 
-                colL, colR = st.columns(2)
-                focus_exit = colL.selectbox(
-                    "🔍 Focus Exit Dimension",
-                    ["All"] + pivot_c.index.tolist(),
-                    help="Show only this exit in the network",
-                )
-                focus_return = colR.selectbox(
-                    "🔍 Focus Return Dimension",
-                    ["All"] + pivot_c.columns.tolist(),
-                    help="Show only this return in the network",
-                )
+                with st.container(border=True):
+                    colL, colR = st.columns(
+                        2, gap="medium", vertical_alignment="bottom"
+                    )
+                    focus_exit = colL.selectbox(
+                        "🔍 Focus Exit Dimension",
+                        ["All"] + pivot_c.index.tolist(),
+                        help="Show only this exit in the network",
+                    )
+                    focus_return = colR.selectbox(
+                        "🔍 Focus Return Dimension",
+                        ["All"] + pivot_c.columns.tolist(),
+                        help="Show only this return in the network",
+                    )
 
                 # Create filtered pivot for Sankey
                 pivot_sankey = pivot_c.copy()
@@ -912,10 +920,6 @@ def display_ph_comparison(final_df: pd.DataFrame, return_period: int) -> None:
         ph_df = final_df[final_df["PH_Exit"]]
         nonph_df = final_df[~final_df["PH_Exit"]]
 
-        # Apply metric card styling for comparison
-        ui.apply_metric_card_style(
-            border_color=theme.colors.success, box_shadow=True
-        )
 
         comp_cols = st.columns(2)
 
@@ -929,10 +933,6 @@ def display_ph_comparison(final_df: pd.DataFrame, return_period: int) -> None:
             if not ph_df.empty:
                 ph_metrics = compute_summary_metrics(ph_df, return_period)
 
-                # Apply success-themed metric cards for PH exits
-                ui.apply_metric_card_style(
-                    border_color=theme.colors.success, box_shadow=True
-                )
 
                 # Display metrics using ui.metric_row
                 ui.metric_row(
@@ -1010,10 +1010,6 @@ def display_ph_comparison(final_df: pd.DataFrame, return_period: int) -> None:
                     nonph_df, return_period
                 )
 
-                # Apply warning-themed metric cards for non-PH exits
-                ui.apply_metric_card_style(
-                    border_color=theme.colors.warning, box_shadow=True
-                )
 
                 # Display metrics using ui.metric_row
                 ui.metric_row(
@@ -1088,15 +1084,14 @@ def display_data_export(final_df: pd.DataFrame) -> None:
         st.html(html_factory.title("Data Export", level=3, icon="📤"))
 
         # Export section with styled card
-        st.html('<div class="neutral-card">')
-        col1, col2, col3 = st.columns([1, 2, 1])
-        with col2:
-            render_download_button(
-                final_df,
-                filename="spm2_analysis_results.csv",
-                label="📥 Download SPM2 Data",
-            )
-        st.html("</div>")
+        with st.container(border=True):
+            col1, col2, col3 = st.columns([1, 2, 1])
+            with col2:
+                render_download_button(
+                    final_df,
+                    filename="spm2_analysis_results.csv",
+                    label="📥 Download SPM2 Data",
+                )
 
 
 # ============================================================================

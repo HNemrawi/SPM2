@@ -35,6 +35,7 @@ from src.modules.recidivism.outbound_page import outbound_recidivism_page
 from src.modules.spm2.page import spm2_page
 from src.ui.factories.html import html_factory
 from src.ui.layouts.templates import get_header_logo_html, render_footer
+from src.ui.themes.styles import apply_custom_css
 from src.ui.themes.theme import theme
 
 # Enable pandas performance optimizations
@@ -122,87 +123,11 @@ def setup_page() -> None:
 
 
 def inject_custom_css() -> None:
-    """Inject custom CSS for improved native component styling."""
-    custom_css = f"""
-    <style>
-    /* Soften Streamlit multiselect/filter pills */
-    .stMultiSelect [data-baseweb="tag"] {{
-        background-color: {theme.colors.primary_bg_subtle} !important;
-        border: 1px solid {theme.colors.border} !important;
-        color: {theme.colors.text_primary} !important;
-    }}
-
-    /* Improve table styling */
-    .stDataFrame {{
-        border: 1px solid {theme.colors.border} !important;
-        border-radius: {theme.borders.radius_md} !important;
-    }}
-
-    .stDataFrame th {{
-        background-color: {theme.colors.background_secondary} !important;
-        color: {theme.colors.text_primary} !important;
-        font-weight: 600 !important;
-        padding: 12px !important;
-        border-bottom: 2px solid {theme.colors.border} !important;
-    }}
-
-    .stDataFrame td {{
-        padding: 10px 12px !important;
-        border-bottom: 1px solid {theme.colors.border_light} !important;
-    }}
-
-    .stDataFrame tr:hover {{
-        background-color: {theme.colors.surface_hover} !important;
-    }}
-
-    /* Soften alert boxes */
-    .stAlert {{
-        border-radius: {theme.borders.radius_md} !important;
-        padding: 1rem !important;
-    }}
-
-    /* Improve button styling */
-    .stButton > button {{
-        border-radius: {theme.borders.radius_md} !important;
-        font-weight: 500 !important;
-        transition: all 0.2s ease !important;
-    }}
-
-    .stButton > button:hover {{
-        transform: translateY(-1px) !important;
-        box-shadow: {theme.shadows.md} !important;
-    }}
-
-    /* Soften expander styling */
-    .streamlit-expanderHeader {{
-        background-color: {theme.colors.background_secondary} !important;
-        border-radius: {theme.borders.radius_sm} !important;
-        font-weight: 600 !important;
-    }}
-
-    /* Improve select box styling */
-    .stSelectbox [data-baseweb="select"] {{
-        border-radius: {theme.borders.radius_md} !important;
-    }}
-
-    /* Tab styling improvements */
-    .stTabs [data-baseweb="tab-list"] {{
-        gap: 8px !important;
-    }}
-
-    .stTabs [data-baseweb="tab"] {{
-        border-radius: {theme.borders.radius_sm} !important;
-        padding: 8px 16px !important;
-    }}
-
-    /* Reduce visual weight of info messages */
-    [data-testid="stNotification"] {{
-        background-color: {theme.colors.info_bg_subtle} !important;
-        border-left: 3px solid {theme.colors.info} !important;
-    }}
-    </style>
-    """
-    st.html(custom_css)
+    """Inject the unified app CSS. The rules formerly inlined here moved
+    into ``src/ui/themes/styles.py:get_neutral_css`` so the entire app
+    loads one CSS block (Phase 1 of UI_LAYOUT_AUDIT.md). The function
+    is kept so the existing call site in ``main()`` doesn't move."""
+    apply_custom_css()
 
 
 def render_enhanced_header() -> None:
@@ -268,7 +193,7 @@ def render_welcome_modules() -> None:
         f"best fits your needs:</p>"
     )
 
-    col1, col2 = st.columns(2)
+    col1, col2 = st.columns(2, gap="medium")
 
     with col1:
         render_module_card(
@@ -374,10 +299,7 @@ def render_sidebar() -> Tuple[str, Dict[str, Dict]]:
             reset_session_manager()
             st.rerun()
 
-        st.html(
-            f"<div style='margin: 1rem 0; border-top: 1px solid "
-            f"{theme.colors.border};'></div>"
-        )
+        st.html(html_factory.divider())
 
         # Data upload section - Professional and Clean
         st.html(html_factory.title("Data Source", level=4, icon="📁"))
@@ -530,13 +452,11 @@ def render_sidebar() -> Tuple[str, Dict[str, Dict]]:
                         st.error(f"Error processing file: {str(e)}")
                         st.info("Please check your file format and try again.")
 
-        st.html(
-            f"<div style='margin: 1.5rem 0; border-top: 1px solid "
-            f"{theme.colors.border};'></div>"
-        )
+        st.html(html_factory.divider())
 
-        # Module selection - Clean and Professional
-        st.html(html_factory.title("Analysis Type", level=4, icon="📊"))
+        # Module selection - sidebar is narrow, so use level=5 to keep
+        # the title visually right-sized (Phase 4.B3 of UI_LAYOUT_AUDIT.md).
+        st.html(html_factory.title("Analysis Type", level=5, icon="📊"))
 
         selected_module = st.selectbox(
             "Select Analysis Type",
@@ -699,7 +619,9 @@ def render_welcome_screen() -> None:
 @st.dialog("💾 Export Analysis Configuration", width="large")
 def show_export_dialog():
     """Display modal export dialog."""
-    st.markdown("### Save your current analysis settings")
+    st.html(
+        html_factory.title("Save your current analysis settings", level=3)
+    )
 
     # Get current session info
     session_manager.get_session_summary()
@@ -729,8 +651,8 @@ def show_export_dialog():
     )
 
     # Export options
-    st.markdown("---")
-    st.markdown("### Export Options")
+    st.html(html_factory.divider())
+    st.html(html_factory.title("Export Options", level=3))
 
     current_module_only = st.checkbox(
         "Export current module only",
@@ -749,8 +671,8 @@ def show_export_dialog():
 
     config_summary = export_data.get("configuration_summary", {})
 
-    st.markdown("---")
-    st.markdown("### What Will Be Saved")
+    st.html(html_factory.divider())
+    st.html(html_factory.title("What Will Be Saved", level=3))
 
     # Show clean summary
     st.html(
@@ -793,7 +715,7 @@ def show_export_dialog():
             )
 
     # Action buttons
-    st.markdown("---")
+    st.html(html_factory.divider())
     col1, col2 = st.columns([1, 1])
 
     with col1:
@@ -828,7 +750,9 @@ def show_export_dialog():
 @st.dialog("📥 Import Analysis Configuration", width="large")
 def show_import_dialog():
     """Display modal import dialog."""
-    st.markdown("### Load a saved analysis configuration")
+    st.html(
+        html_factory.title("Load a saved analysis configuration", level=3)
+    )
 
     uploaded_session = st.file_uploader(
         "Choose session file",
@@ -847,8 +771,8 @@ def show_import_dialog():
             # Show preview using SessionSerializer
             summary = SessionSerializer.create_session_summary(session_data)
 
-            st.markdown("---")
-            st.markdown("### Session Preview")
+            st.html(html_factory.divider())
+            st.html(html_factory.title("Session Preview", level=3))
 
             # Show session info (v2.1+ format)
             if "name" in summary:
@@ -945,7 +869,7 @@ def show_import_dialog():
                 st.warning(f"⚠️ Could not validate compatibility: {str(e)}")
 
             # Action buttons
-            st.markdown("---")
+            st.html(html_factory.divider())
             col1, col2 = st.columns([1, 1])
 
             with col1:
@@ -1029,15 +953,17 @@ def render_analysis_page(
         st.error("No data loaded. Please upload a file first.")
         return
 
-    # Handle duplicate analysis if present
+    # Handle duplicate analysis if present (Phase 3.C4 of UI_LAYOUT_AUDIT.md:
+    # the warning + divider read as one attention block when bordered).
     if (
         SessionKeys.DUPLICATE_ANALYSIS in st.session_state
         and not st.session_state.get(SessionKeys.DEDUP_ACTION)
     ):
-        show_duplicate_info(
-            df, st.session_state[SessionKeys.DUPLICATE_ANALYSIS]
-        )
-        st.divider()
+        with st.container(border=True):
+            show_duplicate_info(
+                df, st.session_state[SessionKeys.DUPLICATE_ANALYSIS]
+            )
+            st.divider()
 
     if st.session_state.get(SessionKeys.DEDUP_ACTION) == "keep_all":
         for key in [SessionKeys.DUPLICATE_ANALYSIS, SessionKeys.DEDUP_ACTION]:

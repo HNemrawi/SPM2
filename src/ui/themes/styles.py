@@ -418,6 +418,329 @@ def get_neutral_css() -> str:
         max-width: 100% !important;
         overflow-wrap: break-word !important;
     }}
+
+    /* ====================================================================
+       Centralized rules (Phase 1, see UI_LAYOUT_AUDIT.md)
+       Three CSS sources were merged here so the whole app loads one block:
+         - main.inject_custom_css        (was global)
+         - components.apply_metric_card_style  (was per-call on dashboard)
+         - dashboard.apply_neutral_tab_style   (was dashboard-only)
+       Cascade order is intentional: rules later in the file override
+       earlier rules of equal specificity.
+       ==================================================================== */
+
+    /* ===== From main.inject_custom_css ===== */
+    /* Soften Streamlit multiselect/filter pills */
+    .stMultiSelect [data-baseweb="tag"] {{
+        background-color: {theme.colors.primary_bg_subtle} !important;
+        border: 1px solid {theme.colors.border} !important;
+        color: {theme.colors.text_primary} !important;
+    }}
+
+    /* Native dataframe wrapper styling (applied alongside the .dataframe
+       rules above; .stDataFrame is the Streamlit wrapper, .dataframe is
+       the inner pandas-emitted table). */
+    .stDataFrame {{
+        border: 1px solid {theme.colors.border} !important;
+        border-radius: {theme.borders.radius_md} !important;
+    }}
+
+    .stDataFrame th {{
+        background-color: {theme.colors.background_secondary} !important;
+        color: {theme.colors.text_primary} !important;
+        font-weight: 600 !important;
+        padding: 12px !important;
+        border-bottom: 2px solid {theme.colors.border} !important;
+    }}
+
+    .stDataFrame td {{
+        padding: 10px 12px !important;
+        border-bottom: 1px solid {theme.colors.border_light} !important;
+    }}
+
+    .stDataFrame tr:hover {{
+        background-color: {theme.colors.surface_hover} !important;
+    }}
+
+    /* Soften alert boxes (overrides the .stAlert block above). */
+    .stAlert {{
+        border-radius: {theme.borders.radius_md} !important;
+        padding: 1rem !important;
+    }}
+
+    /* Button overrides (theme-token versions; the .stButton block above
+       is the structural baseline). */
+    .stButton > button {{
+        border-radius: {theme.borders.radius_md} !important;
+        font-weight: 500 !important;
+        transition: all 0.2s ease !important;
+    }}
+
+    .stButton > button:hover {{
+        transform: translateY(-1px) !important;
+        box-shadow: {theme.shadows.md} !important;
+    }}
+
+    /* Expander header (theme-token override of .streamlit-expanderHeader
+       above). */
+    .streamlit-expanderHeader {{
+        background-color: {theme.colors.background_secondary} !important;
+        border-radius: {theme.borders.radius_sm} !important;
+        font-weight: 600 !important;
+    }}
+
+    /* Selectbox border radius. */
+    .stSelectbox [data-baseweb="select"] {{
+        border-radius: {theme.borders.radius_md} !important;
+    }}
+
+    /* Notification visual weight. */
+    [data-testid="stNotification"] {{
+        background-color: {theme.colors.info_bg_subtle} !important;
+        border-left: 3px solid {theme.colors.info} !important;
+    }}
+
+    /* ===== Metric cards (was components.apply_metric_card_style) =====
+       These rules previously injected only on dashboard sections that
+       called ui.apply_metric_card_style(). Now applied globally so every
+       st.metric in the app gets the same enhanced treatment. */
+    div[data-testid="metric-container"] {{
+        background: linear-gradient(135deg, rgba(255,255,255,0.9) 0%, rgba(248,250,252,0.9) 100%);
+        border: 1px solid {theme.colors.border};
+        border-left: 4px solid {theme.colors.primary};
+        border-radius: {theme.borders.radius_lg};
+        padding: 1.25rem;
+        margin: 0.5rem 0;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08), 0 1px 3px rgba(0, 0, 0, 0.05);
+        transition: all 0.3s ease;
+        min-height: auto !important;
+        height: auto !important;
+        overflow: visible !important;
+    }}
+
+    div[data-testid="metric-container"]:hover {{
+        transform: translateY(-2px);
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
+    }}
+
+    div[data-testid="metric-container"] label {{
+        color: {theme.colors.text_muted};
+        font-size: {theme.typography.size_sm};
+        font-weight: {theme.typography.weight_medium};
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        white-space: normal !important;
+        word-wrap: break-word !important;
+        line-height: 1.4;
+    }}
+
+    div[data-testid="metric-container"] [data-testid="metric-value"] {{
+        color: {theme.colors.text_primary};
+        font-weight: {theme.typography.weight_bold};
+        font-size: clamp(1.25rem, 2vw, {theme.typography.size_2xl});
+        white-space: normal !important;
+        word-wrap: break-word !important;
+        overflow-wrap: break-word !important;
+        line-height: 1.2;
+    }}
+
+    div[data-testid="metric-container"] [data-testid="metric-delta"] {{
+        font-size: {theme.typography.size_sm};
+        font-weight: {theme.typography.weight_medium};
+        white-space: normal !important;
+        word-wrap: break-word !important;
+    }}
+
+    /* Equal-height metric containers in column layouts. */
+    div[data-testid="column"] > div > div[data-testid="metric-container"] {{
+        height: 100%;
+        display: flex;
+        flex-direction: column;
+        justify-content: space-between;
+    }}
+
+    /* ===== Tab strip (was dashboard.apply_neutral_tab_style) =====
+       NOTE: full-bleed hack ahead. The .stTabs [data-baseweb="tab-list"]
+       block uses `margin: 0 -5rem; padding: 1rem 5rem;` to bleed the tab
+       strip past the page padding, and `.main > .block-container` sets
+       that page padding to 5rem so the negative margin lines up. Both
+       rules MUST stay in sync, and BOTH are fragile against Streamlit
+       DOM-structure changes — revalidate visually on every Streamlit
+       upgrade. */
+    .stTabs {{
+        width: 100% !important;
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    }}
+
+    .stTabs [data-baseweb="tab-list"] {{
+        gap: 0.75rem;
+        background-color: transparent;
+        padding: 1rem;
+        border-radius: 0;
+        border: none;
+        margin: 0 -5rem;
+        padding: 1rem 5rem;
+        margin-bottom: 2rem;
+        background: var(--background-secondary, rgba(0, 0, 0, 0.02));
+        border-top: 1px solid var(--border-color, rgba(0, 0, 0, 0.1));
+        border-bottom: 1px solid var(--border-color, rgba(0, 0, 0, 0.1));
+        display: flex;
+        justify-content: center;
+    }}
+
+    .stTabs [data-baseweb="tab"] {{
+        height: 52px;
+        padding: 0 40px;
+        background-color: rgba(255, 255, 255, 0.9);
+        border: 1px solid rgba(0, 0, 0, 0.08);
+        border-radius: 8px;
+        color: rgba(0, 0, 0, 0.85);
+        font-weight: 500;
+        font-size: 1rem;
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        transition: all 0.2s ease;
+        white-space: nowrap;
+        position: relative;
+        flex: 1 1 auto;
+        min-width: 140px;
+        max-width: 220px;
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+        margin: 0 6px;
+    }}
+
+    .stTabs [data-baseweb="tab"]:hover {{
+        background-color: rgba(255, 255, 255, 1);
+        border-color: rgba(0, 0, 0, 0.15);
+        color: rgba(0, 0, 0, 0.95);
+        transform: translateY(-1px);
+        box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1);
+    }}
+
+    .stTabs [aria-selected="true"] {{
+        background-color: {NeutralColors.PRIMARY} !important;
+        color: white !important;
+        font-weight: 600;
+        border-color: {NeutralColors.PRIMARY} !important;
+        box-shadow: 0 2px 8px rgba(33, 150, 243, 0.3) !important;
+        transform: translateY(-1px);
+    }}
+
+    .stTabs [aria-selected="true"]:hover {{
+        background-color: {NeutralColors.PRIMARY} !important;
+        filter: brightness(0.9);
+        border-color: {NeutralColors.PRIMARY} !important;
+        box-shadow: 0 3px 10px rgba(33, 150, 243, 0.4) !important;
+    }}
+
+    .stTabs [data-baseweb="tab-panel"] {{
+        padding-top: 0;
+        background-color: transparent;
+    }}
+
+    .stTabs [data-baseweb="tab"]:focus {{
+        outline: 2px solid {NeutralColors.PRIMARY};
+        outline-offset: 2px;
+        box-shadow: 0 0 0 4px rgba(33, 150, 243, 0.1);
+    }}
+
+    .stTabs [data-baseweb="tab"]:focus:not(:focus-visible) {{
+        outline: none;
+        box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1);
+    }}
+
+    .tab-content {{
+        padding: 1.5rem 0;
+    }}
+
+    /* Page padding paired with the negative-margin tab bleed above. */
+    .main > .block-container {{
+        max-width: 100%;
+        padding-left: 5rem;
+        padding-right: 5rem;
+    }}
+
+    .stTabs [data-baseweb="tab"]:active {{
+        transform: translateY(0);
+        box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+    }}
+
+    .stTabs [data-baseweb="tab"][disabled] {{
+        opacity: 0.5;
+        cursor: not-allowed;
+        transform: none;
+    }}
+
+    .stTabs [data-baseweb="tab"] > span {{
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+    }}
+
+    .stTabs [data-baseweb="tab"]::before {{
+        content: '';
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        border-radius: 8px;
+        background: linear-gradient(180deg, rgba(255, 255, 255, 0.1) 0%, rgba(255, 255, 255, 0) 100%);
+        pointer-events: none;
+        opacity: 0;
+        transition: opacity 0.2s ease;
+    }}
+
+    .stTabs [data-baseweb="tab"]:hover::before {{
+        opacity: 1;
+    }}
+
+    .stTabs [aria-selected="true"]::before {{
+        display: none;
+    }}
+
+    .stTabs [data-baseweb="tab"],
+    .stTabs [data-baseweb="tab-list"] {{
+        transition: background-color 0.3s ease, border-color 0.3s ease, color 0.3s ease;
+    }}
+
+    @media (max-width: 768px) {{
+        .stTabs [data-baseweb="tab-list"] {{
+            margin: 0 -1rem;
+            padding: 0.75rem 1rem;
+            overflow-x: auto;
+            -webkit-overflow-scrolling: touch;
+            scrollbar-width: thin;
+            gap: 0.5rem;
+            justify-content: flex-start;
+        }}
+
+        .stTabs [data-baseweb="tab"] {{
+            padding: 0 20px;
+            font-size: 0.9rem;
+            height: 44px;
+            margin: 0 3px;
+            flex: 0 0 auto;
+            min-width: 120px;
+        }}
+
+        .main > .block-container {{
+            padding-left: 1rem;
+            padding-right: 1rem;
+        }}
+
+        .stTabs [data-baseweb="tab-list"]::-webkit-scrollbar {{
+            height: 4px;
+        }}
+
+        .stTabs [data-baseweb="tab-list"]::-webkit-scrollbar-track {{
+            background: rgba(0, 0, 0, 0.05);
+        }}
+
+        .stTabs [data-baseweb="tab-list"]::-webkit-scrollbar-thumb {{
+            background: rgba(0, 0, 0, 0.2);
+            border-radius: 2px;
+        }}
+    }}
     </style>
     """
 
@@ -431,91 +754,6 @@ def apply_custom_css():
     st.markdown(
         get_neutral_css(), unsafe_allow_html=True
     )  # Keep legacy CSS for backward compatibility
-
-
-def style_metric_cards(
-    background_color: str = None,
-    border_size_px: int = 1,
-    border_color: str = None,
-    border_radius_px: int = 8,
-    border_left_color: str = None,
-    box_shadow: bool = True,
-) -> None:
-    """
-    Legacy function for backward compatibility.
-    Applies styling for metric cards with customizable options.
-
-    Parameters:
-        background_color (str): Background color of the cards.
-        border_size_px (int): Border width in pixels.
-        border_color (str): Border color.
-        border_radius_px (int): Border radius in pixels.
-        border_left_color (str): Left border accent color.
-        box_shadow (bool): Whether to apply a shadow effect.
-    """
-    # Use neutral theme colors if not specified
-    if background_color is None:
-        background_color = "var(--bg-card)"
-    if border_color is None:
-        border_color = "var(--border-color)"
-    if border_left_color is None:
-        border_left_color = NeutralColors.PRIMARY
-
-    box_shadow_str = (
-        "box-shadow: var(--shadow-md);" if box_shadow else "box-shadow: none;"
-    )
-
-    st.markdown(
-        f"""
-    <style>
-        div[data-testid="stMetric"],
-        div[data-testid="metric-container"] {{
-            background: {background_color};
-            border: {border_size_px}px solid {border_color};
-            padding: 1.25rem 1rem;
-            border-radius: {border_radius_px}px;
-            border-left: 0.5rem solid {border_left_color} !important;
-            {box_shadow_str}
-            transition: all 0.2s ease;
-            overflow: visible !important;
-            min-height: 90px;
-            display: flex;
-            flex-direction: column;
-            justify-content: space-between;
-        }}
-
-        /* Ensure metric content doesn't get cut off */
-        div[data-testid="stMetric"] label {{
-            white-space: normal !important;
-            word-wrap: break-word !important;
-            overflow-wrap: break-word !important;
-            hyphens: auto !important;
-            max-width: 100% !important;
-        }}
-
-        div[data-testid="stMetric"] div[data-testid="stMetricValue"] {{
-            white-space: normal !important;
-            word-wrap: break-word !important;
-            overflow-wrap: break-word !important;
-            max-width: 100% !important;
-        }}
-
-        div[data-testid="stMetric"] div[data-testid="stMetricDelta"] {{
-            white-space: normal !important;
-            word-wrap: break-word !important;
-            overflow-wrap: break-word !important;
-            font-size: 0.875rem !important;
-            max-width: 100% !important;
-        }}
-
-        /* Adjust column spacing for metrics */
-        .stMetric {{
-            min-width: 0 !important;
-        }}
-    </style>
-    """,
-        unsafe_allow_html=True,
-    )
 
 
 def create_info_box(
@@ -777,7 +1015,6 @@ def apply_chart_theme(fig):
 __all__ = [
     "NeutralColors",
     "apply_custom_css",
-    "style_metric_cards",
     "create_info_box",
     "style_dataframe",
     "create_styled_divider",

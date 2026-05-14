@@ -345,10 +345,6 @@ def _render_period_breakdown(period_comp: Dict[str, Any]) -> None:
         else 0
     )
 
-    # Apply metric card styling for population flow
-    ui.apply_metric_card_style(
-        border_color=ui.theme.colors.primary, box_shadow=True
-    )
 
     # Display metrics using native Streamlit columns
     col1, col2, col3 = st.columns(3)
@@ -600,7 +596,7 @@ def render_summary_metrics(
             ui.info_section(filter_content, type="warning", expanded=True)
 
         # Display period context
-        col1, col2 = st.columns(2)
+        col1, col2 = st.columns(2, gap="medium")
         with col1:
             ui.info_section(
                 f"<strong>{t0.strftime('%B %d, %Y')}</strong> to <strong>{t1.strftime('%B %d, %Y')}</strong><br>({current_days} days)",
@@ -619,10 +615,6 @@ def render_summary_metrics(
                 icon="📅",
             )
 
-        # Apply metric card styling
-        ui.apply_metric_card_style(
-            border_color=Colors.PRIMARY, box_shadow=True
-        )
 
         # Display metrics in rows
         st.html(html_factory.divider("gradient"))

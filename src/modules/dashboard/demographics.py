@@ -1542,13 +1542,14 @@ def render_breakdown_section(
         total_ph_exits = bdf_filtered["PH Exits"].sum()
         total_returns = bdf_filtered["Returns Count"].sum()
 
-        # Display summary metrics
-        summary_cols = st.columns(5)
-        summary_cols[0].metric("Total Served", fmt_int(total_served))
-        summary_cols[1].metric("Total Inflow", fmt_int(total_inflow))
-        summary_cols[2].metric("Total Outflow", fmt_int(total_outflow))
-        summary_cols[3].metric("Total PH Exits", fmt_int(total_ph_exits))
-        summary_cols[4].metric("Total Returns", fmt_int(total_returns))
+        # Display summary metrics in a horizontal container that wraps
+        # cleanly on narrower viewports (Phase 3.A2 of UI_LAYOUT_AUDIT.md)
+        with st.container(horizontal=True, gap="small"):
+            st.metric("Total Served", fmt_int(total_served))
+            st.metric("Total Inflow", fmt_int(total_inflow))
+            st.metric("Total Outflow", fmt_int(total_outflow))
+            st.metric("Total PH Exits", fmt_int(total_ph_exits))
+            st.metric("Total Returns", fmt_int(total_returns))
 
         # Volume comparison chart
         st.html(html_factory.title("Client Count by Group", level=3, icon="👥"))
@@ -1725,7 +1726,8 @@ def render_breakdown_section(
             {k: v for k, v in format_dict.items() if k in export_df.columns}
         )
 
-        st.dataframe(styled_export, width="stretch", height=500)
+        with st.container(border=True):
+            st.dataframe(styled_export, width="stretch", height=500)
 
         # Note about built-in CSV export
         st.caption("💡 Use the download icon in the table header above to export data as CSV")

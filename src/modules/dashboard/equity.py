@@ -1540,21 +1540,22 @@ def render_equity_analysis(
         ]
 
         # Display formatted table
-        st.dataframe(
-            display_df.style.format(
-                {
-                    "Population": "{:,}",
-                    "% of Total": "{:.1f}%",
-                    "Outcome Count": "{:,}",
-                    "Rate (%)": "{:.1f}%",
-                    "Disparity Index": "{:.2f}",
-                    "p-value": "{:.3f}",
-                    "Potential Impact": "{:+,}",
-                }
-            ),
-            width="stretch",
-            hide_index=True,
-        )
+        with st.container(border=True):
+            st.dataframe(
+                display_df.style.format(
+                    {
+                        "Population": "{:,}",
+                        "% of Total": "{:.1f}%",
+                        "Outcome Count": "{:,}",
+                        "Rate (%)": "{:.1f}%",
+                        "Disparity Index": "{:.2f}",
+                        "p-value": "{:.3f}",
+                        "Potential Impact": "{:+,}",
+                    }
+                ),
+                width="stretch",
+                hide_index=True,
+            )
 
         # Note about built-in download
         st.caption("💡 Use the download icon in the table header above to export data as CSV")

@@ -190,6 +190,9 @@ def setup_entry_filters(df: pd.DataFrame) -> Tuple[Optional[List[str]], ...]:
             module=INBOUND_MODULE,
         )
 
+        # Sub-group divider: geography vs program filters
+        st.html(html_factory.divider(margin="1rem 0"))
+
         allowed_agencies = create_multiselect_filter(
             "Agencies - Entry",
             (
@@ -297,6 +300,9 @@ def setup_exit_filters(df: pd.DataFrame) -> Tuple[Optional[List[str]], ...]:
             module=INBOUND_MODULE,
         )
 
+        # Sub-group divider: geography vs program/destination filters
+        st.html(html_factory.divider(margin="1rem 0"))
+
         allowed_agencies_exit = create_multiselect_filter(
             "Agencies - Exit",
             (
@@ -360,6 +366,9 @@ def setup_exit_filters(df: pd.DataFrame) -> Tuple[Optional[List[str]], ...]:
                 on_change=lambda: inbound_state.mark_dirty(),
                 module=INBOUND_MODULE,
             )
+
+        # Sub-group divider: program filters vs destination filters
+        st.html(html_factory.divider(margin="1rem 0"))
 
         # Exit Destination Category filter
         allowed_exit_dest_cats = None
@@ -523,10 +532,6 @@ def display_summary_metrics(
             expanded=True,
         )
 
-    # Apply metric card styling
-    ui.apply_metric_card_style(
-        border_color=NeutralColors.PRIMARY, box_shadow=True
-    )
 
     metrics = compute_return_metrics(final_df)
     display_return_metrics_cards(metrics)
@@ -742,7 +747,9 @@ def display_client_flow(final_df: pd.DataFrame) -> None:
                 expanded=True,
             )
 
-            flow_cols = st.columns(2)
+            flow_cols = st.columns(
+                2, gap="medium", vertical_alignment="bottom"
+            )
             with flow_cols[0]:
                 exit_flow_col = st.selectbox(
                     "Exit Dimension: Rows",
@@ -830,19 +837,22 @@ def display_client_flow(final_df: pd.DataFrame) -> None:
                 expanded=True,
             )
 
-            drill_cols = st.columns(2)
-            with drill_cols[0]:
-                focus_exit = st.selectbox(
-                    "🔍 Focus Exit Dimension",
-                    ["All"] + flow_pivot_ra.index.tolist(),
-                    help="Show only this exit in the network",
+            with st.container(border=True):
+                drill_cols = st.columns(
+                    2, gap="medium", vertical_alignment="bottom"
                 )
-            with drill_cols[1]:
-                focus_return = st.selectbox(
-                    "🔍 Focus Entry Dimension",
-                    ["All"] + flow_pivot_ra.columns.tolist(),
-                    help="Show only this entry in the network",
-                )
+                with drill_cols[0]:
+                    focus_exit = st.selectbox(
+                        "🔍 Focus Exit Dimension",
+                        ["All"] + flow_pivot_ra.index.tolist(),
+                        help="Show only this exit in the network",
+                    )
+                with drill_cols[1]:
+                    focus_return = st.selectbox(
+                        "🔍 Focus Entry Dimension",
+                        ["All"] + flow_pivot_ra.columns.tolist(),
+                        help="Show only this entry in the network",
+                    )
 
             # Create filtered pivot for Sankey
             flow_pivot_sankey = flow_pivot_ra.copy()
@@ -871,15 +881,14 @@ def display_data_export(final_df: pd.DataFrame) -> None:
     st.html(html_factory.title("Data Export", level=3, icon="📤"))
 
     # Export section with styled card
-    st.html('<div class="neutral-card">')
-    col1, col2, col3 = st.columns([1, 2, 1])
-    with col2:
-        render_download_button(
-            final_df,
-            filename="inbound_recidivism_analysis.csv",
-            label="📥 Download Inbound Data",
-        )
-    st.html("</div>")
+    with st.container(border=True):
+        col1, col2, col3 = st.columns([1, 2, 1])
+        with col2:
+            render_download_button(
+                final_df,
+                filename="inbound_recidivism_analysis.csv",
+                label="📥 Download Inbound Data",
+            )
 
 
 # ============================================================================

@@ -279,95 +279,6 @@ class UIComponentFactory:
                     )
                 )
 
-    def apply_metric_card_style(
-        self,
-        border_color: Optional[str] = None,
-        background_gradient: bool = True,
-        box_shadow: bool = True,
-    ) -> None:
-        """
-        Apply professional metric card styling to the current container.
-        This provides consistent styling across all metric displays.
-
-        Args:
-            border_color: Color for the left border accent
-            background_gradient: Whether to apply gradient background
-            box_shadow: Whether to apply shadow effect
-        """
-        border_color = border_color or self.theme.colors.primary
-
-        gradient_bg = (
-            "background: linear-gradient(135deg, rgba(255,255,255,0.9) 0%, rgba(248,250,252,0.9) 100%);"
-            if background_gradient
-            else ""
-        )
-        shadow = (
-            "box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08), 0 1px 3px rgba(0, 0, 0, 0.05);"
-            if box_shadow
-            else ""
-        )
-
-        st.html(
-            f"""
-        <style>
-        div[data-testid="metric-container"] {{
-            {gradient_bg}
-            border: 1px solid {self.theme.colors.border};
-            border-left: 4px solid {border_color};
-            border-radius: {self.theme.borders.radius_lg};
-            padding: 1.25rem;
-            margin: 0.5rem 0;
-            {shadow}
-            transition: all 0.3s ease;
-            min-height: auto !important;
-            height: auto !important;
-            overflow: visible !important;
-        }}
-
-        div[data-testid="metric-container"]:hover {{
-            transform: translateY(-2px);
-            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
-        }}
-
-        div[data-testid="metric-container"] label {{
-            color: {self.theme.colors.text_muted};
-            font-size: {self.theme.typography.size_sm};
-            font-weight: {self.theme.typography.weight_medium};
-            text-transform: uppercase;
-            letter-spacing: 0.05em;
-            white-space: normal !important;
-            word-wrap: break-word !important;
-            line-height: 1.4;
-        }}
-
-        div[data-testid="metric-container"] [data-testid="metric-value"] {{
-            color: {self.theme.colors.text_primary};
-            font-weight: {self.theme.typography.weight_bold};
-            font-size: clamp(1.25rem, 2vw, {self.theme.typography.size_2xl});
-            white-space: normal !important;
-            word-wrap: break-word !important;
-            overflow-wrap: break-word !important;
-            line-height: 1.2;
-        }}
-
-        div[data-testid="metric-container"] [data-testid="metric-delta"] {{
-            font-size: {self.theme.typography.size_sm};
-            font-weight: {self.theme.typography.weight_medium};
-            white-space: normal !important;
-            word-wrap: break-word !important;
-        }}
-
-        /* Ensure metric containers in columns have equal height */
-        div[data-testid="column"] > div > div[data-testid="metric-container"] {{
-            height: 100%;
-            display: flex;
-            flex-direction: column;
-            justify-content: space-between;
-        }}
-        </style>
-        """
-        )
-
     def metric_grid(
         self,
         metrics: List[Dict[str, Any]],
@@ -940,9 +851,6 @@ class UIComponentFactory:
                 formatted_delta = fmt_change(delta, with_sign=True)
             else:
                 formatted_delta = str(delta)
-
-        # Apply metric card styling
-        self.apply_metric_card_style()
 
         # Use Streamlit's metric with enhanced styling
         st.metric(

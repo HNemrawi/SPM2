@@ -388,10 +388,6 @@ def display_spm_metrics(
         return_period (int): Maximum days to consider for returns
         show_total_exits (bool): Whether to display total exit count.
     """
-    # Apply neutral metric card styling
-    ui.apply_metric_card_style(
-        border_color=NeutralColors.PRIMARY, box_shadow=True
-    )
 
     # If return_period is less than 730, override the >24 Months metric
     if return_period <= 730:

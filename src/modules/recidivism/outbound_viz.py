@@ -80,11 +80,6 @@ def display_spm_metrics_ph(metrics: Dict[str, Any]) -> None:
     Parameters:
         metrics (Dict[str, Any]): Dictionary of metrics
     """
-    # Apply success-themed metric cards for PH exits
-    ui.apply_metric_card_style(
-        border_color=NeutralColors.SUCCESS, box_shadow=True
-    )
-
     # First row - Core metrics
     ui.metric_row(
         {
@@ -122,11 +117,6 @@ def display_spm_metrics_non_ph(metrics: Dict[str, Any]) -> None:
     Parameters:
         metrics (Dict[str, Any]): Dictionary of metrics
     """
-    # Apply warning-themed metric cards for non-PH exits
-    ui.apply_metric_card_style(
-        border_color=NeutralColors.WARNING, box_shadow=True
-    )
-
     # First row - Core metrics
     ui.metric_row(
         {

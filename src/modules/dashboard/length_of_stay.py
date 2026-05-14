@@ -1306,16 +1306,17 @@ def render_length_of_stay(df_filt: DataFrame) -> None:
                     st.plotly_chart(fig_dest, width="stretch")
 
                     # Show summary table
-                    st.dataframe(
-                        dest_summary.style.format(
-                            {
-                                "mean_los": "{:.0f} days",
-                                "median_los": "{:.0f} days",
-                                "count": "{:,}",
-                            }
-                        ),
-                        width="stretch",
-                    )
+                    with st.container(border=True):
+                        st.dataframe(
+                            dest_summary.style.format(
+                                {
+                                    "mean_los": "{:.0f} days",
+                                    "median_los": "{:.0f} days",
+                                    "count": "{:,}",
+                                }
+                            ),
+                            width="stretch",
+                        )
                 else:
                     st.info("No exit destination data available.")
 

@@ -173,6 +173,9 @@ def setup_exit_filters(df: pd.DataFrame) -> Dict[str, Any]:
             on_change=lambda: outbound_state.mark_dirty(),
         )
 
+        # Sub-group divider: geography vs program/destination filters
+        st.html(html_factory.divider(margin="1rem 0"))
+
         exit_agencies = create_multiselect_filter(
             "Agencies",
             (
@@ -241,6 +244,9 @@ def setup_exit_filters(df: pd.DataFrame) -> Dict[str, Any]:
             key="outbound_exiting_projects",
             on_change=_save_projects,
         )
+
+        # Sub-group divider: program filters vs destination filters
+        st.html(html_factory.divider(margin="1rem 0"))
 
         allowed_exit_dest_cats = None
         if "ExitDestinationCat" in df.columns:
@@ -324,6 +330,9 @@ def setup_return_filters(df: pd.DataFrame) -> Dict[str, Any]:
             module=OUTBOUND_MODULE,
             on_change=lambda: outbound_state.mark_dirty(),
         )
+
+        # Sub-group divider: geography vs program filters
+        st.html(html_factory.divider(margin="1rem 0"))
 
         return_agencies = create_multiselect_filter(
             "Agencies",
@@ -540,10 +549,6 @@ def display_summary_metrics(
             expanded=True,
         )
 
-    # Apply metric card styling
-    ui.apply_metric_card_style(
-        border_color=NeutralColors.PRIMARY, box_shadow=True
-    )
 
     # Compute metrics
     metrics = compute_summary_metrics(out_df)
@@ -793,7 +798,9 @@ def display_client_flow(out_df: pd.DataFrame) -> None:
             expanded=True,
         )
 
-        flow_cols = st.columns(2)
+        flow_cols = st.columns(
+            2, gap="medium", vertical_alignment="bottom"
+        )
         with flow_cols[0]:
             ex_choice = st.selectbox(
                 "Exit Dimension: Rows",
@@ -921,19 +928,22 @@ def display_client_flow(out_df: pd.DataFrame) -> None:
             expanded=True,
         )
 
-        colL, colR = st.columns(2)
-        with colL:
-            focus_exit = st.selectbox(
-                "🔍 Focus Exit Dimension",
-                ["All"] + pivot_c.index.tolist(),
-                help="Show only this exit in the network",
+        with st.container(border=True):
+            colL, colR = st.columns(
+                2, gap="medium", vertical_alignment="bottom"
             )
-        with colR:
-            focus_return = st.selectbox(
-                "🔍 Focus Return Dimension",
-                ["All"] + pivot_c.columns.tolist(),
-                help="Show only this return in the network",
-            )
+            with colL:
+                focus_exit = st.selectbox(
+                    "🔍 Focus Exit Dimension",
+                    ["All"] + pivot_c.index.tolist(),
+                    help="Show only this exit in the network",
+                )
+            with colR:
+                focus_return = st.selectbox(
+                    "🔍 Focus Return Dimension",
+                    ["All"] + pivot_c.columns.tolist(),
+                    help="Show only this return in the network",
+                )
 
         # Create filtered pivot for Sankey
         pivot_sankey = pivot_c.copy()
@@ -999,15 +1009,14 @@ def display_data_export(out_df: pd.DataFrame) -> None:
     st.html(html_factory.title("Data Export", level=3, icon="📤"))
 
     # Export section with styled card
-    st.html('<div class="neutral-card">')
-    col1, col2, col3 = st.columns([1, 2, 1])
-    with col2:
-        render_download_button(
-            out_df,
-            filename="outbound_recidivism_results.csv",
-            label="📥 Download Outbound Data",
-        )
-    st.html("</div>")
+    with st.container(border=True):
+        col1, col2, col3 = st.columns([1, 2, 1])
+        with col2:
+            render_download_button(
+                out_df,
+                filename="outbound_recidivism_results.csv",
+                label="📥 Download Outbound Data",
+            )
 
 
 # ============================================================================
