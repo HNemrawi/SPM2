@@ -10,7 +10,7 @@ import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
-from src.ui.factories.charts import ChartConfig, ChartFactory, default_chart
+from src.ui.factories.charts import build_flow_sankey, default_chart
 from src.ui.factories.components import ui
 from src.ui.themes.styles import (
     NeutralColors,
@@ -95,128 +95,18 @@ def get_top_flows_from_pivot(
 def plot_flow_sankey(
     pivot_df: pd.DataFrame, title: str = "Exit → Return Sankey Diagram"
 ) -> go.Figure:
+    """Render the SPM2 Exit → Return flow Sankey via the shared builder.
+
+    "No Return" is highlighted in the in-theme teal so the positive analytic
+    sink stands out from the other return buckets.
     """
-    Build a Sankey diagram to visualize the flow from exit to return categories.
-
-    Parameters:
-        pivot_df (DataFrame): Flow pivot table (rows are exit, columns are return).
-        title (str): Diagram title.
-
-    Returns:
-        go.Figure: Plotly figure of the Sankey diagram.
-    """
-    df = pivot_df.copy()
-
-    # Get exit categories (rows) and return categories (columns)
-    exit_cats = df.index.tolist()  # left side nodes (Exit)
-    return_cats = df.columns.tolist()  # right side nodes (Return)
-
-    # Overall nodes list: first exit, then return
-    nodes = exit_cats + return_cats
-
-    # Create custom node type data
-    n_exit = len(exit_cats)
-    node_types = ["Exits"] * n_exit + ["Returns"] * len(return_cats)
-
-    sources, targets, values = [], [], []
-    for i, ecat in enumerate(exit_cats):
-        for j, rcat in enumerate(return_cats):
-            val = df.loc[ecat, rcat]
-            if val > 0:
-                sources.append(i)
-                targets.append(n_exit + j)
-                values.append(val)
-
-    # Calculate dynamic height with more generous spacing
-    num_nodes = max(len(exit_cats), len(return_cats))
-    min_height = 600
-    height_per_node = 40  # More space per node
-    calculated_height = max(min_height, num_nodes * height_per_node + 250)
-
-    # Create chart factory with custom config for Sankey
-    sankey_config = ChartConfig(
-        height=calculated_height,
-        margin={"l": 150, "r": 150, "t": 100, "b": 100},
-        show_grid=False,
+    return build_flow_sankey(
+        pivot_df,
+        title,
+        source_role="Exit",
+        target_role="Return",
+        accent_targets=frozenset({"No Return"}),
     )
-    sankey_factory = ChartFactory(sankey_config)
-
-    # Create the Sankey diagram using the chart factory
-    fig = sankey_factory.sankey_diagram(
-        source=sources, target=targets, value=values, labels=nodes, title=title
-    )
-
-    # Update the Sankey diagram with custom styling
-    sankey_trace = fig.data[0]
-
-    # Update node properties
-    sankey_trace.node.update(
-        pad=25,  # More padding between nodes
-        thickness=25,  # Thicker nodes for better label visibility
-        line=dict(
-            color="rgba(0, 0, 0, 0.2)", width=2
-        ),  # Black border for definition
-        customdata=node_types,
-        hovertemplate="%{label}<br>%{customdata}: %{value}<extra></extra>",
-        # Force label positioning
-        x=[0.001] * n_exit + [0.999] * len(return_cats),  # Push nodes to edges
-        y=None,  # Let Plotly optimize vertical positioning
-    )
-
-    # Update link properties
-    sankey_trace.link.update(
-        color="rgba(128, 128, 128, 0.15)",  # Very light links
-        hovertemplate="From: %{source.label}<br>To: %{target.label}<br>Count: %{value}<extra></extra>",
-    )
-
-    # Update text font
-    sankey_trace.textfont = dict(
-        color="rgba(255, 255, 255, 0.95)",  # White text on colored nodes
-        size=12,
-        family="Arial, sans-serif",
-        weight=600,  # Bold text for better readability
-    )
-
-    # Update arrangement
-    sankey_trace.arrangement = "snap"  # Snap to grid for better layout
-    sankey_trace.orientation = "h"  # Horizontal orientation
-
-    # Add custom axis configuration for Sankey
-    fig.update_layout(
-        xaxis=dict(showgrid=False, zeroline=False, visible=False),
-        yaxis=dict(showgrid=False, zeroline=False, visible=False),
-    )
-
-    # Add annotations for exit and return labels
-    for i, label in enumerate(exit_cats):
-        sankey_factory.add_annotation(
-            fig,
-            text=label,
-            x=-0.05,
-            y=i / (len(exit_cats) - 1) if len(exit_cats) > 1 else 0.5,
-            xref="paper",
-            yref="paper",
-            xanchor="right",
-            yanchor="middle",
-            arrow=False,
-            font=dict(size=11, color="#404040", family="Arial, sans-serif"),
-        )
-
-    for i, label in enumerate(return_cats):
-        sankey_factory.add_annotation(
-            fig,
-            text=label,
-            x=1.05,
-            y=i / (len(return_cats) - 1) if len(return_cats) > 1 else 0.5,
-            xref="paper",
-            yref="paper",
-            xanchor="left",
-            yanchor="middle",
-            arrow=False,
-            font=dict(size=11, color="#404040", family="Arial, sans-serif"),
-        )
-
-    return fig
 
 
 def plot_days_to_return_box(

@@ -1,8 +1,21 @@
 """
 Unified Theme Configuration
 ============================
-Single source of truth for all theme-related settings including colors, typography,
-spacing, borders, and chart configurations.
+Single source of truth for all theme-related settings including colors,
+typography, spacing, borders, and chart configurations.
+
+SYNC CONTRACT
+-------------
+Fields tagged with the trailing comment ``# config.toml-mirror`` must be
+copied verbatim into the ``[theme]`` block of ``.streamlit/config.toml``.
+
+Dark mode is removed from this app: ``config.toml`` defines only ``[theme]``
+(light) and sets ``client.toolbarMode = "minimal"`` to hide the menu where
+Streamlit's Light/Dark toggle would otherwise live. There is no
+``[theme.dark]`` block to keep in sync.
+
+If you change a mirrored field here, update config.toml. There is no
+automatic sync.
 """
 
 from dataclasses import dataclass, field
@@ -13,7 +26,7 @@ class ThemeColors:
     """Unified color palette for the entire application."""
 
     # Primary brand colors
-    primary = "#00629b"  # Deep professional blue
+    primary = "#00629b"  # config.toml-mirror (primaryColor, linkColor)
     primary_dark = "#004d7a"  # Darker variant
     primary_light = "#4d94c1"  # Light blue
     primary_hover = "#0074b3"  # Hover state
@@ -62,19 +75,19 @@ class ThemeColors:
     info_bg_subtle = "rgba(59, 130, 246, 0.04)"  # Very subtle blue
 
     # Text hierarchy
-    text_primary = "#1E293B"  # Dark slate
+    text_primary = "#1E293B"  # config.toml-mirror (textColor)
     text_secondary = "#475569"  # Medium slate
     text_muted = "#94A3B8"  # Light slate
     text_disabled = "#CBD5E1"  # Very light
 
     # Background layers
-    background = "#FFFFFF"  # Main background
-    background_secondary = "#F8FAFC"  # Secondary areas
-    surface = "#F1F5F9"  # Card surfaces
+    background = "#FFFFFF"  # config.toml-mirror (backgroundColor)
+    background_secondary = "#F8FAFC"  # config.toml-mirror (secondaryBackgroundColor)
+    surface = "#F1F5F9"  # config.toml-mirror (dataframeHeaderBackgroundColor)
     surface_hover = "#E2E8F0"  # Hover state
 
     # Border colors
-    border = "#E2E8F0"  # Default border
+    border = "#E2E8F0"  # config.toml-mirror (borderColor)
     border_light = "#F1F5F9"  # Subtle borders
     border_dark = "#CBD5E1"  # Emphasized borders
 
@@ -104,19 +117,20 @@ class ThemeColors:
         "#065F46",  # Dark Green
     ]
 
+    # Wong 7-color colorblind-safe palette (Nature Methods 2011).
+    # config.toml-mirror (chartCategoricalColors). Field name kept for
+    # backward compatibility with module imports.
     chart_colors_categorical = [
-        "#3B82F6",  # Blue
-        "#10B981",  # Green
-        "#F59E0B",  # Amber
-        "#EF4444",  # Red
-        "#8B5CF6",  # Purple
-        "#14B8A6",  # Teal
-        "#F97316",  # Orange
-        "#EC4899",  # Pink
-        "#6366F1",  # Indigo
-        "#84CC16",  # Lime
+        "#0072B2",  # Blue
+        "#E69F00",  # Orange
+        "#009E73",  # Bluish green
+        "#CC79A7",  # Reddish purple
+        "#56B4E9",  # Sky blue
+        "#D55E00",  # Vermillion
+        "#F0E442",  # Yellow
     ]
 
+    # config.toml-mirror (chartSequentialColors)
     chart_colors_sequential = [
         "#e6f2f8",  # Lightest blue
         "#cce5f1",  # Blue 100
@@ -149,7 +163,7 @@ class ThemeColors:
 class ThemeTypography:
     """Typography system for professional appearance."""
 
-    # Font families
+    # Font families. config.toml-mirror (font, codeFont)
     font_family = "Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif"
     font_mono = "'SF Mono', Monaco, 'Cascadia Code', 'Roboto Mono', Consolas, monospace"
 
@@ -223,7 +237,7 @@ class ThemeBorders:
     # Border radii
     radius_none = "0"
     radius_sm = "0.25rem"  # 4px
-    radius_md = "0.5rem"  # 8px
+    radius_md = "0.5rem"  # 8px  — config.toml-mirror (baseRadius)
     radius_lg = "0.75rem"  # 12px
     radius_xl = "1rem"  # 16px
     radius_2xl = "1.5rem"  # 24px

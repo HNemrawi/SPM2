@@ -9,6 +9,7 @@ import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
+from src.ui.factories.charts import build_flow_sankey
 from src.ui.factories.components import ui
 from src.ui.themes.styles import NeutralColors
 
@@ -212,163 +213,18 @@ def get_top_flows_from_pivot(
 def plot_flow_sankey(
     pivot_df: pd.DataFrame, title: str = "Exit → Return Sankey Diagram"
 ) -> go.Figure:
+    """Render the Outbound Recidivism Exit → Return Sankey via the shared builder.
+
+    "No Return" is highlighted in the in-theme teal so the positive analytic
+    sink stands out from the other return buckets.
     """
-    Build a Sankey diagram to visualize the flow from exit to return categories.
-
-    Parameters:
-        pivot_df (pd.DataFrame): Crosstab pivot table
-        title (str): Diagram title
-
-    Returns:
-        go.Figure: Plotly Sankey diagram
-    """
-    # If no flows are present
-    if pivot_df.empty:
-        fig = go.Figure()
-        fig.add_annotation(
-            text="No flows available",
-            xref="paper",
-            yref="paper",
-            x=0.5,
-            y=0.5,
-            showarrow=False,
-            font=dict(size=16, color="#404040"),
-        )
-        fig.update_layout(
-            title=title,
-            xaxis_visible=False,
-            yaxis_visible=False,
-            paper_bgcolor="rgba(0,0,0,0)",
-            plot_bgcolor="rgba(0,0,0,0)",
-            height=400,
-        )
-        return fig
-
-    df = pivot_df.copy()
-    exit_cats = df.index.tolist()
-    return_cats = df.columns.tolist()
-    nodes = exit_cats + return_cats
-    n_exit = len(exit_cats)
-    node_types = ["Exit"] * n_exit + ["Return"] * len(return_cats)
-
-    # Define node colors based on type
-    node_colors = [NeutralColors.CHART_COLORS[0]] * n_exit + [
-        NeutralColors.CHART_COLORS[1]
-    ] * len(return_cats)
-
-    sources, targets, values = [], [], []
-    for i, ecat in enumerate(exit_cats):
-        for j, rcat in enumerate(return_cats):
-            count = df.loc[ecat, rcat]
-            if count > 0:
-                sources.append(i)
-                targets.append(n_exit + j)
-                values.append(int(count))
-
-    sankey = go.Sankey(
-        node=dict(
-            pad=25,  # More padding between nodes
-            thickness=25,  # Thicker nodes for better label visibility
-            line=dict(
-                color="rgba(0, 0, 0, 0.2)", width=2
-            ),  # Black border for definition
-            label=nodes,
-            color=node_colors,
-            customdata=node_types,
-            hovertemplate="%{label}<br>%{customdata}: %{value}<extra></extra>",
-            # Force label positioning
-            x=[0.001] * n_exit
-            + [0.999] * len(return_cats),  # Push nodes to edges
-            y=None,  # Let Plotly optimize vertical positioning
-        ),
-        link=dict(
-            source=sources,
-            target=targets,
-            value=values,
-            color="rgba(128, 128, 128, 0.15)",  # Very light links
-            hovertemplate="From: %{source.label}<br>To: %{target.label}<br>Count: %{value}<extra></extra>",
-        ),
-        textfont=dict(
-            color="rgba(255, 255, 255, 0.95)",  # White text on colored nodes
-            size=12,
-            family="Arial, sans-serif",
-            weight=600,  # Bold text for better readability
-        ),
-        arrangement="snap",  # Snap to grid for better layout
-        orientation="h",  # Horizontal orientation
+    return build_flow_sankey(
+        pivot_df,
+        title,
+        source_role="Exit",
+        target_role="Return",
+        accent_targets=frozenset({"No Return"}),
     )
-
-    fig = go.Figure(data=[sankey])
-
-    # Calculate dynamic height with more generous spacing
-    num_nodes = max(len(exit_cats), len(return_cats))
-    min_height = 600
-    height_per_node = 40  # More space per node
-    calculated_height = max(min_height, num_nodes * height_per_node + 250)
-
-    fig.update_layout(
-        title=dict(
-            text=title,
-            font=dict(
-                size=18,
-                color="#404040",  # Dark gray that's visible in both themes
-                family="Arial, sans-serif",
-                weight=600,
-            ),
-            x=0.5,
-            xanchor="center",
-            y=0.98,
-            yanchor="top",
-        ),
-        font=dict(size=12, color="#404040", family="Arial, sans-serif"),
-        height=calculated_height,
-        margin=dict(
-            l=150,  # Large left margin for exit labels
-            r=150,  # Large right margin for return labels
-            t=100,  # Top margin for title
-            b=100,  # Bottom margin to prevent cutoff
-        ),
-        paper_bgcolor="rgba(0,0,0,0)",
-        plot_bgcolor="rgba(0,0,0,0)",
-        hoverlabel=dict(
-            bgcolor="rgba(50, 50, 50, 0.95)",  # Dark background
-            font=dict(color="white", size=13, family="Arial, sans-serif"),
-            bordercolor="rgba(255, 255, 255, 0.3)",
-            namelength=-1,  # Show full label names
-        ),
-        # Force the plot to use full width
-        autosize=True,
-        xaxis=dict(showgrid=False, zeroline=False, visible=False),
-        yaxis=dict(showgrid=False, zeroline=False, visible=False),
-    )
-
-    for i, label in enumerate(exit_cats):
-        fig.add_annotation(
-            x=-0.05,
-            y=i / (len(exit_cats) - 1) if len(exit_cats) > 1 else 0.5,
-            text=f"Exit: {label}",
-            showarrow=False,
-            xref="paper",
-            yref="paper",
-            xanchor="right",
-            yanchor="middle",
-            font=dict(size=11, color="#404040", family="Arial, sans-serif"),
-        )
-
-    for i, label in enumerate(return_cats):
-        fig.add_annotation(
-            x=1.05,
-            y=i / (len(return_cats) - 1) if len(return_cats) > 1 else 0.5,
-            text=f"Return: {label}",
-            showarrow=False,
-            xref="paper",
-            yref="paper",
-            xanchor="left",
-            yanchor="middle",
-            font=dict(size=11, color="#404040", family="Arial, sans-serif"),
-        )
-
-    return fig
 
 
 def plot_days_to_return_box(final_df: pd.DataFrame) -> go.Figure:

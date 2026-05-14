@@ -536,7 +536,7 @@ def render_welcome_screen() -> None:
         background: linear-gradient(135deg, {theme.colors.primary_bg}
             0%, {theme.colors.background} 50%, {theme.colors.background_secondary} 100%);
         border: 1px solid {theme.colors.border};
-        border-radius: 20px;
+        border-radius: 1.25rem;
         margin: 3rem auto;
         max-width: 700px;
         box-shadow: 0 10px 25px {primary_rgba_10}, 0 6px 10px {primary_rgba_05};
@@ -588,7 +588,7 @@ def render_welcome_screen() -> None:
             color: white;
             display: inline-block;
             padding: 1rem 2.5rem;
-            border-radius: 12px;
+            border-radius: 0.75rem;
             font-weight: 600;
             font-size: 1.125rem;
             box-shadow: 0 4px 14px {primary_rgba_40};
@@ -992,36 +992,16 @@ def main() -> None:
     # Inject custom CSS for improved component styling
     inject_custom_css()
 
-    # Professional header with enhanced styling using theme colors
+    # Professional header — sourced from html_factory so theme tokens stay
+    # the single source of truth.
     st.html(
-        f"""
-    <div style="
-        text-align: center;
-        padding: 2rem 0;
-        background: linear-gradient(180deg, {theme.colors.background_secondary}
-            0%, {theme.colors.background} 100%);
-        border-bottom: 1px solid {theme.colors.border};
-        margin: -1rem -1rem 2rem -1rem;
-    ">
-        <h1 style="
-            color: {theme.colors.primary};
-            font-size: 2.5rem;
-            font-weight: 700;
-            margin-bottom: 0.5rem;
-            letter-spacing: -0.025em;
-        ">
-            📊 HMIS Data Analysis Suite
-        </h1>
-        <p style="
-            color: {theme.colors.text_secondary};
-            font-size: 1.125rem;
-            margin: 0;
-            font-weight: 400;
-        ">
-            Homeless Management Information Systems (HMIS) data analysis and reporting platform
-        </p>
-    </div>
-    """
+        html_factory.page_header(
+            title="📊 HMIS Data Analysis Suite",
+            subtitle=(
+                "Homeless Management Information Systems (HMIS) data "
+                "analysis and reporting platform"
+            ),
+        )
     )
 
     # Sidebar and module selection

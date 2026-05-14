@@ -752,6 +752,179 @@ class HTMLFactory:
         """Generate padding style."""
         return f"padding: {top} {right} {bottom} {left};"
 
+    # ==================== DASH-STYLE PRIMITIVES ====================
+
+    def eyebrow(self, text: str) -> str:
+        """Small uppercase label used above KPIs, filters, and section starts.
+
+        Renders with the ``.eyebrow`` class defined in styles.py — muted
+        color, letter-spaced, semibold. Designed to pair with a hero KPI
+        or numeric callout below it.
+        """
+        return f'<div class="eyebrow">{text}</div>'
+
+    def panel(
+        self,
+        content: str,
+        *,
+        lede: bool = False,
+    ) -> str:
+        """Wrap ``content`` in a DASH-style ``.panel`` card.
+
+        Args:
+            content: Inner HTML (already-rendered fragments OK).
+            lede: When True, use the ``.panel--lede`` chapter-headlining
+                variant with more generous padding.
+        """
+        klass = "panel panel--lede" if lede else "panel"
+        return f'<div class="{klass}">{content}</div>'
+
+    def kpi_card(
+        self,
+        label: str,
+        value: Any,
+        *,
+        hero: bool = False,
+        delta_pill: Optional[str] = None,
+    ) -> str:
+        """Render a labeled KPI card with tabular numerics.
+
+        Args:
+            label: Short uppercase-style label rendered as an eyebrow.
+            value: The big number. Already-formatted string preferred.
+            hero: Use the editorial hero variant (left-aligned, larger,
+                gradient background) for the lead KPI of a section.
+            delta_pill: Optional already-rendered ``.pill`` HTML (e.g.
+                from :meth:`rate_pill`) shown beneath the value.
+        """
+        eyebrow_html = self.eyebrow(label)
+        if hero:
+            value_html = f'<div class="hero-kpi">{value}</div>'
+            yoy_html = (
+                f'<div class="yoy">{delta_pill}</div>' if delta_pill else ""
+            )
+            return (
+                f'<div class="kpi-card kpi-card--hero">'
+                f"{eyebrow_html}{value_html}{yoy_html}</div>"
+            )
+        value_html = f'<div class="num">{value}</div>'
+        pill_html = (
+            f'<div style="margin-top: 0.5rem;">{delta_pill}</div>'
+            if delta_pill
+            else ""
+        )
+        return (
+            f'<div class="kpi-card">{eyebrow_html}{value_html}{pill_html}</div>'
+        )
+
+    def rate_pill(self, text: str, status: str = "mid") -> str:
+        """Render a status pill chip.
+
+        Args:
+            text: Pill contents (usually a small number + percent or label).
+            status: One of ``good`` / ``bad`` / ``mid`` / ``warn`` / ``info``.
+        """
+        valid = {"good", "bad", "mid", "warn", "info"}
+        cls = status if status in valid else "mid"
+        return f'<span class="pill pill--{cls}">{text}</span>'
+
+    def three_things(self, items: List[Dict[str, str]]) -> str:
+        """Render a three-column callout grid.
+
+        Args:
+            items: Iterable of three dicts with keys ``status`` (``good``/
+                ``bad``/``mid``), ``icon`` (emoji or character), ``title``
+                (heading), and ``body`` (short paragraph).
+        """
+        cells: List[str] = []
+        for item in items:
+            status = item.get("status", "mid")
+            icon = item.get("icon", "")
+            title = item.get("title", "")
+            body = item.get("body", "")
+            cells.append(
+                f'<div><div class="three-things__icon three-things__icon--{status}">'
+                f"{icon}</div>"
+                f'<div style="font-weight: 600; color: var(--text-primary); '
+                f'margin-bottom: 0.25rem;">{title}</div>'
+                f'<div style="color: var(--text-secondary); font-size: 0.875rem; '
+                f'line-height: 1.5;">{body}</div></div>'
+            )
+        return f'<div class="three-things">{"".join(cells)}</div>'
+
+    def page_header(
+        self,
+        title: str,
+        subtitle: Optional[str] = None,
+        badge: Optional[str] = None,
+    ) -> str:
+        """Render the editorial page header used at the top of main.py.
+
+        Replaces the inline-style block that previously lived in ``main.py``.
+        Pulls all colors and gradients from the theme so this is the only
+        place those values need to be tuned.
+        """
+        bg = (
+            f"linear-gradient(180deg, {self.theme.colors.background_secondary} "
+            f"0%, {self.theme.colors.background} 100%)"
+        )
+        subtitle_html = (
+            f'<p style="color: {self.theme.colors.text_secondary}; '
+            f'font-size: 1.125rem; margin: 0; font-weight: 400;">{subtitle}</p>'
+            if subtitle
+            else ""
+        )
+        badge_html = (
+            f'<div style="margin-bottom: 0.5rem;">{self.rate_pill(badge, "info")}</div>'
+            if badge
+            else ""
+        )
+        return (
+            f'<div style="text-align: center; padding: 2rem 0; '
+            f'background: {bg}; '
+            f"border-bottom: 1px solid {self.theme.colors.border}; "
+            f'margin: -1rem -1rem 2rem -1rem;">'
+            f"{badge_html}"
+            f'<h1 style="color: {self.theme.colors.primary}; '
+            f"font-size: clamp(1.75rem, 1.4rem + 1.5vw, 2.5rem); font-weight: 700; "
+            f'margin-bottom: 0.5rem; letter-spacing: -0.025em;">{title}</h1>'
+            f"{subtitle_html}"
+            f"</div>"
+        )
+
+    def welcome_banner(
+        self,
+        title: str,
+        subtitle: str,
+        icon: Optional[str] = None,
+    ) -> str:
+        """Render the welcome card shown when no data is loaded.
+
+        Replaces the inline-style block previously in ``main.render_welcome_screen``.
+        """
+        icon_html = (
+            f'<div style="font-size: clamp(3rem, 2rem + 3vw, 4.5rem); '
+            f'margin-bottom: 1.5rem; filter: drop-shadow(0 4px 6px rgba(0, 0, 0, 0.1));">'
+            f"{icon}</div>"
+            if icon
+            else ""
+        )
+        return (
+            f'<div style="text-align: center; padding: 4rem 3rem; '
+            f"background: linear-gradient(135deg, {self.theme.colors.primary_bg} 0%, "
+            f"{self.theme.colors.background} 50%, "
+            f"{self.theme.colors.background_secondary} 100%); "
+            f"border: 1px solid {self.theme.colors.border}; "
+            f"border-radius: 1.25rem; margin: 3rem auto; max-width: 700px; "
+            f"box-shadow: {self.theme.shadows.lg}; position: relative; overflow: hidden;\">"
+            f"{icon_html}"
+            f'<h2 class="heading-fluid-2" style="color: {self.theme.colors.text_primary}; '
+            f'margin-bottom: 1rem; font-weight: 700; letter-spacing: -0.025em;">{title}</h2>'
+            f'<p class="lede" style="margin: 0 auto 2.5rem auto; max-width: 500px;">'
+            f"{subtitle}</p>"
+            f"</div>"
+        )
+
 
 # Create global instance
 html_factory = HTMLFactory()

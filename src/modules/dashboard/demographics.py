@@ -893,29 +893,10 @@ def _create_outcome_quadrant_chart(df: DataFrame, dim_col: str) -> go.Figure:
     # Create more distinct color palette for groups
     n_groups = len(comparison_df[dim_col].unique())
 
-    # Define a more distinct color palette with good contrast in both themes
-    distinct_colors = [
-        "#FF6B6B",  # Bright red
-        "#4ECDC4",  # Turquoise
-        "#45B7D1",  # Sky blue
-        "#96CEB4",  # Mint green
-        "#DDA0DD",  # Plum
-        "#FFA07A",  # Light salmon
-        "#98D8C8",  # Seafoam
-        "#F7DC6F",  # Light yellow
-        "#BB8FCE",  # Light purple
-        "#85C1E2",  # Light blue
-        "#F8B739",  # Golden yellow
-        "#52BE80",  # Medium green
-        "#EC7063",  # Soft red
-        "#5DADE2",  # Bright blue
-        "#45B39D",  # Teal
-        "#F5B041",  # Orange
-        "#AF7AC5",  # Purple
-        "#48C9B0",  # Turquoise green
-        "#F1948A",  # Coral
-        "#85929E",  # Blue gray
-    ]
+    # Canonical categorical palette from the unified theme (Wong 7-color,
+    # colorblind-safe). For demographic breakdowns with more than 7 groups,
+    # the HSL fallback below extends the palette while preserving distinctness.
+    distinct_colors = list(theme.colors.chart_colors_categorical)
 
     # Use custom colors if available, otherwise generate from color scale
     if n_groups <= len(distinct_colors):
@@ -1396,7 +1377,7 @@ def render_breakdown_section(
         filter_warning_html = f"""
         <div style="background-color: rgba(255,165,0,0.1); border: 2px solid {WARNING_COLOR}
                                                                               ;
-                    border-radius: 10px; padding: 15px; margin-bottom: 20px;">
+                    border-radius: 0.625rem; padding: 0.9375rem; margin-bottom: 1.25rem;">
             <strong>🔍 Filtered View Active</strong><br>
             Breakdown shows data for filtered subset only. Inflow/outflow are within this subset.
             Returns are tracked system-wide.

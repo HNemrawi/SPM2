@@ -254,7 +254,7 @@ def _create_los_summary_html(
         dominant_type = "Mixed"
 
     # Create metric cards
-    metrics_html = "<div style='display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px; margin: 1rem 0;'>"
+    metrics_html = "<div style='display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 12.5rem), 1fr)); gap: 1.25rem; margin: 1rem 0;'>"
 
     # Average Stay metric
     metrics_html += html_factory.metric_card(
@@ -296,8 +296,8 @@ def _create_los_summary_html(
 
     # Context information
     context_info = f"""
-    <p style='margin: 0 0 10px 0; font-size: 16px;'>{desc}</p>
-    <p style='margin: 0 0 15px 0; font-size: 14px; color: {theme.colors.text_secondary}
+    <p style='margin: 0 0 0.625rem 0; font-size: 1rem;'>{desc}</p>
+    <p style='margin: 0 0 0.9375rem 0; font-size: 0.875rem; color: {theme.colors.text_secondary}
         ;'>
         <strong>Dominant Project Type:</strong> {dominant_type} |
         <strong>Analysis Level:</strong> Enrollment-based ({total_enrollments:,} enrollments from {unique_clients:,} unique clients)
@@ -340,7 +340,7 @@ def _create_demographic_insights_html(
         disparity_color = DANGER_COLOR
 
     # Create metric cards for the key patterns
-    metrics_html = "<div style='display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 20px; margin: 1rem 0;'>"
+    metrics_html = "<div style='display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 15.625rem), 1fr)); gap: 1.25rem; margin: 1rem 0;'>"
 
     # Longest stays metric
     metrics_html += html_factory.metric_card(
@@ -1122,7 +1122,7 @@ def render_length_of_stay(df_filt: DataFrame) -> None:
         warning_content = f"""
         Found {los_data['data_quality_issues']}
             enrollment(s) with data quality issues:
-        <ul style='margin: 10px 0; padding-left: 20px;'>
+        <ul style='margin: 0.625rem 0; padding-left: 1.25rem;'>
             <li>{'</li><li>'.join(warning_issues)}</li>
         </ul>
         <em>Please review and correct these data entry errors in the source system.</em>
@@ -1236,12 +1236,12 @@ def render_length_of_stay(df_filt: DataFrame) -> None:
         st.plotly_chart(fig, width="stretch")
 
         # Category explanation with improved UI
-        category_content = "<div style='display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px;'>"
+        category_content = "<div style='display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 12.5rem), 1fr)); gap: 0.625rem;'>"
 
         for category, info in LOS_CATEGORIES.items():
             category_content += f"""
-                <div style='display: flex; align-items: center; gap: 10px;'>
-                    <div style='width: 20px; height: 20px; background-color: {info['color']};
+                <div style='display: flex; align-items: center; gap: 0.625rem;'>
+                    <div style='width: 1.25rem; height: 1.25rem; background-color: {info['color']};
                                 border-radius: 3px; border: 1px solid white;'></div>
                     <span><strong>{category}
                 </strong>: {info['desc']}</span>
@@ -1330,7 +1330,7 @@ def render_length_of_stay(df_filt: DataFrame) -> None:
         # Add explanation with improved UI
         demo_explanation = """
         <strong>Why this matters:</strong> Identifying disparities in length of stay can reveal:
-        <ul style='margin: 10px 0; padding-left: 20px;'>
+        <ul style='margin: 0.625rem 0; padding-left: 1.25rem;'>
             <li>Groups facing additional housing barriers</li>
             <li>Potential service gaps or mismatches</li>
             <li>Opportunities for targeted interventions</li>
@@ -1589,8 +1589,8 @@ def render_length_of_stay(df_filt: DataFrame) -> None:
 
         # Chart guide
         chart_guide_html = f"""
-        <div style="background-color: rgba(0,0,0,0.2); border-radius: 8px; padding: 10px; margin: 10px 0;">
-            <p style="margin: 0; font-size: 14px;">
+        <div style="background-color: rgba(0,0,0,0.2); border-radius: 8px; padding: 0.625rem; margin: 0.625rem 0;">
+            <p style="margin: 0; font-size: 0.875rem;">
                 📊 <strong>Chart Guide:</strong>
                 Bar shows typical range (25th-75th percentile) |
                 <span style="color: {MAIN_COLOR};">Blue line</span> = median |
@@ -1734,7 +1734,7 @@ def render_length_of_stay(df_filt: DataFrame) -> None:
                         if ph_groups:
                             success_content = f"""
                             These permanent housing programs show excellent housing stability with extended stays:
-                            <div style='padding-left: 20px; margin: 10px 0;'>{groups_text}</div>
+                            <div style='padding-left: 1.25rem; margin: 0.625rem 0;'>{groups_text}</div>
                             <em>Long stays in permanent housing indicate successful housing retention.</em>
                             """
 
@@ -1747,7 +1747,7 @@ def render_length_of_stay(df_filt: DataFrame) -> None:
                         else:
                             extended_content = f"""
                             These groups have stays at least 50% longer than average:
-                            <div style='padding-left: 20px; margin: 10px 0;'>{groups_text}
+                            <div style='padding-left: 1.25rem; margin: 0.625rem 0;'>{groups_text}
                                 </div>
                             """
 
@@ -1760,7 +1760,7 @@ def render_length_of_stay(df_filt: DataFrame) -> None:
                     else:
                         extended_content = f"""
                         These groups have stays at least 50% longer than average:
-                        <div style='padding-left: 20px; margin: 10px 0;'>{groups_text}
+                        <div style='padding-left: 1.25rem; margin: 0.625rem 0;'>{groups_text}
                             </div>
                         """
 

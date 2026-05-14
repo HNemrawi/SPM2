@@ -973,7 +973,8 @@ def display_ph_comparison(out_df: pd.DataFrame) -> None:
         nonph_df = out_df[~out_df["PH_Exit"]]
 
         # Create columns with proper spacing
-        c1, spacer, c2 = st.columns([5, 0.2, 5])
+        # Gutter of 1 (not 0.2) survives the narrow-viewport reflow.
+        c1, spacer, c2 = st.columns([5, 1, 5], gap="small")
 
         with c1:
             st.html(

@@ -13,54 +13,47 @@ from src.ui.themes.theme import theme
 
 
 class NeutralColors:
+    """Backward-compat passthrough — every attribute now aliases the
+    canonical ``theme.colors`` tokens so this class can no longer drift
+    from the rest of the app. New code should import ``theme`` directly
+    from ``src.ui.themes.theme`` and use ``theme.colors.*``.
     """
-    Neutral color system using CSS variables for theme adaptability.
-    These colors are chosen to have good contrast in both light and dark modes.
-    """
 
-    # Primary brand colors - work well in both modes
-    PRIMARY = "#0066CC"  # Professional blue
-    PRIMARY_HOVER = "#0052A3"  # Darker blue for hover states
-    PRIMARY_LIGHT = "#E6F0FF"  # Very light blue for backgrounds
+    # Primary brand colors
+    PRIMARY = theme.colors.primary
+    PRIMARY_HOVER = theme.colors.primary_hover
+    PRIMARY_LIGHT = theme.colors.primary_bg
 
-    # Semantic colors - carefully chosen for both modes
-    SUCCESS = "#059862"  # Green that's not too bright
-    SUCCESS_LIGHT = "#E6F7F1"
-    WARNING = "#D97706"  # Amber that's readable in both modes
-    WARNING_LIGHT = "#FEF3E2"
-    DANGER = "#DC2626"  # Red that's not too harsh
-    DANGER_LIGHT = "#FEE2E2"
-    INFO = "#0066CC"  # Same as primary
-    INFO_LIGHT = "#E6F0FF"
+    # Semantic colors
+    SUCCESS = theme.colors.success
+    SUCCESS_LIGHT = theme.colors.success_bg
+    WARNING = theme.colors.warning
+    WARNING_LIGHT = theme.colors.warning_bg
+    DANGER = theme.colors.danger
+    DANGER_LIGHT = theme.colors.danger_bg
+    INFO = theme.colors.info
+    INFO_LIGHT = theme.colors.info_bg
 
-    # Neutral grays - work with any background
-    NEUTRAL_900 = "#111827"  # Almost black
-    NEUTRAL_800 = "#1F2937"  # Dark gray
-    NEUTRAL_700 = "#374151"
-    NEUTRAL_600 = "#4B5563"
-    NEUTRAL_500 = "#6B7280"  # Mid gray
-    NEUTRAL_400 = "#9CA3AF"
-    NEUTRAL_300 = "#D1D5DB"
-    NEUTRAL_200 = "#E5E7EB"
-    NEUTRAL_100 = "#F3F4F6"  # Very light gray
-    NEUTRAL_50 = "#F9FAFB"  # Almost white
+    # Neutral grays
+    NEUTRAL_900 = theme.colors.neutral_900
+    NEUTRAL_800 = theme.colors.neutral_800
+    NEUTRAL_700 = theme.colors.neutral_700
+    NEUTRAL_600 = theme.colors.neutral_600
+    NEUTRAL_500 = theme.colors.neutral_500
+    NEUTRAL_400 = theme.colors.neutral_400
+    NEUTRAL_300 = theme.colors.neutral_300
+    NEUTRAL_200 = theme.colors.neutral_200
+    NEUTRAL_100 = theme.colors.neutral_100
+    NEUTRAL_50 = theme.colors.neutral_50
 
-    # Adaptive colors using currentColor and opacity
-    BORDER_COLOR = "rgba(0, 0, 0, 0.1)"  # Works on any background
+    # Adaptive overlays — kept independent of theme.colors because they
+    # are currentColor-relative, not palette-derived.
+    BORDER_COLOR = theme.colors.border
     SHADOW_COLOR = "rgba(0, 0, 0, 0.1)"
     OVERLAY_COLOR = "rgba(0, 0, 0, 0.05)"
 
-    # Chart colors - distinct in both modes
-    CHART_COLORS = [
-        "#0066CC",  # Primary blue
-        "#059862",  # Success green
-        "#D97706",  # Warning amber
-        "#DC2626",  # Danger red
-        "#7C3AED",  # Purple
-        "#0891B2",  # Cyan
-        "#EC4899",  # Pink
-        "#6366F1",  # Indigo
-    ]
+    # Chart colors — Wong colorblind-safe palette from theme.
+    CHART_COLORS = theme.colors.chart_colors_categorical
 
 
 # ==================== CSS STYLES ====================
@@ -73,35 +66,135 @@ def get_neutral_css() -> str:
     """
     return f"""
     <style>
-    /* ===== CSS Variables for Theme Adaptability ===== */
+    /* =====================================================================
+       STREAMLIT INTERNAL SELECTORS THIS BUNDLE DEPENDS ON
+       These targets are NOT public API. They are auto-generated or
+       semi-stable attributes that may change across Streamlit versions.
+       Revalidate after every Streamlit upgrade.
+
+         section[data-testid="stSidebar"]           — sidebar root (stable ≥1.30)
+         [data-testid="stMetric"] / metric-container — st.metric wrappers
+         [data-testid="stMetricValue"]              — metric number
+         [data-testid="stMetricDelta"]              — metric delta
+         [data-testid="metric-value"]               — alternate (older builds)
+         [data-testid="stForm"] / stFormSubmitButton — st.form internals
+         [data-testid="stDateInput"]                — date picker
+         [data-testid="stCheckbox"]                 — checkbox
+         [data-testid="stNotification"]             — toast/notification
+         [data-testid="stExpander"]                 — expander panels
+         [data-testid="stVerticalBlock"]            — generic block wrapper
+         .stTabs [data-baseweb="tab-list"]          — tab strip (BaseWeb)
+         .stTabs [data-baseweb="tab"]               — individual tab
+         .stTabs [data-baseweb="tab-panel"]         — active panel
+         .stMultiSelect [data-baseweb="tag"]        — multiselect pill
+         .stSelectbox [data-baseweb="select"]       — selectbox shell
+         .stButton > button                         — button element
+         .stDataFrame                               — Arrow dataframe wrapper
+         .streamlit-expanderHeader                  — legacy expander header
+         .main > .block-container                   — main content container
+
+       The previously-targeted ``.css-1d391kg`` (autogenerated sidebar
+       class) was removed — secondaryBackgroundColor in config.toml drives
+       the sidebar now.
+       ===================================================================== */
+
+    /* =====================================================================
+       DESIGN TOKENS — single source of truth, all bound to theme.* in
+       src/ui/themes/theme.py. Token taxonomy mirrors a DASH-style editorial
+       dashboard system applied to this app's existing palette. Legacy var
+       names (--text-color, --background-color, --border-color, etc.) are
+       defined as aliases so existing inline-style consumers (trends.py,
+       filters.py) continue to resolve.
+       ===================================================================== */
     :root {{
-        /* Adaptive text colors using system preferences */
-        --text-primary: color-mix(in srgb, currentColor 90%, transparent);
-        --text-secondary: color-mix(in srgb, currentColor 70%, transparent);
-        --text-muted: color-mix(in srgb, currentColor 50%, transparent);
+        /* Brand */
+        --brand-deep:  {theme.colors.primary};
+        --brand-mid:   {theme.colors.primary_hover};
+        --brand-dark:  {theme.colors.primary_dark};
+        --brand-light: {theme.colors.primary_light};
+        --brand-bg:    {theme.colors.primary_bg};
 
-        /* Adaptive backgrounds using transparency */
-        --bg-card: rgba(128, 128, 128, 0.05);
-        --bg-hover: rgba(128, 128, 128, 0.1);
-        --bg-active: rgba(128, 128, 128, 0.15);
+        /* Surfaces */
+        --bg-page:     {theme.colors.background_secondary};
+        --bg-card:     {theme.colors.background};
+        --bg-card-alt: {theme.colors.surface};
+        --bg-hover:    {theme.colors.surface_hover};
+        --bg-active:   {theme.colors.surface_hover};
 
-        /* Borders that work on any background */
-        --border-color: {NeutralColors.BORDER_COLOR};
-        --border-radius: 8px;
-        --border-radius-sm: 4px;
-        --border-radius-lg: 12px;
+        /* Borders */
+        --border:       {theme.colors.border};
+        --border-light: {theme.colors.border_light};
+        --border-dark:  {theme.colors.border_dark};
 
-        /* Shadows with transparency */
-        --shadow-sm: 0 1px 2px 0 {NeutralColors.SHADOW_COLOR};
-        --shadow-md: 0 4px 6px -1px {NeutralColors.SHADOW_COLOR};
-        --shadow-lg: 0 10px 15px -3px {NeutralColors.SHADOW_COLOR};
+        /* Text */
+        --text-primary:   {theme.colors.text_primary};
+        --text-secondary: {theme.colors.text_secondary};
+        --text-muted:     {theme.colors.text_muted};
 
-        /* Spacing system */
-        --spacing-xs: 0.25rem;
-        --spacing-sm: 0.5rem;
-        --spacing-md: 1rem;
-        --spacing-lg: 1.5rem;
-        --spacing-xl: 2rem;
+        /* Status (DASH "rate" semantics mapped to our semantic colors) */
+        --good:        {theme.colors.success};
+        --good-bg:     {theme.colors.success_bg};
+        --bad:         {theme.colors.danger};
+        --bad-bg:      {theme.colors.danger_bg};
+        --warn:        {theme.colors.warning};
+        --warn-bg:     {theme.colors.warning_bg};
+        --info-color:  {theme.colors.info};
+        --info-bg:     {theme.colors.info_bg};
+        --neutral:     {theme.colors.neutral_500};
+        --neutral-bg:  {theme.colors.neutral_100};
+
+        /* Spacing (4px scale) */
+        --sp-1: {theme.spacing.xs};      /* 0.25rem */
+        --sp-2: {theme.spacing.sm};      /* 0.5rem  */
+        --sp-3: 0.75rem;
+        --sp-4: {theme.spacing.md};      /* 1rem    */
+        --sp-5: 1.25rem;
+        --sp-6: {theme.spacing.lg};      /* 1.5rem  */
+        --sp-7: {theme.spacing.xl};      /* 2rem    */
+        --sp-8: 2.5rem;
+        --sp-9: {theme.spacing.xxl};     /* 3rem    */
+        --sp-10: {theme.spacing.xxxl};   /* 4rem    */
+
+        /* Radii */
+        --r-xs:   {theme.borders.radius_sm};   /* 0.25rem */
+        --r-sm:   {theme.borders.radius_md};   /* 0.5rem  */
+        --r:      {theme.borders.radius_md};   /* default 0.5rem */
+        --r-lg:   {theme.borders.radius_lg};   /* 0.75rem */
+        --r-xl:   {theme.borders.radius_xl};   /* 1rem    */
+        --r-full: {theme.borders.radius_full}; /* 9999px  */
+
+        /* Shadows */
+        --shadow-xs:    {theme.shadows.sm};
+        --shadow-sm:    {theme.shadows.card};
+        --shadow-md:    {theme.shadows.md};
+        --shadow-lg:    {theme.shadows.lg};
+        --shadow-hover: {theme.shadows.hover};
+
+        /* Font stacks */
+        --font-sans: {theme.typography.font_family};
+        --font-mono: {theme.typography.font_mono};
+
+        /* Page padding token — paired with the tab-strip full-bleed
+           negative-margin hack so the two values can't drift apart.
+           If you change the value here, both `.main > .block-container`
+           padding and `.stTabs [data-baseweb="tab-list"]` negative
+           margin update together. */
+        --block-pad: 5rem;
+
+        /* ----- Legacy aliases (do not remove until callers migrate) ----- */
+        --text-color:                  var(--text-primary);
+        --text-color-secondary:        var(--text-secondary);
+        --background-color:            var(--bg-card);
+        --secondary-background-color:  var(--bg-page);
+        --border-color:                var(--border);
+        --border-radius:               var(--r);
+        --border-radius-sm:            var(--r-xs);
+        --border-radius-lg:            var(--r-lg);
+        --spacing-xs:                  var(--sp-1);
+        --spacing-sm:                  var(--sp-2);
+        --spacing-md:                  var(--sp-4);
+        --spacing-lg:                  var(--sp-6);
+        --spacing-xl:                  var(--sp-7);
     }}
 
     /* ===== Global Resets ===== */
@@ -109,27 +202,20 @@ def get_neutral_css() -> str:
         box-sizing: border-box;
     }}
 
-    /* ===== Typography ===== */
-    html, body, [class*="css"] {{
-        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto,
-                     'Helvetica Neue', Arial, sans-serif;
-        line-height: 1.6;
+    /* ===== Typography =====
+       NOTE: font-family / heading sizes / heading weights / line height are
+       set by Streamlit's native [theme] block in .streamlit/config.toml
+       (font, headingFontSizes, headingFontWeights, baseFontWeight). The
+       only thing left here is anti-aliasing — Streamlit doesn't expose it. */
+    html, body {{
         -webkit-font-smoothing: antialiased;
         -moz-osx-font-smoothing: grayscale;
     }}
 
-    /* Headings with better hierarchy */
     h1, h2, h3, h4, h5, h6 {{
-        font-weight: 600;
-        line-height: 1.25;
         margin-bottom: var(--spacing-md);
         color: var(--text-primary);
     }}
-
-    h1 {{font-size: 2rem; }}
-    h2 {{font-size: 1.5rem; }}
-    h3 {{font-size: 1.25rem; }}
-    h4 {{font-size: 1.125rem; }}
 
     /* ===== Container Styling ===== */
     .block-container {{
@@ -336,11 +422,12 @@ def get_neutral_css() -> str:
         margin: var(--spacing-xl) 0;
     }}
 
-    /* ===== Sidebar ===== */
-    .css-1d391kg {{
-        background: var(--bg-card);
-        border-right: 1px solid var(--border-color);
-    }}
+    /* ===== Sidebar =====
+       Background is driven by [theme] secondaryBackgroundColor in
+       .streamlit/config.toml. The legacy .css-1d391kg selector (autogenerated
+       and brittle across Streamlit versions) has been removed. If sidebar-
+       specific overrides are ever needed, target section[data-testid="stSidebar"]
+       which has been stable since Streamlit 1.30+. */
 
     /* ===== Tooltips ===== */
     .tooltip {{
@@ -368,19 +455,162 @@ def get_neutral_css() -> str:
         outline: none;
     }}
 
+    /* =====================================================================
+       DASH-STYLE COMPONENT CSS
+       Editorial dashboard primitives: panels, KPI cards, rate pills,
+       three-things callout, sticky table headers. All tokens come from
+       :root above so the palette stays unified.
+       ===================================================================== */
+
+    .panel {{
+        background: var(--bg-card);
+        border: 1px solid var(--border-light);
+        border-radius: var(--r);
+        padding: var(--sp-5);
+        box-shadow: var(--shadow-sm);
+        transition: box-shadow .18s cubic-bezier(.165, .84, .44, 1);
+    }}
+    .panel:hover {{box-shadow: var(--shadow-md); }}
+    .panel--lede {{padding: var(--sp-7); }}
+    .panel--lede > h2:first-child {{
+        font-size: clamp(1.5rem, 1.25rem + 1vw, 2rem);
+        margin: 0 0 var(--sp-4);
+        color: var(--text-primary);
+    }}
+
+    .kpi-card {{
+        background: var(--bg-card);
+        border: 1px solid var(--border-light);
+        border-left: 4px solid var(--brand-deep);
+        border-radius: var(--r);
+        padding: var(--sp-5);
+        text-align: center;
+        box-shadow: var(--shadow-sm);
+    }}
+    .kpi-card .eyebrow {{margin-bottom: var(--sp-2); }}
+    .kpi-card .num     {{font-size: 1.75rem; font-weight: 700; color: var(--text-primary); }}
+    .kpi-card--hero {{
+        text-align: left;
+        background: linear-gradient(135deg, var(--bg-card) 0%, var(--bg-page) 100%);
+        display: grid;
+        grid-template-areas: "label" "value" "yoy";
+        gap: var(--sp-2);
+        padding: var(--sp-6);
+    }}
+    .kpi-card--hero .eyebrow  {{grid-area: label; }}
+    .kpi-card--hero .hero-kpi {{grid-area: value; }}
+    .kpi-card--hero .yoy      {{grid-area: yoy; }}
+
+    .pill {{
+        display: inline-block;
+        padding: 2px 10px;
+        border-radius: var(--r-full);
+        font-size: 0.75rem;
+        font-weight: 600;
+        font-variant-numeric: tabular-nums;
+        line-height: 1.5;
+    }}
+    .pill--good {{background: var(--good-bg);    color: var(--good); }}
+    .pill--bad  {{background: var(--bad-bg);     color: var(--bad); }}
+    .pill--mid  {{background: var(--neutral-bg); color: var(--neutral); }}
+    .pill--warn {{background: var(--warn-bg);    color: var(--warn); }}
+    .pill--info {{background: var(--info-bg);    color: var(--info-color); }}
+
+    .three-things {{
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: var(--sp-5);
+        margin: var(--sp-6) 0;
+    }}
+    .three-things__icon {{
+        width: 2.5rem; height: 2.5rem;
+        border-radius: var(--r-full);
+        display: inline-flex; align-items: center; justify-content: center;
+        margin-bottom: var(--sp-3);
+        font-size: 1.25rem;
+    }}
+    .three-things__icon--good {{background: var(--good-bg);    color: var(--good); }}
+    .three-things__icon--bad  {{background: var(--bad-bg);     color: var(--bad); }}
+    .three-things__icon--mid  {{background: var(--neutral-bg); color: var(--neutral); }}
+    @media (max-width: 768px) {{
+        .three-things {{grid-template-columns: 1fr; }}
+    }}
+
+    /* Sticky table headers for wrapped st.dataframe widgets — keeps the
+       header visible when long tables are scrolled inside their container. */
+    .stDataFrame thead th {{
+        position: sticky; top: 0; z-index: 1;
+        background: var(--bg-card-alt);
+    }}
+
     /* ===== Utility classes ===== */
     .text-muted {{color: var(--text-muted); }}
     .text-small {{font-size: 0.875rem; }}
     .text-large {{font-size: 1.125rem; }}
-    .font-mono {{font-family: monospace; }}
+    .font-mono {{font-family: var(--font-mono); }}
 
-    .mt-1 {{margin-top: var(--spacing-sm); }}
-    .mt-2 {{margin-top: var(--spacing-md); }}
-    .mt-3 {{margin-top: var(--spacing-lg); }}
+    .mt-1 {{margin-top: var(--sp-2); }}
+    .mt-2 {{margin-top: var(--sp-4); }}
+    .mt-3 {{margin-top: var(--sp-6); }}
 
-    .mb-1 {{margin-bottom: var(--spacing-sm); }}
-    .mb-2 {{margin-bottom: var(--spacing-md); }}
-    .mb-3 {{margin-bottom: var(--spacing-lg); }}
+    .mb-1 {{margin-bottom: var(--sp-2); }}
+    .mb-2 {{margin-bottom: var(--sp-4); }}
+    .mb-3 {{margin-bottom: var(--sp-6); }}
+
+    /* ===== DASH-style typography utilities ===== */
+    /* Tabular figures for any numeric content (KPIs, table cells, metric
+       values). Digits occupy equal width so columns of numbers align. */
+    .num {{font-variant-numeric: tabular-nums; }}
+
+    /* Auto-apply to Streamlit metric values and dataframe cells so we
+       don't have to add the class at every call site. */
+    [data-testid="stMetricValue"],
+    [data-testid="metric-value"],
+    .stDataFrame td,
+    .stDataFrame th {{
+        font-variant-numeric: tabular-nums;
+    }}
+
+    /* Uppercase "eyebrow" label used above KPIs, filter groups, and section
+       starts. Smaller, muted, letter-spaced. */
+    .eyebrow {{
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        font-weight: 600;
+        color: var(--text-muted);
+        font-size: 0.6875rem;
+        line-height: 1.5;
+    }}
+
+    /* Editorial hero KPI number for the largest single-figure cards. */
+    .hero-kpi {{
+        font-family: var(--font-mono);
+        font-weight: 800;
+        font-size: clamp(2.25rem, 1.5rem + 3vw, 3rem);
+        letter-spacing: -0.025em;
+        font-variant-numeric: tabular-nums;
+        color: var(--text-primary);
+        line-height: 1.1;
+    }}
+
+    /* Lede paragraph — chapter-headlining narrative text capped to
+       comfortable measure. */
+    .lede {{
+        font-size: 1.125rem;
+        line-height: 1.7;
+        color: var(--text-secondary);
+        max-width: 75ch;
+    }}
+    .lede strong {{color: var(--text-primary); font-weight: 600; }}
+    .lede em      {{color: var(--brand-deep); font-style: normal; font-weight: 500; }}
+
+    /* Opt-in fluid heading classes — use these instead of native h1-h6 when
+       a heading should scale with viewport. Streamlit's native
+       headingFontSizes drives bare <h1>..<h6>; these overrides apply only
+       when the class is explicitly set. */
+    .heading-fluid-1 {{font-size: clamp(1.75rem, 1.4rem + 1.5vw, 2.5rem); }}
+    .heading-fluid-2 {{font-size: clamp(1.5rem, 1.25rem + 1vw, 2rem); }}
+    .heading-fluid-3 {{font-size: clamp(1.25rem, 1.1rem + 0.6vw, 1.5rem); }}
 
     /* ===== Responsive adjustments ===== */
     @media (max-width: 768px) {{
@@ -445,8 +675,9 @@ def get_neutral_css() -> str:
         border-radius: {theme.borders.radius_md} !important;
     }}
 
+    /* Header background is now driven by [theme] dataframeHeaderBackgroundColor
+       in config.toml. We keep the typography and border tweaks here. */
     .stDataFrame th {{
-        background-color: {theme.colors.background_secondary} !important;
         color: {theme.colors.text_primary} !important;
         font-weight: 600 !important;
         padding: 12px !important;
@@ -462,16 +693,14 @@ def get_neutral_css() -> str:
         background-color: {theme.colors.surface_hover} !important;
     }}
 
-    /* Soften alert boxes (overrides the .stAlert block above). */
+    /* Soften alert boxes. border-radius is now native (baseRadius). */
     .stAlert {{
-        border-radius: {theme.borders.radius_md} !important;
         padding: 1rem !important;
     }}
 
-    /* Button overrides (theme-token versions; the .stButton block above
-       is the structural baseline). */
+    /* Button overrides — border-radius is now native (baseRadius).
+       The .stButton block above is the structural baseline. */
     .stButton > button {{
-        border-radius: {theme.borders.radius_md} !important;
         font-weight: 500 !important;
         transition: all 0.2s ease !important;
     }}
@@ -481,18 +710,13 @@ def get_neutral_css() -> str:
         box-shadow: {theme.shadows.md} !important;
     }}
 
-    /* Expander header (theme-token override of .streamlit-expanderHeader
-       above). */
+    /* Expander header — border-radius is now native (baseRadius). */
     .streamlit-expanderHeader {{
         background-color: {theme.colors.background_secondary} !important;
-        border-radius: {theme.borders.radius_sm} !important;
         font-weight: 600 !important;
     }}
 
-    /* Selectbox border radius. */
-    .stSelectbox [data-baseweb="select"] {{
-        border-radius: {theme.borders.radius_md} !important;
-    }}
+    /* Selectbox border-radius is now native (baseRadius). */
 
     /* Notification visual weight. */
     [data-testid="stNotification"] {{
@@ -561,29 +785,27 @@ def get_neutral_css() -> str:
 
     /* ===== Tab strip (was dashboard.apply_neutral_tab_style) =====
        NOTE: full-bleed hack ahead. The .stTabs [data-baseweb="tab-list"]
-       block uses `margin: 0 -5rem; padding: 1rem 5rem;` to bleed the tab
-       strip past the page padding, and `.main > .block-container` sets
-       that page padding to 5rem so the negative margin lines up. Both
-       rules MUST stay in sync, and BOTH are fragile against Streamlit
-       DOM-structure changes — revalidate visually on every Streamlit
-       upgrade. */
+       block bleeds past the page padding using a negative margin that
+       must equal the page's left/right padding. To avoid the two values
+       drifting, both now reference `var(--block-pad)` (defined in :root).
+       The hack is still fragile against Streamlit DOM-structure changes —
+       revalidate visually on every Streamlit upgrade. */
     .stTabs {{
         width: 100% !important;
-        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        font-family: var(--font-sans);
     }}
 
     .stTabs [data-baseweb="tab-list"] {{
         gap: 0.75rem;
         background-color: transparent;
-        padding: 1rem;
         border-radius: 0;
         border: none;
-        margin: 0 -5rem;
-        padding: 1rem 5rem;
+        margin: 0 calc(-1 * var(--block-pad));
+        padding: 1rem var(--block-pad);
         margin-bottom: 2rem;
-        background: var(--background-secondary, rgba(0, 0, 0, 0.02));
-        border-top: 1px solid var(--border-color, rgba(0, 0, 0, 0.1));
-        border-bottom: 1px solid var(--border-color, rgba(0, 0, 0, 0.1));
+        background: var(--bg-page);
+        border-top: 1px solid var(--border);
+        border-bottom: 1px solid var(--border);
         display: flex;
         justify-content: center;
     }}
@@ -652,11 +874,12 @@ def get_neutral_css() -> str:
         padding: 1.5rem 0;
     }}
 
-    /* Page padding paired with the negative-margin tab bleed above. */
+    /* Page padding paired with the negative-margin tab bleed above.
+       Single source of truth: var(--block-pad) in :root. */
     .main > .block-container {{
         max-width: 100%;
-        padding-left: 5rem;
-        padding-right: 5rem;
+        padding-left: var(--block-pad);
+        padding-right: var(--block-pad);
     }}
 
     .stTabs [data-baseweb="tab"]:active {{
@@ -704,9 +927,16 @@ def get_neutral_css() -> str:
     }}
 
     @media (max-width: 768px) {{
+        /* Narrow the page padding token at mobile sizes; the tab strip
+           and .main > .block-container both read --block-pad, so this
+           one redefinition propagates to both. */
+        :root {{
+            --block-pad: 1rem;
+        }}
+
         .stTabs [data-baseweb="tab-list"] {{
-            margin: 0 -1rem;
-            padding: 0.75rem 1rem;
+            padding-top: 0.75rem;
+            padding-bottom: 0.75rem;
             overflow-x: auto;
             -webkit-overflow-scrolling: touch;
             scrollbar-width: thin;
@@ -715,17 +945,12 @@ def get_neutral_css() -> str:
         }}
 
         .stTabs [data-baseweb="tab"] {{
-            padding: 0 20px;
+            padding: 0 1.25rem;
             font-size: 0.9rem;
             height: 44px;
-            margin: 0 3px;
+            margin: 0 0.1875rem;
             flex: 0 0 auto;
             min-width: 120px;
-        }}
-
-        .main > .block-container {{
-            padding-left: 1rem;
-            padding-right: 1rem;
         }}
 
         .stTabs [data-baseweb="tab-list"]::-webkit-scrollbar {{
@@ -778,23 +1003,23 @@ def create_info_box(
     """
     type_config = {
         "info": {
-            "bg": "rgba(128, 128, 128, 0.08)",
-            "border": "rgba(128, 128, 128, 0.4)",
+            "bg": theme.colors.info_bg,
+            "border": theme.colors.info,
             "icon": "",
         },
         "success": {
-            "bg": "rgba(128, 128, 128, 0.08)",
-            "border": "rgba(128, 128, 128, 0.4)",
+            "bg": theme.colors.success_bg,
+            "border": theme.colors.success,
             "icon": "",
         },
         "warning": {
-            "bg": "rgba(128, 128, 128, 0.08)",
-            "border": "rgba(128, 128, 128, 0.4)",
+            "bg": theme.colors.warning_bg,
+            "border": theme.colors.warning,
             "icon": "⚠️",
         },
         "danger": {
-            "bg": "rgba(128, 128, 128, 0.08)",
-            "border": "rgba(128, 128, 128, 0.4)",
+            "bg": theme.colors.danger_bg,
+            "border": theme.colors.danger,
             "icon": "❌",
         },
     }

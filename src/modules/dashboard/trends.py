@@ -76,24 +76,11 @@ CHART_COLORS = {
     },
 }
 
-# Custom color sequence for breakdowns
-CUSTOM_COLOR_SEQUENCE = [
-    "#1f77b4",  # muted blue
-    "#ff7f0e",  # safety orange
-    "#2ca02c",  # cooked asparagus green
-    "#d62728",  # brick red
-    "#9467bd",  # muted purple
-    "#8c564b",  # chestnut brown
-    "#e377c2",  # raspberry yogurt pink
-    "#7f7f7f",  # middle gray
-    "#17becf",  # blue-teal
-    "#bcbd22",  # curry yellow-green
-    "#393b79",  # dark slate blue
-    "#637939",  # olive green
-    "#8c6d31",  # brownish yellow
-    "#843c39",  # dark sienna
-    "#7b4173",  # deep magenta
-]
+# Color sequence for chart breakdowns — pulled from the canonical Wong
+# palette in theme.py so trends share the same swatches as every other
+# chart in the app. The name is preserved for backward-compatibility with
+# downstream call sites.
+CUSTOM_COLOR_SEQUENCE = theme_config.colors.chart_colors_categorical
 
 # Neutral metrics
 NEUTRAL_METRICS = {"Active Clients", "Inflow", "Outflow"}
@@ -113,47 +100,48 @@ SUGGESTED_ROLLING_WINDOWS = {
 
 
 def get_theme_colors():
-    """Get colors optimized for current theme (dark/light)."""
-    # Use actual color values that work in CSS
+    """Return module-local view of the canonical theme tokens.
+
+    Sourced from ``src/ui/themes/theme.py`` so trends.py shares colors
+    with the rest of the app.
+    """
+    c = theme_config.colors
     return {
-        "background": "rgba(0, 0, 0, 0.05)",
-        "surface": "rgba(0, 0, 0, 0.02)",
-        "border": "rgba(128, 128, 128, 0.2)",
-        "text_primary": "#333333",  # Dark gray for text
-        "text_secondary": "rgba(128, 128, 128, 0.8)",
-        "success": "#10B981",
-        "warning": "#F59E0B",
-        "danger": "#EF4444",
-        "info": "#3B82F6",
-        "neutral": "#6B7280",
+        "background": c.background,
+        "surface": c.surface,
+        "border": c.border,
+        "text_primary": c.text_primary,
+        "text_secondary": c.text_secondary,
+        "success": c.success,
+        "warning": c.warning,
+        "danger": c.danger,
+        "info": c.info,
+        "neutral": c.neutral_500,
     }
 
 
 def get_plotly_theme():
-    """Get Plotly theme settings that work well in both dark and light modes."""
+    """Return Plotly layout settings sourced from ``chart_factory``.
+
+    Historically this returned a hand-rolled dict that drifted from the
+    canonical chart theme. It now pulls from
+    ``src/ui/factories/charts.py`` so every chart in this module shares
+    layout with the rest of the app. Keys are filtered to the subset
+    callers actually merge into ``fig.update_layout(**theme)``.
+    """
+    from src.ui.factories.charts import chart_factory
+
+    base = chart_factory.get_base_layout()
+    # Caller expects a flat dict that they spread into update_layout; we
+    # cherry-pick keys that are appropriate to merge without arguments
+    # like title/height which are chart-specific.
     return {
-        "plot_bgcolor": "rgba(0,0,0,0)",
-        "paper_bgcolor": "rgba(0,0,0,0)",
-        "font": {
-            "family": "Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
-            "size": 12,
-            "color": "#666666",  # Medium gray that works in both themes
-        },
-        "xaxis": {
-            "gridcolor": "rgba(128, 128, 128, 0.2)",
-            "linecolor": "rgba(128, 128, 128, 0.3)",
-            "tickcolor": "rgba(128, 128, 128, 0.3)",
-        },
-        "yaxis": {
-            "gridcolor": "rgba(128, 128, 128, 0.2)",
-            "linecolor": "rgba(128, 128, 128, 0.3)",
-            "tickcolor": "rgba(128, 128, 128, 0.3)",
-        },
-        "hoverlabel": {
-            "bgcolor": "rgba(0, 0, 0, 0.8)",
-            "bordercolor": "rgba(255, 255, 255, 0.2)",
-            "font": {"size": 13, "color": "white", "family": "monospace"},
-        },
+        "plot_bgcolor": base["plot_bgcolor"],
+        "paper_bgcolor": base["paper_bgcolor"],
+        "font": base["font"],
+        "xaxis": base["xaxis"],
+        "yaxis": base["yaxis"],
+        "hoverlabel": base["hoverlabel"],
     }
 
 
@@ -278,26 +266,26 @@ def _render_metric_explanation_card():
     content = f"""
     <h4 style="margin-top: 0;">📊 Understanding the Metrics</h4>
 
-    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px;">
+    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1rem;">
         <div>
             <strong>Active Clients</strong>
-            <p style="margin: 4px 0; font-size: 14px;">All clients enrolled at any point during the time period</p>
+            <p style="margin: 0.25rem 0; font-size: 0.875rem;">All clients enrolled at any point during the time period</p>
         </div>
         <div>
             <strong>Inflow</strong>
-            <p style="margin: 4px 0; font-size: 14px;">Clients entering during the period who weren't enrolled the day before it started</p>
+            <p style="margin: 0.25rem 0; font-size: 0.875rem;">Clients entering during the period who weren't enrolled the day before it started</p>
         </div>
         <div>
             <strong>Outflow</strong>
-            <p style="margin: 4px 0; font-size: 14px;">Clients who exited during the period and aren't enrolled on the last day</p>
+            <p style="margin: 0.25rem 0; font-size: 0.875rem;">Clients who exited during the period and aren't enrolled on the last day</p>
         </div>
-        <div style="background-color: rgba(16, 185, 129, 0.1); padding: 12px; border-radius: 8px; border: 1px solid rgba(16, 185, 129, 0.3);">
-            <strong>PH Exits</strong> <span style="color: {professional_colors.SUCCESS}; font-size: 12px; font-weight: 600;">✓ Positive Outcome</span>
-            <p style="margin: 4px 0; font-size: 14px;">Clients exiting to permanent housing during the period</p>
+        <div style="background-color: rgba(16, 185, 129, 0.1); padding: 0.75rem; border-radius: 8px; border: 1px solid rgba(16, 185, 129, 0.3);">
+            <strong>PH Exits</strong> <span style="color: {professional_colors.SUCCESS}; font-size: 0.75rem; font-weight: 600;">✓ Positive Outcome</span>
+            <p style="margin: 0.25rem 0; font-size: 0.875rem;">Clients exiting to permanent housing during the period</p>
         </div>
-        <div style="background-color: rgba(239, 68, 68, 0.1); padding: 12px; border-radius: 8px; border: 1px solid rgba(239, 68, 68, 0.3);">
-            <strong>Returns to Homelessness</strong> <span style="color: {professional_colors.ERROR}; font-size: 12px; font-weight: 600;">✗ Negative Outcome</span>
-            <p style="margin: 4px 0; font-size: 14px;">Clients who exited to PH and returned within the specified window</p>
+        <div style="background-color: rgba(239, 68, 68, 0.1); padding: 0.75rem; border-radius: 8px; border: 1px solid rgba(239, 68, 68, 0.3);">
+            <strong>Returns to Homelessness</strong> <span style="color: {professional_colors.ERROR}; font-size: 0.75rem; font-weight: 600;">✗ Negative Outcome</span>
+            <p style="margin: 0.25rem 0; font-size: 0.875rem;">Clients who exited to PH and returned within the specified window</p>
         </div>
     </div>
     """
@@ -990,7 +978,7 @@ def _render_insights_panel(
     <div style="
         background: linear-gradient(135deg, {colors['background']} 0%, rgba(59, 130, 246, 0.05) 100%);
         border-radius: 16px;
-        padding: 24px;
+        padding: 1.5rem;
         border: 1px solid {colors['border']};
         box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
         height: 100%;
@@ -998,22 +986,22 @@ def _render_insights_panel(
         <h3 style="
             color: {colors['text_primary']};
             margin-top: 0;
-            margin-bottom: 20px;
-            font-size: 22px;
+            margin-bottom: 1.25rem;
+            font-size: 1.375rem;
             font-weight: 600;
         ">Key Insights</h3>
 
-        <div style="display: grid; gap: 16px;">
+        <div style="display: grid; gap: 1rem;">
             <div style="
                 background-color: {colors['surface']};
                 border-radius: 12px;
-                padding: 16px;
+                padding: 1rem;
                 border: 1px solid {colors['border']};
             ">
-                <p style="margin: 0; color: {colors['text_secondary']}; font-size: 13px; text-transform: uppercase; letter-spacing: 0.5px;">
+                <p style="margin: 0; color: {colors['text_secondary']}; font-size: 0.8125rem; text-transform: uppercase; letter-spacing: 0.5px;">
                     Current Direction
                 </p>
-                <p style="margin: 6px 0; color: {colors['text_primary']}; font-size: 20px; font-weight: 600;">
+                <p style="margin: 0.375rem 0; color: {colors['text_primary']}; font-size: 1.25rem; font-weight: 600;">
                     {trend_direction.capitalize()} {trend_icon}
                 </p>
             </div>
@@ -1021,56 +1009,56 @@ def _render_insights_panel(
             <div style="
                 background-color: {colors['surface']};
                 border-radius: 12px;
-                padding: 16px;
+                padding: 1rem;
                 border: 1px solid {colors['border']};
             ">
-                <p style="margin: 0; color: {colors['text_secondary']}; font-size: 13px; text-transform: uppercase; letter-spacing: 0.5px;">
+                <p style="margin: 0; color: {colors['text_secondary']}; font-size: 0.8125rem; text-transform: uppercase; letter-spacing: 0.5px;">
                     Current Value
                 </p>
-                <p style="margin: 6px 0; color: {colors['text_primary']}; font-size: 20px; font-weight: 600;">
-                    {fmt_int(last_value)} <span style="font-size: 14px; font-weight: 400;">clients</span>
+                <p style="margin: 0.375rem 0; color: {colors['text_primary']}; font-size: 1.25rem; font-weight: 600;">
+                    {fmt_int(last_value)} <span style="font-size: 0.875rem; font-weight: 400;">clients</span>
                 </p>
             </div>
 
             <div style="
                 background: linear-gradient(135deg, {colors['surface']} 0%, {change_color}10 100%);
                 border-radius: 12px;
-                padding: 16px;
+                padding: 1rem;
                 border: 1px solid {change_color}40;
             ">
-                <p style="margin: 0; color: {colors['text_secondary']}; font-size: 13px; text-transform: uppercase; letter-spacing: 0.5px;">
+                <p style="margin: 0; color: {colors['text_secondary']}; font-size: 0.8125rem; text-transform: uppercase; letter-spacing: 0.5px;">
                     Overall Change
                 </p>
-                <p style="margin: 6px 0; color: {change_color}; font-size: 20px; font-weight: 600;">
-                    {total_change:+,.0f} <span style="font-size: 16px;">({pct_change:+.1f}%)</span>
+                <p style="margin: 0.375rem 0; color: {change_color}; font-size: 1.25rem; font-weight: 600;">
+                    {total_change:+,.0f} <span style="font-size: 1rem;">({pct_change:+.1f}%)</span>
                 </p>
             </div>
 
             <div style="
                 background-color: {colors['surface']};
                 border-radius: 12px;
-                padding: 16px;
+                padding: 1rem;
                 border: 1px solid {colors['border']};
             ">
-                <p style="margin: 0; color: {colors['text_secondary']}; font-size: 13px; text-transform: uppercase; letter-spacing: 0.5px;">
+                <p style="margin: 0; color: {colors['text_secondary']}; font-size: 0.8125rem; text-transform: uppercase; letter-spacing: 0.5px;">
                     Recent Change (Last {recent_periods} {period_label}s)
                 </p>
-                <p style="margin: 6px 0; color: {recent_color}; font-size: 20px; font-weight: 600;">
-                    {recent_change:+,.0f} <span style="font-size: 16px;">({recent_pct:+.1f}%)</span>
+                <p style="margin: 0.375rem 0; color: {recent_color}; font-size: 1.25rem; font-weight: 600;">
+                    {recent_change:+,.0f} <span style="font-size: 1rem;">({recent_pct:+.1f}%)</span>
                 </p>
             </div>
 
             <div style="
                 background-color: {colors['surface']};
                 border-radius: 12px;
-                padding: 16px;
+                padding: 1rem;
                 border: 1px solid {volatility_color}40;
             ">
-                <p style="margin: 0; color: {colors['text_secondary']}; font-size: 13px; text-transform: uppercase; letter-spacing: 0.5px;">
+                <p style="margin: 0; color: {colors['text_secondary']}; font-size: 0.8125rem; text-transform: uppercase; letter-spacing: 0.5px;">
                     Volatility
                 </p>
-                <p style="margin: 6px 0; color: {volatility_color}; font-size: 20px; font-weight: 600;">
-                    {volatility_desc} <span style="font-size: 16px;">({volatility:.1f}%)</span>
+                <p style="margin: 0.375rem 0; color: {volatility_color}; font-size: 1.25rem; font-weight: 600;">
+                    {volatility_desc} <span style="font-size: 1rem;">({volatility:.1f}%)</span>
                 </p>
             </div>
         </div>
@@ -1090,21 +1078,21 @@ def _render_growth_insights(
         .growth-insights {
             background: linear-gradient(135deg, var(--secondary-background-color) 0%, var(--background-color) 100%);
             border-radius: 16px;
-            padding: 24px;
+            padding: 1.5rem;
             border: 1px solid var(--border-color);
             box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
         }
         .growth-title {
             color: var(--text-color);
             margin-top: 0;
-            margin-bottom: 20px;
-            font-size: 22px;
+            margin-bottom: 1.25rem;
+            font-size: 1.375rem;
             font-weight: 600;
         }
         .growth-card {
             border-radius: 12px;
-            padding: 18px;
-            margin-bottom: 16px;
+            padding: 1.125rem;
+            margin-bottom: 1rem;
         }
         .growth-card.positive {
             background: linear-gradient(135deg, rgba(16, 185, 129, 0.1) 0%, rgba(16, 185, 129, 0.05) 100%);
@@ -1121,54 +1109,54 @@ def _render_growth_insights(
         .growth-header {
             display: flex;
             align-items: center;
-            gap: 8px;
-            margin-bottom: 8px;
+            gap: 0.5rem;
+            margin-bottom: 0.5rem;
         }
         .growth-label {
             margin: 0;
-            font-size: 14px;
+            font-size: 0.875rem;
             font-weight: 600;
             text-transform: uppercase;
             letter-spacing: 0.5px;
         }
         .growth-group {
-            margin: 8px 0;
+            margin: 0.5rem 0;
             color: var(--text-color);
-            font-size: 18px;
+            font-size: 1.125rem;
             font-weight: bold;
         }
         .growth-value {
-            margin: 8px 0;
-            font-size: 28px;
+            margin: 0.5rem 0;
+            font-size: 1.75rem;
             font-weight: 700;
         }
         .growth-details {
             margin: 0;
             color: var(--text-color-secondary);
-            font-size: 14px;
+            font-size: 0.875rem;
         }
         .disparity-section {
-            margin-top: 24px;
-            padding-top: 24px;
+            margin-top: 1.5rem;
+            padding-top: 1.5rem;
             border-top: 1px solid var(--border-color);
         }
         .disparity-card {
             background-color: var(--background-color);
             border-radius: 12px;
-            padding: 18px;
+            padding: 1.125rem;
             border: 1px solid var(--border-color);
         }
         .disparity-row {
             display: flex;
             justify-content: space-between;
             align-items: center;
-            margin-bottom: 12px;
+            margin-bottom: 0.75rem;
         }
         .disparity-ratio {
             background: linear-gradient(135deg, rgba(96, 165, 250, 0.1) 0%, rgba(96, 165, 250, 0.05) 100%);
             border-radius: 8px;
-            padding: 12px;
-            margin-top: 16px;
+            padding: 0.75rem;
+            margin-top: 1rem;
             border: 1px solid rgba(96, 165, 250, 0.3);
             text-align: center;
         }
@@ -1193,7 +1181,7 @@ def _render_growth_insights(
                     f"""
                 <div class="growth-card positive">
                     <div class="growth-header">
-                        <span style="font-size: 20px;">🚀</span>
+                        <span style="font-size: 1.25rem;">🚀</span>
                         <p class="growth-label" style="color: #10B981;">Fastest Growing Group</p>
                     </div>
                     <p class="growth-group">{max_growth['group']}</p>
@@ -1223,7 +1211,7 @@ def _render_growth_insights(
                     f"""
                 <div class="growth-card {card_class}">
                     <div class="growth-header">
-                        <span style="font-size: 20px;">{emoji}</span>
+                        <span style="font-size: 1.25rem;">{emoji}</span>
                         <p class="growth-label" style="color: {color};">{label}</p>
                     </div>
                     <p class="growth-group">{min_growth['group']}</p>
@@ -1255,16 +1243,16 @@ def _render_growth_insights(
                         f"""
                     <div class="disparity-section">
                         <div class="disparity-card">
-                            <p style="margin: 0 0 16px 0; color: var(--text-color-secondary); font-size: 14px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px;">
+                            <p style="margin: 0 0 1rem 0; color: var(--text-color-secondary); font-size: 0.875rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px;">
                                 Current Disparity Analysis
                             </p>
 
-                            <div style="display: grid; gap: 12px;">
+                            <div style="display: grid; gap: 0.75rem;">
                                 <div class="disparity-row">
                                     <span style="color: #3B82F6; font-weight: 500;">📊 Highest:</span>
                                     <span>
                                         <span style="color: var(--text-color); font-weight: bold;">{max_group['group']}</span>
-                                        <span style="color: var(--text-color-secondary); font-size: 14px;"> ({fmt_int(max_group['count'])} clients)</span>
+                                        <span style="color: var(--text-color-secondary); font-size: 0.875rem;"> ({fmt_int(max_group['count'])} clients)</span>
                                     </span>
                                 </div>
 
@@ -1272,14 +1260,14 @@ def _render_growth_insights(
                                     <span style="color: #F59E0B; font-weight: 500;">📉 Lowest:</span>
                                     <span>
                                         <span style="color: var(--text-color); font-weight: bold;">{min_group['group']}</span>
-                                        <span style="color: var(--text-color-secondary); font-size: 14px;"> ({fmt_int(min_group['count'])} clients)</span>
+                                        <span style="color: var(--text-color-secondary); font-size: 0.875rem;"> ({fmt_int(min_group['count'])} clients)</span>
                                     </span>
                                 </div>
                             </div>
 
                             <div class="disparity-ratio">
-                                <p style="margin: 0; color: #3B82F6; font-size: 16px;">
-                                    Disparity Ratio: <strong style="font-size: 20px;">{disparity_ratio:.1f}x</strong>
+                                <p style="margin: 0; color: #3B82F6; font-size: 1rem;">
+                                    Disparity Ratio: <strong style="font-size: 1.25rem;">{disparity_ratio:.1f}x</strong>
                                 </p>
                             </div>
                         </div>
@@ -1289,8 +1277,8 @@ def _render_growth_insights(
         except Exception as e:
             insights_content.append(
                 f"""
-            <div style="background-color: var(--background-color); border-radius: 8px; padding: 12px; border: 1px solid var(--border-color);">
-                <p style="color: var(--text-color-secondary); font-size: 14px; margin: 0;">
+            <div style="background-color: var(--background-color); border-radius: 8px; padding: 0.75rem; border: 1px solid var(--border-color);">
+                <p style="color: var(--text-color-secondary); font-size: 0.875rem; margin: 0;">
                     ⚠️ Could not calculate group insights: {str(e)}
                 </p>
             </div>
@@ -1299,8 +1287,8 @@ def _render_growth_insights(
     else:
         insights_content.append(
             """
-        <div style="background-color: rgba(59, 130, 246, 0.1); border-radius: 8px; padding: 16px; border: 1px solid rgba(59, 130, 246, 0.3); text-align: center;">
-            <p style="color: #3B82F6; font-size: 15px; margin: 0;">
+        <div style="background-color: rgba(59, 130, 246, 0.1); border-radius: 8px; padding: 1rem; border: 1px solid rgba(59, 130, 246, 0.3); text-align: center;">
+            <p style="color: #3B82F6; font-size: 0.9375rem; margin: 0;">
                 ℹ️ Not enough groups for comparison. Select more groups to see detailed insights.
             </p>
         </div>

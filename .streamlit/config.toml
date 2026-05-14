@@ -1,18 +1,82 @@
 # .streamlit/config.toml
 # HMIS Data Analysis Suite — Professional Enterprise Theme
+#
+# SYNC CONTRACT
+# -------------
+# Values in [theme] mirror fields in src/ui/themes/theme.py tagged
+# "# config.toml-mirror". If you change one, update both. There is no
+# automatic sync.
+#
+# Per Streamlit docs (verified via Context7), these keys are GLOBAL and may
+# only appear in [theme] — they are NOT valid in [theme.sidebar]:
+#   base, baseFontSize, baseFontWeight,
+#   chartCategoricalColors, chartSequentialColors, chartDivergingColors,
+#   showSidebarBorder
+#
+# THEME LOCK
+# ----------
+# Dark mode is removed entirely from this app:
+#   1. No [theme.dark] block — only the light theme is defined.
+#   2. client.toolbarMode = "minimal" hides the hamburger menu so users
+#      cannot reach the Light/Dark toggle in Streamlit's settings dialog.
+# If you need to expose the menu (e.g., for the Print/Rerun shortcuts),
+# switch toolbarMode back to "viewer" — but be aware the theme switcher
+# becomes accessible again, and without a [theme.dark] mirror, toggling
+# Dark falls back to Streamlit's default dark theme (off-brand).
 
+# ============ Main theme (light only) ============
 [theme]
-# Valid Streamlit theme settings only
 base = "light"
-primaryColor = "#00629b"  # Deep professional blue
-backgroundColor = "#FFFFFF"  # Clean white background  
-secondaryBackgroundColor = "#F8FAFC"  # Subtle gray for contrast areas
-textColor = "#1E293B"  # Dark slate for primary text
+primaryColor = "#00629b"                     # theme.colors.primary
+backgroundColor = "#FFFFFF"                  # theme.colors.background
+secondaryBackgroundColor = "#F8FAFC"         # theme.colors.background_secondary
+textColor = "#1E293B"                        # theme.colors.text_primary
+borderColor = "#E2E8F0"                      # theme.colors.border
+linkColor = "#00629b"                        # theme.colors.primary
+linkUnderline = false
+showWidgetBorder = true
+showSidebarBorder = true                     # global only
+baseRadius = "0.5rem"                        # theme.borders.radius_md
+buttonRadius = "0.5rem"
+baseFontSize = 14                            # global only
+baseFontWeight = 400                         # global only
+codeFontWeight = 500
+codeFontSize = "0.85rem"
+codeBackgroundColor = "#F1F5F9"
+codeTextColor = "#1E293B"
+dataframeBorderColor = "#E2E8F0"
+dataframeHeaderBackgroundColor = "#F8FAFC"
+font = "Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif"
+codeFont = "'SF Mono', Monaco, 'Cascadia Code', 'Roboto Mono', Consolas, monospace"
+headingFontSizes = ["2.25rem", "1.875rem", "1.5rem", "1.25rem", "1.125rem", "1rem"]
+headingFontWeights = [700, 700, 600, 600, 500, 500]
+
+# Streamlit's named color palette — used by st.metric deltas, st.badge, etc.
+# Background variants are auto-derived (10% opacity in light theme).
+blueColor = "#00629b"
+greenColor = "#10B981"
+yellowColor = "#F59E0B"
+orangeColor = "#F97316"
+redColor = "#EF4444"
+violetColor = "#7C3AED"
+grayColor = "#94A3B8"
+
+# Wong 7-color colorblind-safe categorical palette (global)
+chartCategoricalColors = ["#0072B2", "#E69F00", "#009E73", "#CC79A7", "#56B4E9", "#D55E00", "#F0E442"]
+# Sequential ramp around brand primary (10 stops, global)
+chartSequentialColors = ["#e6f2f8", "#cce5f1", "#b3d9ea", "#99cce3", "#80bfdc", "#4d94c1", "#337ba8", "#1a628f", "#00629b", "#004d7a"]
+
+# ============ Sidebar overrides ============
+[theme.sidebar]
+backgroundColor = "#F8FAFC"
+secondaryBackgroundColor = "#F1F5F9"
+borderColor = "#E2E8F0"
+codeBackgroundColor = "#E2E8F0"
 
 # ============ Application Settings ============
 [client]
 showSidebarNavigation = true
-toolbarMode = "viewer"
+toolbarMode = "minimal"  # hides hamburger menu, removing access to theme toggle
 
 [runner]
 fastReruns = true
