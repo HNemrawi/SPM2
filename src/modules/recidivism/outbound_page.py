@@ -46,9 +46,7 @@ from src.ui.factories.components import (
 from src.ui.factories.html import html_factory
 from src.ui.layouts.templates import ABOUT_OUTBOUND_CONTENT
 from src.ui.themes.styles import (
-    NeutralColors,
     apply_chart_theme,
-    apply_custom_css,
     create_styled_divider,
 )
 
@@ -1033,9 +1031,6 @@ def outbound_recidivism_page() -> None:
     # This ensures widgets created for the first time don't trigger "changed" state
     if not st.session_state.get(f"{outbound_state.key_prefix}last_params"):
         outbound_state.save_params_snapshot()
-
-    # Apply custom CSS theme
-    apply_custom_css()
 
     st.html(
         html_factory.title("Outbound Recidivism Analysis", level=1, icon="📈")

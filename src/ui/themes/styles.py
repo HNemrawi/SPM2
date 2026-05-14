@@ -749,11 +749,13 @@ def get_neutral_css() -> str:
 
 
 def apply_custom_css():
-    """Apply the unified theme CSS to the Streamlit app."""
-    # Theme is now handled by Streamlit's config.toml
-    st.markdown(
-        get_neutral_css(), unsafe_allow_html=True
-    )  # Keep legacy CSS for backward compatibility
+    """Apply the unified theme CSS to the Streamlit app.
+
+    Single global CSS injection — see ``get_neutral_css`` for the
+    bundled rules. Called once per session from
+    ``main.inject_custom_css``.
+    """
+    st.markdown(get_neutral_css(), unsafe_allow_html=True)
 
 
 def create_info_box(

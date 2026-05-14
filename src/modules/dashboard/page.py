@@ -36,30 +36,11 @@ from src.ui.factories.components import (
 from src.ui.factories.components import render_download_button, ui
 from src.ui.factories.html import html_factory
 from src.ui.layouts.templates import ABOUT_GENERAL_ANALYSIS_CONTENT
-from src.ui.themes.styles import apply_custom_css
 
 # Enhanced session management instances
 DASHBOARD_MODULE = ModuleType.DASHBOARD
 session_manager = get_session_manager()
 dashboard_state = get_dashboard_state()
-
-
-def apply_neutral_tab_style():
-    """No-op shim. The dashboard tab CSS now lives in
-    ``src/ui/themes/styles.py:get_neutral_css`` and loads globally for
-    the whole app (Phase 1 of UI_LAYOUT_AUDIT.md). The function is kept
-    so callers still resolve, and so the rule's full-bleed/negative-
-    margin trick stays in one place when revalidating across Streamlit
-    upgrades."""
-    return
-
-
-def _setup_page_styling() -> None:
-    """Apply global styling for the dashboard page. Both the unified
-    CSS and the (now no-op) tab styling are kept as calls so that any
-    future per-page overrides have a stable hook."""
-    apply_custom_css()
-    apply_neutral_tab_style()
 
 
 def _render_page_header() -> None:
@@ -244,7 +225,6 @@ def general_analysis_page() -> None:
     # Initialize enhanced session management
     dashboard_state.initialize()
 
-    _setup_page_styling()
     _render_page_header()
 
     df = _load_and_validate_data()
