@@ -24,6 +24,7 @@ from src.core.data.loader import (
 )
 from src.core.session import (
     SessionKeys,
+    clear_module_transient_state,
     get_session_manager,
     reset_session_manager,
 )
@@ -37,7 +38,7 @@ from src.ui.layouts.templates import get_header_logo_html, render_footer
 from src.ui.themes.theme import theme
 
 # Enable pandas performance optimizations
-pd.options.mode.copy_on_write = True
+# (Copy-on-Write is always enabled in pandas >= 3.0; no longer needs to be set.)
 pd.options.compute.use_numexpr = True
 pd.options.compute.use_bottleneck = True
 
@@ -443,7 +444,6 @@ def render_sidebar() -> Tuple[str, Dict[str, Dict]]:
                     # Batch cleanup to avoid multiple operations
                     keys_to_remove = [
                         SessionKeys.DF,
-                        SessionKeys.DATA,
                         SessionKeys.CURRENT_FILE,
                         SessionKeys.DATA_LOADED,
                         SessionKeys.DUPLICATE_ANALYSIS,
@@ -500,11 +500,23 @@ def render_sidebar() -> Tuple[str, Dict[str, Dict]]:
                             and isinstance(df, pd.DataFrame)
                             and not df.empty
                         ):
+                            # Seed the session-scoped Arrow/DuckDB store so
+                            # downstream filter pushdown has zero first-call
+                            # latency. Cache key is the file content hash;
+                            # subsequent reruns reuse the same store.
+                            from src.core.data.arrow_store import (
+                                get_arrow_store,
+                            )
+                            from src.core.data.loader import DF_HASH_ATTR
+
+                            file_hash = df.attrs.get(DF_HASH_ATTR, "")
+                            if file_hash:
+                                get_arrow_store(file_hash, df)
+
                             # Batch session state updates to avoid multiple reruns
                             st.session_state.update(
                                 {
                                     SessionKeys.DF: df,
-                                    SessionKeys.DATA: df,  # Add this for SessionManager compatibility
                                     SessionKeys.CURRENT_FILE: uploaded_file.name,
                                     SessionKeys.DATA_LOADED: True,
                                 }
@@ -539,6 +551,20 @@ def render_sidebar() -> Tuple[str, Dict[str, Dict]]:
             st.session_state.get(SessionKeys.SELECTED_MODULE)
             != selected_module
         ):
+            # Drop transient/computed state of the module being left so it
+            # doesn't accumulate across module hops. User-controlled inputs
+            # (lookback values, filters) under the same prefix are preserved
+            # so the user round-trips identically.
+            _MODULE_KEY_TO_PREFIX = {
+                "System Performance Measure 2": SessionKeys.SPM2_PREFIX,
+                "Inbound Recidivism": SessionKeys.INBOUND_PREFIX,
+                "Outbound Recidivism": SessionKeys.OUTBOUND_PREFIX,
+                "General Dashboard": SessionKeys.DASHBOARD_PREFIX,
+            }
+            old_module = st.session_state.get(SessionKeys.SELECTED_MODULE)
+            old_prefix = _MODULE_KEY_TO_PREFIX.get(old_module)
+            if old_prefix:
+                clear_module_transient_state(old_prefix)
             st.session_state[SessionKeys.SELECTED_MODULE] = selected_module
             st.session_state[SessionKeys.CURRENT_MODULE] = selected_module
 
@@ -772,7 +798,7 @@ def show_export_dialog():
 
     with col1:
         if st.button(
-            "❌ Cancel", use_container_width=True, key="export_cancel_btn"
+            "❌ Cancel", width="stretch", key="export_cancel_btn"
         ):
             st.session_state[SessionKeys.SHOW_EXPORT_DIALOG] = False
             st.rerun()
@@ -793,7 +819,7 @@ def show_export_dialog():
             data=json_str,
             file_name=filename,
             mime="application/json",
-            use_container_width=True,
+            width="stretch",
             type="primary",
             key="export_download_btn",
         )
@@ -925,7 +951,7 @@ def show_import_dialog():
             with col1:
                 if st.button(
                     "❌ Cancel",
-                    use_container_width=True,
+                    width="stretch",
                     key="import_cancel_btn",
                 ):
                     st.session_state[SessionKeys.SHOW_IMPORT_DIALOG] = False
@@ -934,7 +960,7 @@ def show_import_dialog():
             with col2:
                 if st.button(
                     "✅ Import & Apply",
-                    use_container_width=True,
+                    width="stretch",
                     type="primary",
                     key="import_confirm_btn",
                 ):

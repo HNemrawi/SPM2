@@ -519,7 +519,7 @@ class UIComponentFactory:
 
         # Render the chart
         fig = chart_func()
-        st.plotly_chart(fig, use_container_width=True, key=key)
+        st.plotly_chart(fig, width="stretch", key=key)
 
     # ============== TAB FACTORY COMPONENTS ==============
 
@@ -631,7 +631,7 @@ class UIComponentFactory:
 
                 # Render chart or content
                 if "chart" in tab_config:
-                    st.plotly_chart(tab_config["chart"], use_container_width=True)
+                    st.plotly_chart(tab_config["chart"], width="stretch")
                 elif "content" in tab_config:
                     tab_config["content"]()
 

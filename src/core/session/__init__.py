@@ -8,6 +8,7 @@ from .manager import (
     SessionManager,
     check_data_available,
     clear_module_state,
+    clear_module_transient_state,
     ensure_date_range,
     get_analysis_result,
     get_dashboard_state,
@@ -31,6 +32,7 @@ __all__ = [
     "reset_session_manager",
     "reset_session",
     "clear_module_state",
+    "clear_module_transient_state",
     # Data functions
     "check_data_available",
     "set_analysis_result",

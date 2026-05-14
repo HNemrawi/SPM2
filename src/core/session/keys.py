@@ -11,8 +11,7 @@ class SessionKeys:
 
     # ==================== GLOBAL KEYS ====================
     # Core data storage
-    DATA = "data"  # Primary data storage location
-    DF = "df"  # Legacy compatibility
+    DF = "df"  # Canonical key for the main DataFrame
     CURRENT_FILE = "current_file"
     DATA_LOADED = "data_loaded"
 

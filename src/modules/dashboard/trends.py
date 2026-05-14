@@ -491,7 +491,7 @@ def _render_section_header():
 # ================================================================================
 
 
-@st.cache_data(show_spinner=False)
+@st.cache_data(show_spinner=False, ttl=1800, max_entries=32)
 def _get_trend_data(
     df_filt: DataFrame,
     full_df: DataFrame,
@@ -1593,7 +1593,7 @@ def render_trend_explorer(
                 multi_data,
             )
 
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, width="stretch")
 
             # Period changes
             if do_delta:
@@ -1633,7 +1633,7 @@ def render_trend_explorer(
                                         increase_is_negative,
                                         sel_freq,
                                     )
-                                    st.plotly_chart(fig_delta, use_container_width=True)
+                                    st.plotly_chart(fig_delta, width="stretch")
                                     _render_interpretation_note(
                                         metric_name,
                                         is_neutral_metric,
@@ -1742,7 +1742,7 @@ def render_trend_explorer(
                             hovertemplate=_get_hover_template(sel_freq)
                         )
 
-                        st.plotly_chart(fig, use_container_width=True)
+                        st.plotly_chart(fig, width="stretch")
 
                         # Additional analysis
                         if len(df) >= 2:
@@ -1764,7 +1764,7 @@ def render_trend_explorer(
                                         increase_is_negative,
                                         sel_freq,
                                     )
-                                    st.plotly_chart(fig_delta, use_container_width=True)
+                                    st.plotly_chart(fig_delta, width="stretch")
                                     _render_interpretation_note(
                                         metric_name,
                                         is_neutral_metric,
@@ -1925,7 +1925,7 @@ def render_trend_explorer(
                             )
                         )
 
-                        st.plotly_chart(fig, use_container_width=True)
+                        st.plotly_chart(fig, width="stretch")
 
                         # Growth analysis
                         if len(filtered_df["bucket"].unique()) >= 2:

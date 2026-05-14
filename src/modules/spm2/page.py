@@ -644,7 +644,7 @@ def display_days_to_return(final_df: pd.DataFrame, return_period: int) -> None:
         try:
             fig = plot_days_to_return_box(final_df, return_period)
             fig = apply_chart_theme(fig)
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, width="stretch")
         except Exception as e:
             st.error(f"📉 Visualization Error: {str(e)}")
 
@@ -891,7 +891,7 @@ def display_client_flow(final_df: pd.DataFrame) -> None:
                     pivot_sankey, f"{ex_choice} → {ret_choice}"
                 )
                 sankey_fig = apply_chart_theme(sankey_fig)
-                st.plotly_chart(sankey_fig, use_container_width=True)
+                st.plotly_chart(sankey_fig, width="stretch")
             else:
                 st.info("📭 Insufficient data for flow analysis")
 

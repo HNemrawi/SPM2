@@ -30,7 +30,7 @@ class SessionManager:
         if "initialized" not in st.session_state:
             st.session_state.initialized = True
             # Use centralized keys
-            st.session_state[SessionKeys.DATA] = None
+            st.session_state[SessionKeys.DF] = None
             st.session_state[SessionKeys.FILTERS] = {}
             st.session_state[SessionKeys.ANALYSIS_RESULTS] = {}
             st.session_state[SessionKeys.SELECTED_MODULE] = "general"
@@ -40,31 +40,25 @@ class SessionManager:
         """Get value from session state with validation."""
         if not SessionKeyValidator.validate_key(key):
             logger.warning(f"Invalid key format: {key}")
-        value = st.session_state.get(key, default)
-        logger.debug(f"Get state: {key} = {type(value).__name__}")
-        return value
+        return st.session_state.get(key, default)
 
     def set(self, key: str, value: Any) -> None:
         """Set value in session state with validation."""
         if not SessionKeyValidator.validate_key(key):
             logger.warning(f"Invalid key format: {key}")
         st.session_state[key] = value
-        logger.debug(f"Set state: {key} = {type(value).__name__}")
 
     def delete(self, key: str) -> None:
         """Delete key from session state."""
         if key in st.session_state:
             del st.session_state[key]
-            logger.debug(f"Deleted state: {key}")
 
     def exists(self, key: str) -> bool:
         """Check if key exists in session state."""
         return key in st.session_state
 
     def set_data(self, data: pd.DataFrame) -> None:
-        """Set the main dataset with proper key management."""
-        st.session_state[SessionKeys.DATA] = data
-        # Also set to DF key for backward compatibility
+        """Set the main dataset under the canonical key."""
         st.session_state[SessionKeys.DF] = data
         # Clear cached results when data changes
         st.session_state[SessionKeys.ANALYSIS_RESULTS] = {}
@@ -73,22 +67,13 @@ class SessionManager:
         )
 
     def get_data(self) -> Optional[pd.DataFrame]:
-        """Get the main dataset from either location."""
-        # Check both locations for compatibility
-        df = st.session_state.get(SessionKeys.DF)
-        data = st.session_state.get(SessionKeys.DATA)
-        return df if df is not None else data
+        """Get the main dataset."""
+        return st.session_state.get(SessionKeys.DF)
 
     def has_data(self) -> bool:
-        """Check if data has been loaded in either location."""
+        """Check if data has been loaded."""
         df = st.session_state.get(SessionKeys.DF)
-        data = st.session_state.get(SessionKeys.DATA)
-        # Check both locations and ensure not empty
-        if df is not None:
-            return isinstance(df, pd.DataFrame) and not df.empty
-        if data is not None:
-            return isinstance(data, pd.DataFrame) and not data.empty
-        return False
+        return isinstance(df, pd.DataFrame) and not df.empty
 
     def get_filters(self) -> Dict[str, Any]:
         """Get current filters."""
@@ -166,7 +151,6 @@ class SessionManager:
         skip_keys = {
             "initialized",
             SessionKeys.DF,
-            SessionKeys.DATA,
             SessionKeys.ANALYSIS_RESULTS,
             SessionKeys.SHOW_EXPORT_DIALOG,
             SessionKeys.SHOW_IMPORT_DIALOG,
@@ -683,8 +667,18 @@ def reset_session_manager() -> None:
     logger.info("Session manager reset")
 
 
+_MODULE_TRANSIENT_PATTERNS = (
+    "_dirty",
+    "_analysis_requested",
+    "_last_params",
+    "_initialized",
+    "_initializing",
+)
+
+
 def clear_module_state(module_prefix: str) -> None:
-    """Clear all state for a specific module."""
+    """Clear all state for a specific module. Used on full session reset
+    and the 'Change File' path — destroys user inputs too."""
     keys_to_delete = [
         k
         for k in st.session_state.keys()
@@ -697,21 +691,62 @@ def clear_module_state(module_prefix: str) -> None:
     )
 
 
+def clear_module_transient_state(module_prefix: str) -> None:
+    """Clear ONLY the cached / computed state for a module — dirty flags,
+    analysis-requested flags, parameter snapshots, init markers. User-
+    controlled inputs (lookback values, filter selections under this
+    prefix) are preserved so flipping modules round-trips identically."""
+    keys_to_delete = [
+        k
+        for k in st.session_state.keys()
+        if SessionKeys.is_module_key(k, module_prefix)
+        and any(pattern in k for pattern in _MODULE_TRANSIENT_PATTERNS)
+    ]
+    for key in keys_to_delete:
+        del st.session_state[key]
+    if keys_to_delete:
+        logger.debug(
+            f"Cleared {len(keys_to_delete)} transient keys for module "
+            f"{module_prefix}"
+        )
+
+
 def reset_session() -> None:
     """Reset the Streamlit session state and clear all caches."""
     reset_session_manager()
 
 
+# LRU bound on the analysis-results dict. The previous behavior was an
+# unbounded ``dict`` — each module's cached DataFrame / Plotly figure
+# would accumulate until the session ended (50-500 MB drift on long
+# sessions per the audit plan). Capacity 4 covers one entry per analysis
+# module (SPM2 / Inbound / Outbound / Dashboard) with no overlap.
+_ANALYSIS_RESULTS_MAX = 4
+
+
 def set_analysis_result(analysis_type: str, data: pd.DataFrame) -> None:
-    """Store analysis results in session state."""
-    if "analysis_results" not in st.session_state:
-        st.session_state.analysis_results = {}
-    st.session_state.analysis_results[analysis_type] = data
+    """Store analysis results in session state with LRU eviction."""
+    from collections import OrderedDict
+
+    store = st.session_state.get("analysis_results")
+    if not isinstance(store, OrderedDict):
+        # Initialize / migrate from a plain dict (preserves any prior
+        # contents the dashboard may have written).
+        existing = dict(store) if isinstance(store, dict) else {}
+        store = OrderedDict(existing)
+        st.session_state.analysis_results = store
+    # Move-to-end on update so frequently-touched entries stay alive.
+    if analysis_type in store:
+        store.move_to_end(analysis_type)
+    store[analysis_type] = data
+    while len(store) > _ANALYSIS_RESULTS_MAX:
+        store.popitem(last=False)  # evict least-recently-used
 
 
 def get_analysis_result(analysis_type: str) -> Optional[pd.DataFrame]:
     """Retrieve analysis results from session state."""
-    return st.session_state.get("analysis_results", {}).get(analysis_type)
+    store = st.session_state.get("analysis_results", {})
+    return store.get(analysis_type)
 
 
 def check_data_available() -> Optional[pd.DataFrame]:

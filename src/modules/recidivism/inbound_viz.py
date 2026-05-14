@@ -8,7 +8,6 @@ from typing import Any, Dict
 
 import pandas as pd
 import plotly.graph_objects as go
-from pandas.api.types import is_categorical_dtype
 
 from src.ui.factories.charts import default_chart
 from src.ui.factories.components import ui
@@ -209,7 +208,7 @@ def create_flow_pivot_ra(
         df_copy = final_df.copy()
 
         # If target column is categorical, convert to object
-        if is_categorical_dtype(df_copy[target_col]):
+        if isinstance(df_copy[target_col].dtype, pd.CategoricalDtype):
             df_copy[target_col] = df_copy[target_col].astype(object)
 
         # Fill missing entries with 'No Data' and ensure string dtype

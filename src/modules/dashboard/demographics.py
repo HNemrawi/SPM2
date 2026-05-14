@@ -47,7 +47,7 @@ BREAKDOWN_SECTION_KEY = "demographic_breakdown"
 # ==============================================================================
 
 
-@st.cache_data(show_spinner=False)
+@st.cache_data(show_spinner=False, ttl=1800, max_entries=32)
 def _calculate_breakdown_data(
     df_filt: DataFrame,
     full_df: DataFrame,
@@ -1553,14 +1553,14 @@ def render_breakdown_section(
         # Volume comparison chart
         st.html(html_factory.title("Client Count by Group", level=3, icon="👥"))
         fig_counts = _create_counts_chart(bdf_filtered, dim_col)
-        st.plotly_chart(fig_counts, use_container_width=True)
+        st.plotly_chart(fig_counts, width="stretch")
 
     with tab_flow:
         st.html(html_factory.title("System Flow Analysis", level=3, icon="🔄"))
 
         # Net flow visualization
         fig_flow = _create_flow_balance_chart(bdf_filtered, dim_col)
-        st.plotly_chart(fig_flow, use_container_width=True)
+        st.plotly_chart(fig_flow, width="stretch")
 
         # Flow insights
         with st.expander("📊 Flow Insights", expanded=True):
@@ -1631,7 +1631,7 @@ def render_breakdown_section(
             fig_ph, _ = _create_rates_charts(
                 bdf_filtered, dim_col, return_window
             )
-            st.plotly_chart(fig_ph, use_container_width=True)
+            st.plotly_chart(fig_ph, width="stretch")
             st.caption(
                 "📈 Higher rates indicate better housing placement outcomes"
             )
@@ -1640,7 +1640,7 @@ def render_breakdown_section(
             _, fig_ret = _create_rates_charts(
                 bdf_filtered, dim_col, return_window
             )
-            st.plotly_chart(fig_ret, use_container_width=True)
+            st.plotly_chart(fig_ret, width="stretch")
             st.caption("📉 Lower rates indicate better housing stability")
 
         # Outcome Comparison (quadrant chart)
@@ -1656,7 +1656,7 @@ def render_breakdown_section(
         )
 
         fig_outcome = _create_outcome_quadrant_chart(bdf_filtered, dim_col)
-        st.plotly_chart(fig_outcome, use_container_width=True)
+        st.plotly_chart(fig_outcome, width="stretch")
 
         # Add interpretation help
         with st.expander("📖 Understanding the charts", expanded=False):

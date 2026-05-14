@@ -1,16 +1,23 @@
 # Core app framework
-streamlit>=1.40.0
+streamlit>=1.57.0
 
 # Data handling
-pandas>=2.2.0
-numpy>=1.26.0
-pyarrow>=14.0.0
+pandas>=3.0.0
+numpy>=2.0.0
+pyarrow>=18.0.0
+
+# In-process analytics engine for filter/aggregation pushdown over the
+# active session's Arrow table (see src/core/data/arrow_store.py). Data is
+# never persisted off-machine — DuckDB runs in the Streamlit process and
+# its tempdir-backed Arrow IPC file is cleaned up when the cache_resource
+# entry is evicted.
+duckdb>=1.1.0
 
 # Visualization
-plotly>=5.24.0
+plotly>=6.0.0
 
 # Statistical analysis
-scipy>=1.14.0
+scipy>=1.15.0
 
 # Utilities
 python-dateutil>=2.9.0
@@ -19,5 +26,4 @@ pyyaml>=6.0.2
 chardet>=5.2.0
 
 # Excel export
-xlsxwriter>=3.0.0
-
+xlsxwriter>=3.2.0

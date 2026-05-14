@@ -542,7 +542,7 @@ def display_time_to_entry(final_df: pd.DataFrame) -> None:
     try:
         fig = plot_time_to_entry_box(final_df)
         fig = apply_chart_theme(fig)
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width="stretch")
 
         # Display time statistics if available
         # display_time_statistics(final_df)
@@ -857,7 +857,7 @@ def display_client_flow(final_df: pd.DataFrame) -> None:
                 flow_pivot_sankey, f"{exit_flow_col} → {entry_flow_col}"
             )
             sankey_ra = apply_chart_theme(sankey_ra)
-            st.plotly_chart(sankey_ra, use_container_width=True)
+            st.plotly_chart(sankey_ra, width="stretch")
         else:
             st.info("📭 Insufficient data for flow analysis")
 

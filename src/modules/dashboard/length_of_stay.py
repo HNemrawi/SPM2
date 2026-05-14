@@ -400,7 +400,7 @@ def _create_demographic_insights_html(
     return title_html + metrics_html + gap_info
 
 
-@st.cache_data(show_spinner=False)
+@st.cache_data(show_spinner=False, ttl=1800, max_entries=32)
 def length_of_stay(
     df: DataFrame, start: Timestamp, end: Timestamp
 ) -> Dict[str, Any]:
@@ -679,7 +679,7 @@ def analyze_los_with_destinations(df: DataFrame, los_data: Dict) -> DataFrame:
     return pd.DataFrame()
 
 
-@st.cache_data(show_spinner=False)
+@st.cache_data(show_spinner=False, ttl=1800, max_entries=32)
 def los_by_demographic(
     df: DataFrame,
     dim_col: str,
@@ -724,7 +724,7 @@ def los_by_demographic(
     demo_map = df[["EnrollmentID", dim_col]].copy()
 
     # Handle categorical columns properly
-    if pd.api.types.is_categorical_dtype(demo_map[dim_col]):
+    if isinstance(demo_map[dim_col].dtype, pd.CategoricalDtype):
         # Add "Not Reported" to categories if not present
         if "Not Reported" not in demo_map[dim_col].cat.categories:
             demo_map[dim_col] = demo_map[dim_col].cat.add_categories(
@@ -738,7 +738,7 @@ def los_by_demographic(
     los_with_demo = los_df.merge(demo_map, on="EnrollmentID", how="left")
 
     # Handle categorical columns in merged data
-    if pd.api.types.is_categorical_dtype(los_with_demo[dim_col]):
+    if isinstance(los_with_demo[dim_col].dtype, pd.CategoricalDtype):
         if "Not Reported" not in los_with_demo[dim_col].cat.categories:
             los_with_demo[dim_col] = los_with_demo[dim_col].cat.add_categories(
                 ["Not Reported"]
@@ -1233,7 +1233,7 @@ def render_length_of_stay(df_filt: DataFrame) -> None:
             bargap=0.2,
         )
 
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width="stretch")
 
         # Category explanation with improved UI
         category_content = "<div style='display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px;'>"
@@ -1303,7 +1303,7 @@ def render_length_of_stay(df_filt: DataFrame) -> None:
                         yaxis_title="Average Length of Stay (days)",
                     )
 
-                    st.plotly_chart(fig_dest, use_container_width=True)
+                    st.plotly_chart(fig_dest, width="stretch")
 
                     # Show summary table
                     st.dataframe(
@@ -1584,7 +1584,7 @@ def render_length_of_stay(df_filt: DataFrame) -> None:
         )
 
         # Display the chart
-        st.plotly_chart(fig_combined, use_container_width=True)
+        st.plotly_chart(fig_combined, width="stretch")
 
         # Chart guide
         chart_guide_html = f"""
@@ -1684,7 +1684,7 @@ def render_length_of_stay(df_filt: DataFrame) -> None:
         )
 
         # Display the chart
-        st.plotly_chart(fig_compare, use_container_width=True)
+        st.plotly_chart(fig_compare, width="stretch")
 
         # Insights section
         with st.expander("💡 Key Findings", expanded=True):

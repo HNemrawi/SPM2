@@ -4,6 +4,7 @@ SPM2 Core Analysis Logic
 Implements the System Performance Measure 2 analysis for housing stability assessment.
 """
 
+import os
 from typing import Any, Dict, List, Optional, Tuple
 
 import pandas as pd
@@ -11,65 +12,79 @@ import streamlit as st
 
 from src.core.constants import DEFAULT_PROJECT_TYPES, PH_PROJECTS
 
+# Module-level Timedelta constants: previously these were allocated inside the
+# inner loop (4 allocations per iteration × tens of thousands of iterations).
+# Hoisting eliminates one of the larger allocation costs in the SPM2 hot path.
+_ONE_DAY = pd.Timedelta(days=1)
+_FOURTEEN_DAYS = pd.Timedelta(days=14)
 
-# Helper function for finding the earliest return enrollment
-def _find_earliest_return(
+
+def _spm2_use_fast() -> bool:
+    """Feature flag. Default ``1`` (fast) once the golden harness and the
+    per-client parity test under ``tests/golden/`` are both green; set the
+    env var to ``0`` to fall back to ``_find_earliest_return_legacy`` if a
+    correctness regression is suspected in production."""
+    return os.environ.get("HMIS_SPM2_VECTORIZED", "1") == "1"
+
+
+def _add_or_extend_window(
+    new_window: Tuple[pd.Timestamp, pd.Timestamp],
+    windows: List[Tuple[pd.Timestamp, pd.Timestamp]],
+) -> List[Tuple[pd.Timestamp, pd.Timestamp]]:
+    """Merge ``new_window`` into ``windows``, coalescing any overlap."""
+    new_start, new_end = new_window
+    updated: List[Tuple[pd.Timestamp, pd.Timestamp]] = []
+    for win_start, win_end in windows:
+        if new_start <= win_end and new_end >= win_start:
+            new_start = min(new_start, win_start)
+            new_end = max(new_end, win_end)
+        else:
+            updated.append((win_start, win_end))
+    updated.append((new_start, new_end))
+    updated.sort(key=lambda w: w[0])
+    return updated
+
+
+def _prep_client_returns_for_scan(
+    client_df: pd.DataFrame,
+) -> Optional[List[Any]]:
+    """Sort once, build namedtuples once. Reused for every exit of the same
+    client by the fast path. Returns ``None`` when the per-client frame has
+    nothing scannable (empty, or no ``ProjectStart`` column)."""
+    if client_df is None or client_df.empty or "ProjectStart" not in client_df.columns:
+        return None
+    sorted_df = client_df.dropna(subset=["ProjectStart"]).sort_values(
+        ["ProjectStart", "EnrollmentID"], kind="stable"
+    )
+    return list(sorted_df.itertuples(index=False))
+
+
+# ---------------------------------------------------------------------------
+# Legacy implementation — kept verbatim as the rollback reference. The fast
+# path below mirrors this line-for-line; any algorithmic change must update
+# both and re-run ``tests/golden/verify_outputs.py`` + the spm2_parity check.
+# ---------------------------------------------------------------------------
+def _find_earliest_return_legacy(
     client_df: pd.DataFrame,
     earliest_exit: pd.Timestamp,
     cutoff: pd.Timestamp,
     report_end: pd.Timestamp,
     exit_enrollment_id: int,
 ) -> Optional[Tuple[pd.Series, str]]:
-    """
-    Identify the earliest valid return enrollment after an exit enrollment.
-
-    For PH projects, ensure at least a 14-day gap and consider exclusion windows.
-
-    Parameters:
-        client_df (pd.DataFrame): Client's enrollment records.
-        earliest_exit (pd.Timestamp): The exit date.
-        cutoff (pd.Timestamp): Maximum ProjectStart date to consider.
-        report_end (pd.Timestamp): End date of the report.
-        exit_enrollment_id (int): EnrollmentID to exclude from scanning.
-
-    Returns:
-        Optional[Tuple[pd.Series, str]]: (row, type) for a valid return enrollment,
-                                         or None if not found.
-    """
+    """Original itertuples-per-call implementation. See `_find_earliest_return`."""
     if client_df.empty or "ProjectStart" not in client_df.columns:
         return None
 
-    # OPTIMIZED: Pre-filter and sort data
     client_df = client_df.dropna(subset=["ProjectStart"]).sort_values(
         ["ProjectStart", "EnrollmentID"]
     )
 
-    # Pre-filter to reduce iteration: exclude the exit enrollment upfront
     if exit_enrollment_id is not None and "EnrollmentID" in client_df.columns:
         client_df = client_df[client_df["EnrollmentID"] != exit_enrollment_id]
 
-    exclusion_windows = []
-
-    def add_or_extend_window(
-        new_window: Tuple[pd.Timestamp, pd.Timestamp],
-        windows: List[Tuple[pd.Timestamp, pd.Timestamp]],
-    ) -> List[Tuple[pd.Timestamp, pd.Timestamp]]:
-        """Merge overlapping windows or add a new one."""
-        new_start, new_end = new_window
-        updated_windows = []
-        for window in windows:
-            win_start, win_end = window
-            if new_start <= win_end and new_end >= win_start:
-                new_start = min(new_start, win_start)
-                new_end = max(new_end, win_end)
-            else:
-                updated_windows.append(window)
-        updated_windows.append((new_start, new_end))
-        updated_windows.sort(key=lambda w: w[0])
-        return updated_windows
+    exclusion_windows: List[Tuple[pd.Timestamp, pd.Timestamp]] = []
 
     for row in client_df.itertuples(index=False):
-        # OPTIMIZED: exit_enrollment_id check moved to pre-filter above
         if row.ProjectStart < earliest_exit:
             if row.ProjectTypeCode in PH_PROJECTS:
                 if (
@@ -77,12 +92,10 @@ def _find_earliest_return(
                     and row.ProjectExit > earliest_exit
                 ):
                     new_window = (
-                        earliest_exit + pd.Timedelta(days=1),
-                        min(
-                            row.ProjectExit + pd.Timedelta(days=14), report_end
-                        ),
+                        earliest_exit + _ONE_DAY,
+                        min(row.ProjectExit + _FOURTEEN_DAYS, report_end),
                     )
-                    exclusion_windows = add_or_extend_window(
+                    exclusion_windows = _add_or_extend_window(
                         new_window, exclusion_windows
                     )
             continue
@@ -93,10 +106,10 @@ def _find_earliest_return(
         else:
             gap = (row.ProjectStart - earliest_exit).days
             new_window = (
-                row.ProjectStart + pd.Timedelta(days=1),
+                row.ProjectStart + _ONE_DAY,
                 min(
                     (
-                        (row.ProjectExit + pd.Timedelta(days=14))
+                        (row.ProjectExit + _FOURTEEN_DAYS)
                         if pd.notna(row.ProjectExit)
                         else report_end
                     ),
@@ -104,7 +117,7 @@ def _find_earliest_return(
                 ),
             )
             if gap <= 14:
-                exclusion_windows = add_or_extend_window(
+                exclusion_windows = _add_or_extend_window(
                     new_window, exclusion_windows
                 )
                 continue
@@ -113,7 +126,7 @@ def _find_earliest_return(
                     win_start <= row.ProjectStart <= win_end
                     for win_start, win_end in exclusion_windows
                 ):
-                    exclusion_windows = add_or_extend_window(
+                    exclusion_windows = _add_or_extend_window(
                         new_window, exclusion_windows
                     )
                     continue
@@ -121,7 +134,121 @@ def _find_earliest_return(
     return None
 
 
-@st.cache_data(show_spinner=False)
+# ---------------------------------------------------------------------------
+# Fast implementation — takes a pre-built list of namedtuples instead of
+# re-sorting + re-itertuples-ing per call. The exclusion-window state machine
+# is byte-identical to the legacy version; only the input shape changes.
+# ---------------------------------------------------------------------------
+def _find_earliest_return_fast(
+    rec_list: List[Any],
+    earliest_exit: pd.Timestamp,
+    cutoff: pd.Timestamp,
+    report_end: pd.Timestamp,
+    exit_enrollment_id: int,
+) -> Optional[Tuple[Any, str]]:
+    """Fast variant: ``rec_list`` is the output of
+    ``_prep_client_returns_for_scan(group_ret)`` — built once per client and
+    reused across all that client's exits. Saves N-1 sort+itertuples calls
+    when a client has N exits.
+
+    The returned row is a pandas namedtuple (same shape as the legacy
+    return), so callers can keep using ``getattr(found, col, default)``."""
+    if not rec_list:
+        return None
+
+    exclusion_windows: List[Tuple[pd.Timestamp, pd.Timestamp]] = []
+    ph = PH_PROJECTS
+
+    for row in rec_list:
+        if row.EnrollmentID == exit_enrollment_id:
+            continue
+
+        ps = row.ProjectStart
+        if ps < earliest_exit:
+            if row.ProjectTypeCode in ph:
+                pe = row.ProjectExit
+                if pd.notna(pe) and pe > earliest_exit:
+                    new_window = (
+                        earliest_exit + _ONE_DAY,
+                        min(pe + _FOURTEEN_DAYS, report_end),
+                    )
+                    exclusion_windows = _add_or_extend_window(
+                        new_window, exclusion_windows
+                    )
+            continue
+
+        if ps > cutoff:
+            break
+
+        if row.ProjectTypeCode not in ph:
+            return (row, "Non-PH")
+
+        gap = (ps - earliest_exit).days
+        pe = row.ProjectExit
+        new_window = (
+            ps + _ONE_DAY,
+            min(
+                ((pe + _FOURTEEN_DAYS) if pd.notna(pe) else report_end),
+                report_end,
+            ),
+        )
+        if gap <= 14:
+            exclusion_windows = _add_or_extend_window(
+                new_window, exclusion_windows
+            )
+            continue
+        if any(ws <= ps <= we for ws, we in exclusion_windows):
+            exclusion_windows = _add_or_extend_window(
+                new_window, exclusion_windows
+            )
+            continue
+        return (row, "PH")
+
+    return None
+
+
+# ---------------------------------------------------------------------------
+# Public dispatcher — picks legacy or fast based on the feature flag.
+# Callers that already do per-client prep (i.e. ``_process_client_exits_
+# and_returns``) call ``_find_earliest_return_fast`` directly with the
+# cached rec_list to avoid re-doing the prep work per exit.
+# ---------------------------------------------------------------------------
+def _find_earliest_return(
+    client_df: pd.DataFrame,
+    earliest_exit: pd.Timestamp,
+    cutoff: pd.Timestamp,
+    report_end: pd.Timestamp,
+    exit_enrollment_id: int,
+) -> Optional[Tuple[Any, str]]:
+    """Identify the earliest valid return enrollment after an exit enrollment.
+
+    For PH projects, ensures at least a 14-day gap and considers exclusion
+    windows. Dispatches to the fast implementation by default; flip
+    ``HMIS_SPM2_VECTORIZED=0`` to fall back to the legacy itertuples path.
+
+    Parameters:
+        client_df: Client's enrollment records.
+        earliest_exit: The exit date.
+        cutoff: Maximum ProjectStart date to consider.
+        report_end: End date of the report.
+        exit_enrollment_id: EnrollmentID to exclude from scanning.
+
+    Returns:
+        (row, type) for a valid return enrollment, or None if not found.
+    """
+    if _spm2_use_fast():
+        rec_list = _prep_client_returns_for_scan(client_df)
+        if rec_list is None:
+            return None
+        return _find_earliest_return_fast(
+            rec_list, earliest_exit, cutoff, report_end, exit_enrollment_id
+        )
+    return _find_earliest_return_legacy(
+        client_df, earliest_exit, cutoff, report_end, exit_enrollment_id
+    )
+
+
+@st.cache_data(show_spinner=False, ttl=1800, max_entries=32)
 def _validate_spm2_inputs(
     df: pd.DataFrame, exiting_projects: Optional[List[str]]
 ) -> bool:
@@ -182,8 +309,8 @@ def _apply_data_filters(
             else frame[frame[col].isin(values)]
         )
 
-    # Filter for exits
-    df_exit_base = df.copy()
+    # Filter for exits (no defensive copy; each isin filter returns a new frame)
+    df_exit_base = df
     df_exit_base = filter_by_column(df_exit_base, "ProgramSetupCoC", exit_cocs)
     df_exit_base = filter_by_column(
         df_exit_base, "LocalCoCCode", exit_localcocs
@@ -193,7 +320,7 @@ def _apply_data_filters(
     df_exit_base = filter_by_column(df_exit_base, "SSVF_RRH", exit_ssvf_rrh)
 
     # Filter for returns
-    df_return_base = df.copy()
+    df_return_base = df
     df_return_base = filter_by_column(
         df_return_base, "ProgramSetupCoC", return_cocs
     )
@@ -252,7 +379,7 @@ def _identify_exit_enrollments(
         & (df_exit_base["ProjectExit"] >= exit_min)
         & (df_exit_base["ProjectExit"] <= exit_max)
     )
-    df_exits = df_exit_base[mask].copy()
+    df_exits = df_exit_base[mask]
 
     # Apply exit destination filters
     if allowed_exit_dest_cats and "ExitDestinationCat" in df_exits.columns:
@@ -289,10 +416,9 @@ def _process_client_exits_and_returns(
     Returns:
         List of dictionaries containing exit and return information
     """
-    # Prepare return data for scanning - optimized
-    df_for_scan = df_return_base[df_return_base.columns.tolist()].copy()
-    df_for_scan = df_for_scan[
-        df_for_scan["ProjectTypeCode"].isin(return_projects)
+    # Prepare return data for scanning (single filter, no redundant copy)
+    df_for_scan = df_return_base[
+        df_return_base["ProjectTypeCode"].isin(return_projects)
     ]
 
     # Pre-sort for better performance
@@ -309,16 +435,23 @@ def _process_client_exits_and_returns(
 
     exit_rows = []
 
-    # Process each client's exits
+    # Process each client's exits. With the fast path enabled, pre-sort and
+    # pre-build the return rec_list ONCE per client and reuse it for every
+    # exit (was once per exit before — the profiler showed itertuples at
+    # 56% of total time, called ~1184× per run).
+    use_fast = _spm2_use_fast()
+
     for cid, group_ex in grouped_exits:
-        # Get returns for this client if they exist
         group_ret = (
             grouped_returns.get_group(cid)
             if cid in grouped_returns.groups
             else pd.DataFrame()
         )
 
-        # Process each exit for this client
+        cached_rec_list = (
+            _prep_client_returns_for_scan(group_ret) if use_fast else None
+        )
+
         for row in group_ex.itertuples(index=False):
             row_dict = _process_single_exit(
                 row,
@@ -327,6 +460,7 @@ def _process_client_exits_and_returns(
                 df_for_scan,
                 return_period,
                 report_end,
+                cached_rec_list=cached_rec_list,
             )
             exit_rows.append(row_dict)
 
@@ -340,8 +474,13 @@ def _process_single_exit(
     df_for_scan: pd.DataFrame,
     return_period: int,
     report_end: pd.Timestamp,
+    cached_rec_list: Optional[List[Any]] = None,
 ) -> Dict[str, Any]:
     """Process a single exit enrollment and find its return.
+
+    ``cached_rec_list`` is the per-client pre-prepared return list (output
+    of ``_prep_client_returns_for_scan``); when non-None we go straight to
+    ``_find_earliest_return_fast`` and skip the per-exit sort+itertuples.
 
     Returns:
         Dictionary containing exit and return data
@@ -362,13 +501,22 @@ def _process_single_exit(
         report_end,
     )
 
-    found_result = _find_earliest_return(
-        group_ret,
-        earliest_exit_date,
-        cutoff_date,
-        report_end,
-        exit_enrollment_id=row.EnrollmentID,
-    )
+    if cached_rec_list is not None:
+        found_result = _find_earliest_return_fast(
+            cached_rec_list,
+            earliest_exit_date,
+            cutoff_date,
+            report_end,
+            exit_enrollment_id=row.EnrollmentID,
+        )
+    else:
+        found_result = _find_earliest_return(
+            group_ret,
+            earliest_exit_date,
+            cutoff_date,
+            report_end,
+            exit_enrollment_id=row.EnrollmentID,
+        )
 
     if found_result is not None:
         found, _ = found_result
@@ -575,7 +723,7 @@ def run_spm2(
         return pd.DataFrame()
 
 
-@st.cache_data(show_spinner=False)
+@st.cache_data(show_spinner=False, ttl=1800, max_entries=32)
 def compute_summary_metrics(
     final_df: pd.DataFrame, return_period: int = 730
 ) -> Dict[str, Any]:
@@ -645,7 +793,7 @@ def compute_summary_metrics(
     }
 
 
-@st.cache_data(show_spinner=False)
+@st.cache_data(show_spinner=False, ttl=1800, max_entries=32)
 def breakdown_by_columns(
     final_df: pd.DataFrame, columns: List[str], return_period: int = 730
 ) -> pd.DataFrame:

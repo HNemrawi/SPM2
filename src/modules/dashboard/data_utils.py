@@ -13,11 +13,28 @@ from src.core.constants import (
 )
 from src.core.constants import PH_PROJECTS as PERMANENT_HOUSING_PROJECTS
 from src.core.data.destinations import apply_custom_ph_destinations
+from src.core.data.loader import DF_HASH_ATTR
 
 # ==================== CONSTANTS & CONFIGURATIONS ====================
 
 # Required columns for basic operations
 REQUIRED_BASE_COLS: List[str] = ["ClientID", "ProjectStart", "ProjectExit"]
+
+
+# Streamlit cache-hash mapping that swaps the O(N) "hash the whole DataFrame"
+# default for an O(1) lookup using the file-content hash (stashed by the
+# loader) plus the frame's Python identity and shape. Identity is stable
+# across reruns when an upstream cache keeps the same frame object alive,
+# which is the common path for filtered views produced by
+# ``_apply_filters_cached``. Including ``id`` + ``shape`` distinguishes full
+# frames from filtered slices (both inherit the same ``attrs`` hash).
+_DF_HASH_FUNCS = {
+    pd.DataFrame: lambda d: (
+        d.attrs.get(DF_HASH_ATTR, ""),
+        id(d),
+        d.shape,
+    ),
+}
 
 
 # Project type classifications
@@ -157,7 +174,7 @@ calc_delta = calculate_change
 # ==================== DATA LOADING & CACHING ====================
 
 
-@st.cache_data(show_spinner="Loading and preprocessing data…")
+@st.cache_data(show_spinner="Loading and preprocessing data…", ttl=3600, max_entries=2, hash_funcs=_DF_HASH_FUNCS)
 def cached_load(upload_or_df: Union[Any, pd.DataFrame]) -> pd.DataFrame:
     """
     Load and cache data with preprocessing.
@@ -175,15 +192,6 @@ def cached_load(upload_or_df: Union[Any, pd.DataFrame]) -> pd.DataFrame:
 
         df = load_and_preprocess_data(upload_or_df)
 
-    # Ensure datetime columns are properly typed
-    datetime_cols = [
-        col
-        for col in df.columns
-        if pd.api.types.is_datetime64_any_dtype(df[col])
-    ]
-    for col in datetime_cols:
-        df[col] = pd.to_datetime(df[col])
-
     return df
 
 
@@ -194,7 +202,7 @@ class ClientMetrics:
     """Core client and household metrics calculations."""
 
     @staticmethod
-    @st.cache_data(show_spinner=False)
+    @st.cache_data(show_spinner=False, ttl=1800, max_entries=32, hash_funcs=_DF_HASH_FUNCS)
     def batch_calculate_metrics(
         df: DataFrame, start_date: Timestamp, end_date: Timestamp
     ) -> Dict[str, Union[Set[int], int]]:
@@ -263,7 +271,7 @@ class ClientMetrics:
         }
 
     @staticmethod
-    @st.cache_data(show_spinner=False)
+    @st.cache_data(show_spinner=False, ttl=1800, max_entries=32, hash_funcs=_DF_HASH_FUNCS)
     def served_clients(
         df: DataFrame, start_date: Timestamp, end_date: Timestamp
     ) -> Set[int]:
@@ -288,7 +296,7 @@ class ClientMetrics:
         return set(df.loc[active_mask, "ClientID"].unique())
 
     @staticmethod
-    @st.cache_data(show_spinner=False)
+    @st.cache_data(show_spinner=False, ttl=1800, max_entries=32, hash_funcs=_DF_HASH_FUNCS)
     def households_served(
         df: DataFrame, start: Timestamp, end: Timestamp
     ) -> int:
@@ -320,7 +328,7 @@ class ClientMetrics:
         return df.loc[mask, "ClientID"].nunique()
 
     @staticmethod
-    @st.cache_data(show_spinner=False)
+    @st.cache_data(show_spinner=False, ttl=1800, max_entries=32, hash_funcs=_DF_HASH_FUNCS)
     def inflow(
         df: DataFrame, start_date: Timestamp, end_date: Timestamp
     ) -> Set[int]:
@@ -353,7 +361,7 @@ class ClientMetrics:
         return entry_ids - active_before_ids
 
     @staticmethod
-    @st.cache_data(show_spinner=False)
+    @st.cache_data(show_spinner=False, ttl=1800, max_entries=32, hash_funcs=_DF_HASH_FUNCS)
     def outflow(
         df: DataFrame, start_date: Timestamp, end_date: Timestamp
     ) -> Set[int]:
@@ -398,7 +406,7 @@ class PHMetrics:
     """Permanent Housing exit metrics and analysis."""
 
     @staticmethod
-    @st.cache_data(show_spinner=False)
+    @st.cache_data(show_spinner=False, ttl=1800, max_entries=32, hash_funcs=_DF_HASH_FUNCS)
     def batch_calculate_ph_metrics(
         df: DataFrame, start_date: Timestamp, end_date: Timestamp
     ) -> Dict[str, Union[Set[int], float, int]]:
@@ -443,7 +451,7 @@ class PHMetrics:
         }
 
     @staticmethod
-    @st.cache_data(show_spinner=False)
+    @st.cache_data(show_spinner=False, ttl=1800, max_entries=32, hash_funcs=_DF_HASH_FUNCS)
     def exit_clients(
         df: DataFrame, start_date: Timestamp, end_date: Timestamp
     ) -> Set[int]:
@@ -470,7 +478,7 @@ class PHMetrics:
         return set(client_ids)
 
     @staticmethod
-    @st.cache_data(show_spinner=False)
+    @st.cache_data(show_spinner=False, ttl=1800, max_entries=32, hash_funcs=_DF_HASH_FUNCS)
     def exit_rate(
         df: DataFrame, start_date: Timestamp, end_date: Timestamp
     ) -> float:
@@ -507,7 +515,7 @@ ph_exit_rate = PHMetrics.exit_rate
 # ==================== PERIOD COMPARISON ====================
 
 
-@st.cache_data(show_spinner=False)
+@st.cache_data(show_spinner=False, ttl=1800, max_entries=32, hash_funcs=_DF_HASH_FUNCS)
 def period_comparison(
     df: DataFrame,
     current_start: Timestamp,
@@ -549,7 +557,7 @@ class ReturnToHomelessness:
     """Track and analyze returns to homelessness after PH exits."""
 
     @staticmethod
-    @st.cache_data(show_spinner=False)
+    @st.cache_data(show_spinner=False, ttl=1800, max_entries=32, hash_funcs=_DF_HASH_FUNCS)
     def identify_returners(
         df_filtered: pd.DataFrame,
         full_df: pd.DataFrame,

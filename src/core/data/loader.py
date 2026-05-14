@@ -1,5 +1,6 @@
 """Data loading and preprocessing with intelligent column mapping and duplicate detection."""
 
+import hashlib
 import traceback
 from datetime import datetime
 from io import BytesIO
@@ -12,6 +13,25 @@ import streamlit as st
 
 from src.ui.factories.html import html_factory
 from src.ui.themes.theme import theme
+
+# Key used to stash a stable content-hash of the originally uploaded file on
+# every loaded DataFrame's ``.attrs`` mapping. Downstream cached metric
+# functions use this in their ``hash_funcs`` so they do NOT have to hash the
+# entire DataFrame to look up a cached result.
+DF_HASH_ATTR = "hmis_file_hash"
+
+
+def compute_file_hash(uploaded_file: BytesIO) -> str:
+    """Return a stable SHA-256 hex digest of the uploaded file's content.
+
+    Reads the entire buffer, then seeks back to position 0 so the caller can
+    still consume it with ``pd.read_csv``. Cheap relative to the parse itself.
+    """
+    pos = uploaded_file.tell()
+    uploaded_file.seek(0)
+    h = hashlib.sha256(uploaded_file.read()).hexdigest()
+    uploaded_file.seek(pos)
+    return h
 
 
 class DataLoadError(Exception):
@@ -185,7 +205,7 @@ class ColumnMapper:
     }
 
     @classmethod
-    @st.cache_data(show_spinner=False)
+    @st.cache_data(show_spinner=False, ttl=3600, max_entries=8)
     def create_mapping(cls, _columns: List[str]) -> Dict[str, str]:
         columns = _columns
         mapping = {}
@@ -265,10 +285,8 @@ class DuplicateAnalyzer:
         if not duplicate_mask.any():
             return pd.DataFrame(), {"has_duplicates": False, "count": 0}
 
-        duplicates_df = df[duplicate_mask].copy()
-
-        # Use sort_values with kind='stable' for consistent ordering
-        duplicates_df = duplicates_df.sort_values(
+        # Single-pass slice + stable sort (drops the defensive copy)
+        duplicates_df = df[duplicate_mask].sort_values(
             "EnrollmentID", kind="stable"
         )
 
@@ -295,18 +313,21 @@ class DuplicateAnalyzer:
         duplicate_count = df["EnrollmentID"].duplicated(keep=False).sum()
         unique_enrollment_count = df[duplicate_mask]["EnrollmentID"].nunique()
 
+        # NOTE: `duplicate_df` is intentionally NOT stored in the analysis
+        # dict — keeping the full duplicate slice in session_state leaks
+        # memory for the lifetime of the session. show_duplicate_info
+        # rebuilds it on demand from the current ``df`` when the dialog opens.
         analysis = {
             "has_duplicates": True,
             "total_duplicate_records": duplicate_count,
             "unique_enrollment_ids_with_duplicates": unique_enrollment_count,
             "varying_columns": varying_columns,
-            "duplicate_df": duplicates_df,
         }
 
         return duplicates_df, analysis
 
 
-@st.cache_data(show_spinner=False)
+@st.cache_data(show_spinner=False, ttl=3600, max_entries=4)
 def detect_file_encoding(file_content: bytes, sample_size: int = 10000) -> str:
     sample = (
         file_content[:sample_size]
@@ -470,13 +491,21 @@ def show_duplicate_info(
     st.html(html_factory.divider())
 
     with st.expander("View Sample Duplicate Records", expanded=False):
-        sample_size = min(50, len(analysis["duplicate_df"]))
+        # Rebuild the duplicate slice on demand instead of carrying it in
+        # session_state (see analyze_duplicates for the rationale).
+        if "EnrollmentID" in df.columns:
+            mask = df.duplicated(subset=["EnrollmentID"], keep=False)
+            duplicate_df = df[mask].sort_values("EnrollmentID", kind="stable")
+        else:
+            duplicate_df = pd.DataFrame()
+
+        sample_size = min(50, len(duplicate_df))
 
         st.html(
             html_factory.info_box(
                 content=(
                     f"Showing first {sample_size} of "
-                    f"{len(analysis['duplicate_df']):,} duplicate records"
+                    f"{len(duplicate_df):,} duplicate records"
                 ),
                 type="info",
             )
@@ -484,13 +513,13 @@ def show_duplicate_info(
 
         # Display the dataframe
         st.dataframe(
-            analysis["duplicate_df"].head(sample_size),
+            duplicate_df.head(sample_size),
             width="stretch",
             height=300,
         )
 
         # Download button for all duplicates
-        csv = analysis["duplicate_df"].to_csv(index=False)
+        csv = duplicate_df.to_csv(index=False)
         st.download_button(
             label="Download All Duplicate Records",
             data=csv,
@@ -596,20 +625,15 @@ def _process_loaded_data(
 
 def _handle_duplicate_detection(df: pd.DataFrame) -> None:
     if "EnrollmentID" in df.columns:
-        duplicates_df, analysis = DuplicateAnalyzer.analyze_duplicates(df)
+        _, analysis = DuplicateAnalyzer.analyze_duplicates(df)
         if analysis.get("has_duplicates", False):
-            st.session_state["duplicate_analysis"] = {
-                "has_duplicates": analysis["has_duplicates"],
-                "total_duplicate_records": analysis["total_duplicate_records"],
-                "unique_enrollment_ids_with_duplicates": analysis[
-                    "unique_enrollment_ids_with_duplicates"
-                ],
-                "varying_columns": analysis["varying_columns"],
-                "duplicate_df": analysis["duplicate_df"],
-            }
+            # Stash the analysis summary only — duplicate_df is intentionally
+            # excluded (see analyze_duplicates) and rebuilt on demand by
+            # show_duplicate_info from the current ``df``.
+            st.session_state["duplicate_analysis"] = analysis
 
 
-@st.cache_data(show_spinner=False)
+@st.cache_data(show_spinner=False, ttl=3600, max_entries=2)
 def load_and_preprocess_data(
     uploaded_file: BytesIO,
     validate: bool = True,
@@ -638,6 +662,10 @@ def load_and_preprocess_data(
             st.error("No file provided for processing.")
             return pd.DataFrame()
 
+        # Compute a stable content hash BEFORE we hand the buffer to read_csv
+        # — used by downstream caches via df.attrs[DF_HASH_ATTR].
+        file_hash = compute_file_hash(uploaded_file)
+
         # Load raw data from file
         df = _load_file_data(uploaded_file, encoding, chunk_size)
 
@@ -653,6 +681,9 @@ def load_and_preprocess_data(
         if df.empty:
             st.error("No data available after processing.")
             return pd.DataFrame()
+
+        # Stash the file content hash on the frame for downstream caches.
+        df.attrs[DF_HASH_ATTR] = file_hash
 
         # Handle duplicate detection
         _handle_duplicate_detection(df)
@@ -773,16 +804,12 @@ def standardize_data_types(df: pd.DataFrame) -> pd.DataFrame:
         "ProgramsContinuumProject",
     ]
 
+    # All listed columns are HMIS-bounded vocabularies — the nunique ratio
+    # check was a 20× full-column scan that always returned True for them.
+    # Skip the scan and cast unconditionally.
     for col in categorical_candidates:
-        if col in df.columns:
-            # Convert to category if not already
-            if df[col].dtype != "category":
-                unique_ratio = (
-                    df[col].nunique() / len(df) if len(df) > 0 else 1
-                )
-                # Use categorical for any column with < 50% unique values
-                if unique_ratio < 0.5:
-                    df[col] = df[col].astype("category")
+        if col in df.columns and df[col].dtype != "category":
+            df[col] = df[col].astype("category")
 
     return df
 
@@ -799,34 +826,6 @@ def add_derived_columns(df: pd.DataFrame) -> pd.DataFrame:
             (df["ProjectStart"] - df["DOB"]).dt.days / 365.25
         ).round(1)
         df["AgeAtEntry"] = df["AgeAtEntry"].clip(lower=0, upper=120)
-
-    # Pre-convert common filter columns to strings for performance
-    # These are frequently used in filter comparisons
-    filter_columns = [
-        "Gender",
-        "RaceEthnicity",
-        "VeteranStatus",
-        "ProjectTypeCode",
-        "AgencyName",
-        "ProgramName",
-        "ExitDestination",
-        "ExitDestinationCat",
-        "PriorLivingCat",
-        "IsHeadOfHousehold",
-        "HasIncome",
-        "HasDisability",
-        "LocalCoCCode",
-        "ProgramSetupCoC",
-        "ProgramsContinuumProject",
-    ]
-
-    for col in filter_columns:
-        if col in df.columns:
-            # Convert to string with proper handling of categorical types
-            if df[col].dtype == "category":
-                df[col + "_str"] = df[col].astype(str)
-            else:
-                df[col + "_str"] = df[col].astype(str)
 
     return df
 

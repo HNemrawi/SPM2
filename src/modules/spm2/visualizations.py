@@ -23,7 +23,7 @@ from src.ui.themes.styles import (
 # ============================================================================
 
 
-@st.cache_data(show_spinner=False)
+@st.cache_data(show_spinner=False, ttl=1800, max_entries=32)
 def create_flow_pivot(
     final_df: pd.DataFrame, exit_col: str, return_col: str
 ) -> pd.DataFrame:

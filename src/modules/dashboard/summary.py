@@ -110,7 +110,7 @@ HOUSING_THRESHOLDS = {
 # ==================== CALCULATION FUNCTIONS ====================
 
 
-@st.cache_data(show_spinner=False)
+@st.cache_data(show_spinner=False, ttl=1800, max_entries=32)
 def _get_summary_metrics(
     df_filt: DataFrame,
     full_df: DataFrame,

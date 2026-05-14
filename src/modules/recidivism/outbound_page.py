@@ -643,7 +643,7 @@ def display_days_to_return(out_df: pd.DataFrame) -> None:
 
     fig = plot_days_to_return_box(out_df)
     fig = apply_chart_theme(fig)
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, width="stretch")
 
 
 @st.fragment
@@ -948,7 +948,7 @@ def display_client_flow(out_df: pd.DataFrame) -> None:
             pivot_sankey, f"{ex_choice} → {ret_choice}"
         )
         sankey_fig = apply_chart_theme(sankey_fig)
-        st.plotly_chart(sankey_fig, use_container_width=True)
+        st.plotly_chart(sankey_fig, width="stretch")
     else:
         st.info("📭 Insufficient data for flow analysis")
 

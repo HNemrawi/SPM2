@@ -154,7 +154,7 @@ def _find_earliest_return_homeless(
         return None
 
 
-@st.cache_data(show_spinner=False)
+@st.cache_data(show_spinner=False, ttl=1800, max_entries=32)
 def run_outbound_recidivism(
     df: pd.DataFrame,
     report_start: pd.Timestamp,
@@ -338,18 +338,27 @@ def run_outbound_recidivism(
                 final_df["Exit_ProjectExit"] - final_df["Exit_DOB"]
             ).dt.days / 365.25
 
-            def _bucket(age):
-                if pd.isna(age):
-                    return "Unknown"
-                for bound, label in zip(
-                    [18, 25, 35, 45, 55, 65],
-                    ["0–17", "18–24", "25–34", "35–44", "45–54", "55–64"],
-                ):
-                    if age < bound:
-                        return label
-                return "65+"
-
-            final_df["AgeAtExitRange"] = age_years.apply(_bucket)
+            # Vectorized bucketing — replaces the per-row .apply(_bucket).
+            # ``right=False`` matches the original ``age < bound`` semantics.
+            buckets = pd.cut(
+                age_years,
+                bins=[-float("inf"), 18, 25, 35, 45, 55, 65, float("inf")],
+                labels=[
+                    "0–17",
+                    "18–24",
+                    "25–34",
+                    "35–44",
+                    "45–54",
+                    "55–64",
+                    "65+",
+                ],
+                right=False,
+                ordered=False,
+            )
+            # NaN age → "Unknown" (was the only branch in the apply).
+            final_df["AgeAtExitRange"] = buckets.astype("object").where(
+                age_years.notna(), "Unknown"
+            )
         else:
             final_df["AgeAtExitRange"] = "Unknown"
 
@@ -360,7 +369,7 @@ def run_outbound_recidivism(
         return pd.DataFrame()
 
 
-@st.cache_data(show_spinner=False)
+@st.cache_data(show_spinner=False, ttl=1800, max_entries=32)
 def compute_summary_metrics(final_df: pd.DataFrame) -> Dict[str, Any]:
     """
     Compute key summary metrics for outbound recidivism.
@@ -403,7 +412,7 @@ def compute_summary_metrics(final_df: pd.DataFrame) -> Dict[str, Any]:
     }
 
 
-@st.cache_data(show_spinner=False)
+@st.cache_data(show_spinner=False, ttl=1800, max_entries=32)
 def breakdown_by_columns(
     final_df: pd.DataFrame, columns: List[str]
 ) -> pd.DataFrame:

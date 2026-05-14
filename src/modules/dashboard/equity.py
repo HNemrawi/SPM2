@@ -1193,7 +1193,7 @@ def render_equity_analysis(
             )
 
         # Display the chart
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width="stretch")
 
         # Add color explanation with clear legend using UI factory
         color_guide_content = f"""
@@ -1365,7 +1365,7 @@ def render_equity_analysis(
         )
 
         # Display the chart
-        st.plotly_chart(di_fig, use_container_width=True)
+        st.plotly_chart(di_fig, width="stretch")
 
         # Color legend for disparity levels using UI factory
         disparity_legend_content = f"""

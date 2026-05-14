@@ -9,6 +9,7 @@ import streamlit as st
 from pandas import DataFrame
 
 from src.core.data.destinations import apply_custom_ph_destinations
+from src.core.data.loader import DF_HASH_ATTR
 from src.core.session import (
     ModuleType,
     SessionKeys,
@@ -21,6 +22,15 @@ from src.core.utils.helpers import (
 )
 from src.ui.factories.components import Colors, ui
 from src.ui.factories.html import html_factory
+
+# See data_utils._DF_HASH_FUNCS — O(1) cache lookup via (file_hash, id, shape).
+_DF_HASH_FUNCS = {
+    pd.DataFrame: lambda d: (
+        d.attrs.get(DF_HASH_ATTR, ""),
+        id(d),
+        d.shape,
+    ),
+}
 
 # ==================== CONSTANTS ====================
 
@@ -962,7 +972,7 @@ def render_filter_form(df: DataFrame) -> bool:
                 if col not in df.columns:
                     continue
 
-                options = sorted(df[col].dropna().astype(str).unique())
+                options = _get_filter_options(df, col)
                 default_sel = state.get(f"filter_{col}", ["ALL"])
                 widget_key = f"filter_{col}_widget"
 
@@ -1029,11 +1039,92 @@ def render_filter_form(df: DataFrame) -> bool:
 # ==================== FILTER APPLICATION ====================
 
 
-@st.cache_data(show_spinner=False)
+@st.cache_data(show_spinner=False, ttl=3600, max_entries=64, hash_funcs=_DF_HASH_FUNCS)
+def _get_filter_options(df: DataFrame, col: str) -> List[str]:
+    """Distinct, sorted, string-coerced values for one filter column. Cached
+    per (file_hash, frame identity, shape, col) so the 20-filter sidebar
+    render reduces from 20 full-column scans to a 20-entry cache lookup.
+
+    Returns ``[]`` if ``col`` is absent — render_filter_form already guards
+    on column presence, but the cached function is defensive."""
+    if col not in df.columns:
+        return []
+    return sorted(df[col].dropna().astype(str).unique().tolist())
+
+
+# Below this row count the pandas mask path wins on raw wall time — the
+# Arrow→pandas materialization that DuckDB performs at the end of every
+# query dominates the filter work itself. Calibrated empirically against
+# the dataset in tests/golden; revisit if the filter SQL grows more
+# complex (joins, aggregates) or row width changes materially.
+_DUCKDB_MIN_ROWS = 50_000
+
+
+def _apply_filters_duckdb(
+    df: DataFrame, filter_tuple: tuple
+) -> Optional[DataFrame]:
+    """Try to apply ``filter_tuple`` via the session's DuckDB view over the
+    Arrow IPC store. Returns ``None`` if DuckDB is unavailable, the store
+    has not been seeded, the row count is below ``_DUCKDB_MIN_ROWS``, or any
+    filter targets a missing column — the caller falls back to the pandas
+    mask path.
+
+    The SQL is parametrized and uses ``CAST(col AS VARCHAR)`` to mirror
+    pandas' ``df[col].astype(str).isin(...)`` semantics (NaN/NULL on either
+    side fails the IN test and the row is dropped — verified against the
+    golden harness)."""
+    if len(df) < _DUCKDB_MIN_ROWS:
+        return None
+    file_hash = df.attrs.get(DF_HASH_ATTR)
+    if not file_hash:
+        return None
+    try:
+        from src.core.data.arrow_store import HAS_DUCKDB, get_arrow_store
+    except ImportError:
+        return None
+    if not HAS_DUCKDB:
+        return None
+
+    where_clauses: List[str] = []
+    params: List[str] = []
+    for col, vals in filter_tuple:
+        if not vals or col not in df.columns:
+            continue
+        val_list = (
+            [vals] if not isinstance(vals, (list, tuple)) else list(vals)
+        )
+        placeholders = ",".join(["?"] * len(val_list))
+        # Quote the column name so identifiers with spaces/hyphens still parse.
+        where_clauses.append(
+            f'CAST("{col}" AS VARCHAR) IN ({placeholders})'
+        )
+        params.extend(str(v) for v in val_list)
+
+    if not where_clauses:
+        return df  # nothing to filter on — preserve identity behavior
+
+    try:
+        store = get_arrow_store(file_hash, df)
+        con = store.duckdb_view()
+        sql = f'SELECT * FROM data WHERE {" AND ".join(where_clauses)}'
+        result = con.execute(sql, params).fetch_df()
+    except Exception:  # pragma: no cover - defensive (fall back to pandas)
+        return None
+
+    # Restore the file-hash attr so downstream caches stay correctly keyed.
+    result.attrs[DF_HASH_ATTR] = file_hash
+    return result
+
+
+@st.cache_data(show_spinner=False, ttl=1800, max_entries=32, hash_funcs=_DF_HASH_FUNCS)
 def _apply_filters_cached(df: DataFrame, filter_tuple: tuple) -> DataFrame:
     """
     Cached filter application for performance.
-    OPTIMIZED: Uses combined mask to avoid repeated DataFrame copies.
+
+    Prefers DuckDB filter pushdown when an ArrowStore has been seeded for the
+    current file (``df.attrs["hmis_file_hash"]`` is set + duckdb importable);
+    otherwise builds a combined pandas mask in one pass. Either path returns
+    the same row set — see ``tests/golden`` for the parity check.
 
     Parameters:
         df: The dataframe to filter
@@ -1045,27 +1136,19 @@ def _apply_filters_cached(df: DataFrame, filter_tuple: tuple) -> DataFrame:
     if not filter_tuple:
         return df
 
-    # OPTIMIZED: Build a combined mask instead of copying df repeatedly
-    import pandas as pd
+    duckdb_result = _apply_filters_duckdb(df, filter_tuple)
+    if duckdb_result is not None:
+        return duckdb_result
 
+    # Pandas fallback: build one combined boolean mask instead of copying
+    # the frame for each filter column.
     combined_mask = pd.Series(True, index=df.index)
-
-    # Apply each filter to the mask
     for col, vals in filter_tuple:
         if vals and col in df.columns:
-            # Convert to list if single value
             val_list = (
                 [vals] if not isinstance(vals, (list, tuple)) else list(vals)
             )
-
-            # Use pre-converted string column if available for performance
-            str_col = col + "_str"
-            if str_col in df.columns:
-                combined_mask &= df[str_col].isin(val_list)
-            else:
-                # Fallback to on-the-fly conversion
-                combined_mask &= df[col].astype(str).isin(val_list)
-
+            combined_mask &= df[col].astype(str).isin(val_list)
     return df[combined_mask]
 
 
