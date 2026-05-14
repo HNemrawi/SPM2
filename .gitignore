@@ -114,8 +114,8 @@ $RECYCLE.BIN/
 *.xlsb
 *.ods
 
-# Data directories
-data/
+# Data directories (root-anchored so src/core/data/ stays tracked)
+/data/
 uploads/
 temp/
 output/
